@@ -3,6 +3,7 @@ import { toCamelCase } from './utils';
 import type {
   PortfolioAccountItem,
   PortfolioAccountCreateRequest,
+  PortfolioAccountUpdateRequest,
   PortfolioAccountListResponse,
   PortfolioCashLedgerCreateRequest,
   PortfolioCashLedgerListResponse,
@@ -11,10 +12,16 @@ import type {
   PortfolioCostMethod,
   PortfolioDeleteResponse,
   PortfolioEventCreatedResponse,
+  PortfolioLatestFxRateListResponse,
   PortfolioFxRefreshResponse,
   PortfolioImportBrokerListResponse,
   PortfolioImportCommitResponse,
   PortfolioImportParseResponse,
+  PortfolioInitializeRequest,
+  PortfolioInitializeResponse,
+  PortfolioPositionAdjustRequest,
+  PortfolioPositionAdjustResponse,
+  PortfolioPositionListResponse,
   PortfolioRiskResponse,
   PortfolioSnapshotResponse,
   PortfolioTradeCreateRequest,
@@ -29,6 +36,11 @@ type SnapshotQuery = {
 
 type FxRefreshQuery = {
   accountId?: number;
+  asOf?: string;
+};
+
+type FxLatestQuery = {
+  toCurrency?: string;
   asOf?: string;
 };
 
@@ -79,6 +91,17 @@ function buildFxRefreshParams(query: FxRefreshQuery): Record<string, string | nu
   return params;
 }
 
+function buildFxLatestParams(query: FxLatestQuery): Record<string, string | number> {
+  const params: Record<string, string | number> = {};
+  if (query.toCurrency) {
+    params.to_currency = query.toCurrency;
+  }
+  if (query.asOf) {
+    params.as_of = query.asOf;
+  }
+  return params;
+}
+
 function buildEventParams(query: EventQuery): Record<string, string | number> {
   const params: Record<string, string | number> = {};
   if (query.accountId != null) {
@@ -118,11 +141,35 @@ export const portfolioApi = {
     return toCamelCase<PortfolioAccountItem>(response.data);
   },
 
+  async updateAccount(accountId: number, payload: PortfolioAccountUpdateRequest): Promise<PortfolioAccountItem> {
+    const response = await apiClient.put<Record<string, unknown>>(`/api/v1/portfolio/accounts/${accountId}`, {
+      name: payload.name,
+      broker: payload.broker,
+      market: payload.market,
+      base_currency: payload.baseCurrency,
+      owner_id: payload.ownerId,
+      is_active: payload.isActive,
+    });
+    return toCamelCase<PortfolioAccountItem>(response.data);
+  },
+
+  async deleteAccount(accountId: number): Promise<PortfolioDeleteResponse> {
+    const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/accounts/${accountId}`);
+    return toCamelCase<PortfolioDeleteResponse>(response.data);
+  },
+
   async getSnapshot(query: SnapshotQuery = {}): Promise<PortfolioSnapshotResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/snapshot', {
       params: buildSnapshotParams(query),
     });
     return toCamelCase<PortfolioSnapshotResponse>(response.data);
+  },
+
+  async listPositions(query: SnapshotQuery = {}): Promise<PortfolioPositionListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/positions', {
+      params: buildSnapshotParams(query),
+    });
+    return toCamelCase<PortfolioPositionListResponse>(response.data);
   },
 
   async getRisk(query: SnapshotQuery = {}): Promise<PortfolioRiskResponse> {
@@ -139,16 +186,30 @@ export const portfolioApi = {
     return toCamelCase<PortfolioFxRefreshResponse>(response.data);
   },
 
+  async getLatestFxRates(query: FxLatestQuery = {}): Promise<PortfolioLatestFxRateListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/fx/latest', {
+      params: buildFxLatestParams(query),
+    });
+    return toCamelCase<PortfolioLatestFxRateListResponse>(response.data);
+  },
+
+  async refreshPrices(): Promise<Record<string, unknown>> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/prices/refresh');
+    return response.data;
+  },
+
   async createTrade(payload: PortfolioTradeCreateRequest): Promise<PortfolioEventCreatedResponse> {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/trades', {
       account_id: payload.accountId,
+      asset_category: payload.assetCategory,
+      asset_subcategory: payload.assetSubcategory,
+      asset_risk_class: payload.assetRiskClass,
+      risk_level: payload.riskLevel,
       symbol: payload.symbol,
       trade_date: payload.tradeDate,
       side: payload.side,
       quantity: payload.quantity,
       price: payload.price,
-      fee: payload.fee ?? 0,
-      tax: payload.tax ?? 0,
       market: payload.market,
       currency: payload.currency,
       trade_uid: payload.tradeUid,
@@ -165,6 +226,10 @@ export const portfolioApi = {
   async createCashLedger(payload: PortfolioCashLedgerCreateRequest): Promise<PortfolioEventCreatedResponse> {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/cash-ledger', {
       account_id: payload.accountId,
+      asset_category: payload.assetCategory,
+      asset_subcategory: payload.assetSubcategory,
+      asset_risk_class: payload.assetRiskClass,
+      risk_level: payload.riskLevel,
       event_date: payload.eventDate,
       direction: payload.direction,
       amount: payload.amount,
@@ -262,5 +327,50 @@ export const portfolioApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return toCamelCase<PortfolioImportCommitResponse>(response.data);
+  },
+
+  async adjustPosition(
+    positionId: number,
+    body: PortfolioPositionAdjustRequest,
+    accountId?: number,
+  ): Promise<PortfolioPositionAdjustResponse> {
+    const params: Record<string, string | number> = {};
+    if (accountId !== undefined) {
+      params.account_id = accountId;
+    }
+    const response = await apiClient.post<Record<string, unknown>>(
+      `/api/v1/portfolio/positions/${positionId}/adjust`,
+      body,
+      { params },
+    );
+    return toCamelCase<PortfolioPositionAdjustResponse>(response.data);
+  },
+
+  async initializePortfolio(payload: PortfolioInitializeRequest): Promise<PortfolioInitializeResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/initialize', {
+      account_id: payload.accountId,
+      init_date: payload.initDate,
+      assets: payload.assets.map((row) => ({
+        asset_category: row.assetCategory,
+        asset_subcategory: row.assetSubcategory,
+        asset_risk_class: row.assetRiskClass,
+        symbol: row.symbol,
+        name: row.name,
+        market: row.market,
+        quantity: row.quantity,
+        avg_cost: row.avgCost,
+        currency: row.currency,
+        note: row.note,
+      })),
+      cash_items: payload.cashItems.map((item) => ({
+        asset_category: item.assetCategory,
+        asset_risk_class: item.assetRiskClass,
+        name: item.name,
+        amount: item.amount,
+        currency: item.currency,
+        note: item.note,
+      })),
+    });
+    return toCamelCase<PortfolioInitializeResponse>(response.data);
   },
 };

@@ -104,7 +104,34 @@ class PortfolioRepository:
             select(PortfolioAccount).where(and_(*conditions)).limit(1)
         ).scalar_one_or_none()
 
-    def update_account(self, account_id: int, fields: Dict[str, Any]) -> Optional[PortfolioAccount]:
+    def update_position_fields(
+        self,
+        *,
+        position_id: int,
+        account_id: Optional[int],
+        fields: Dict[str, Any],
+    ) -> Optional[PortfolioPosition]:
+        """Manually adjust key position fields (quantity, avg_cost, last_price)."""
+        with self.db.get_session() as session:
+            stmt = select(PortfolioPosition).where(PortfolioPosition.id == position_id)
+            if account_id is not None:
+                stmt = stmt.where(PortfolioPosition.account_id == account_id)
+            row = session.execute(stmt.limit(1)).scalar_one_or_none()
+            if row is None:
+                return None
+            if "quantity" in fields and fields["quantity"] is not None:
+                row.quantity = float(fields["quantity"])
+            if "avg_cost" in fields and fields["avg_cost"] is not None:
+                row.avg_cost = float(fields["avg_cost"])
+            if "last_price" in fields and fields["last_price"] is not None:
+                row.last_price = float(fields["last_price"])
+            qty = float(row.quantity or 0)
+            avg = float(row.avg_cost or 0)
+            row.total_cost = qty * avg
+            row.updated_at = datetime.now()
+            session.commit()
+            session.refresh(row)
+            return row
         with self.db.get_session() as session:
             row = session.execute(
                 select(PortfolioAccount).where(PortfolioAccount.id == account_id).limit(1)
@@ -129,6 +156,69 @@ class PortfolioRepository:
             row.updated_at = datetime.now()
             session.commit()
             return True
+
+    def delete_account(self, account_id: int) -> bool:
+        with self.portfolio_write_session() as session:
+            row = session.execute(
+                select(PortfolioAccount).where(PortfolioAccount.id == account_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+
+            session.execute(
+                delete(PortfolioPositionLot).where(PortfolioPositionLot.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioPosition).where(PortfolioPosition.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioDailySnapshot).where(PortfolioDailySnapshot.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioCorporateAction).where(PortfolioCorporateAction.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioCashLedger).where(PortfolioCashLedger.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioTrade).where(PortfolioTrade.account_id == account_id)
+            )
+            session.delete(row)
+            return True
+
+    # ------------------------------------------------------------------
+    # Initialization helpers
+    # ------------------------------------------------------------------
+    def clear_account_events(
+        self,
+        *,
+        account_id: int,
+    ) -> Dict[str, int]:
+        """Clear all event records and cached positions for one account. Returns counts."""
+        with self.portfolio_write_session() as session:
+            trade_count = session.execute(
+                delete(PortfolioTrade).where(PortfolioTrade.account_id == account_id)
+            ).rowcount
+            cash_count = session.execute(
+                delete(PortfolioCashLedger).where(PortfolioCashLedger.account_id == account_id)
+            ).rowcount
+            corporate_count = session.execute(
+                delete(PortfolioCorporateAction).where(PortfolioCorporateAction.account_id == account_id)
+            ).rowcount
+            session.execute(
+                delete(PortfolioPositionLot).where(PortfolioPositionLot.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioPosition).where(PortfolioPosition.account_id == account_id)
+            )
+            session.execute(
+                delete(PortfolioDailySnapshot).where(PortfolioDailySnapshot.account_id == account_id)
+            )
+        return {
+            "trade_count": int(trade_count),
+            "cash_count": int(cash_count),
+            "corporate_count": int(corporate_count),
+        }
 
     # ------------------------------------------------------------------
     # Event writes
@@ -163,6 +253,10 @@ class PortfolioRepository:
         *,
         account_id: int,
         trade_uid: Optional[str],
+        asset_category: Optional[str],
+        asset_subcategory: Optional[str],
+        asset_risk_class: Optional[str],
+        risk_level: Optional[str],
         symbol: str,
         market: str,
         currency: str,
@@ -180,6 +274,10 @@ class PortfolioRepository:
                 session=session,
                 account_id=account_id,
                 trade_uid=trade_uid,
+                asset_category=asset_category,
+                asset_subcategory=asset_subcategory,
+                asset_risk_class=asset_risk_class,
+                risk_level=risk_level,
                 symbol=symbol,
                 market=market,
                 currency=currency,
@@ -199,6 +297,10 @@ class PortfolioRepository:
         self,
         *,
         account_id: int,
+        asset_category: Optional[str],
+        asset_subcategory: Optional[str],
+        asset_risk_class: Optional[str],
+        risk_level: Optional[str],
         event_date: date,
         direction: str,
         amount: float,
@@ -209,6 +311,10 @@ class PortfolioRepository:
             row = self.add_cash_ledger_in_session(
                 session=session,
                 account_id=account_id,
+                asset_category=asset_category,
+                asset_subcategory=asset_subcategory,
+                asset_risk_class=asset_risk_class,
+                risk_level=risk_level,
                 event_date=event_date,
                 direction=direction,
                 amount=amount,
@@ -307,6 +413,10 @@ class PortfolioRepository:
         session: Any,
         account_id: int,
         trade_uid: Optional[str],
+        asset_category: Optional[str],
+        asset_subcategory: Optional[str],
+        asset_risk_class: Optional[str],
+        risk_level: Optional[str],
         symbol: str,
         market: str,
         currency: str,
@@ -322,6 +432,10 @@ class PortfolioRepository:
         row = PortfolioTrade(
             account_id=account_id,
             trade_uid=trade_uid,
+            asset_category=asset_category,
+            asset_subcategory=asset_subcategory,
+            asset_risk_class=asset_risk_class,
+            risk_level=risk_level,
             symbol=symbol,
             market=market,
             currency=currency,
@@ -357,6 +471,10 @@ class PortfolioRepository:
         *,
         session: Any,
         account_id: int,
+        asset_category: Optional[str],
+        asset_subcategory: Optional[str],
+        asset_risk_class: Optional[str],
+        risk_level: Optional[str],
         event_date: date,
         direction: str,
         amount: float,
@@ -365,6 +483,10 @@ class PortfolioRepository:
     ) -> PortfolioCashLedger:
         row = PortfolioCashLedger(
             account_id=account_id,
+            asset_category=asset_category,
+            asset_subcategory=asset_subcategory,
+            asset_risk_class=asset_risk_class,
+            risk_level=risk_level,
             event_date=event_date,
             direction=direction,
             amount=amount,
@@ -683,6 +805,20 @@ class PortfolioRepository:
             ).scalars().all()
             return list(rows), total
 
+    def list_positions(self, *, account_id: Optional[int], cost_method: str) -> List[Tuple[PortfolioPosition, PortfolioAccount]]:
+        with self.db.get_session() as session:
+            query = (
+                select(PortfolioPosition, PortfolioAccount)
+                .join(PortfolioAccount, PortfolioAccount.id == PortfolioPosition.account_id)
+                .where(PortfolioPosition.cost_method == cost_method)
+            )
+            if account_id is not None:
+                query = query.where(PortfolioPosition.account_id == account_id)
+            rows = session.execute(
+                query.order_by(desc(PortfolioPosition.market_value_base), PortfolioPosition.id.asc())
+            ).all()
+            return list(rows)
+
     # ------------------------------------------------------------------
     # Price / FX
     # ------------------------------------------------------------------
@@ -767,6 +903,30 @@ class PortfolioRepository:
             ).scalar_one_or_none()
             return row
 
+    def list_latest_fx_rates(
+        self,
+        *,
+        to_currency: str,
+        as_of: date,
+    ) -> List[PortfolioFxRate]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioFxRate)
+                .where(
+                    and_(
+                        PortfolioFxRate.to_currency == to_currency,
+                        PortfolioFxRate.rate_date <= as_of,
+                    )
+                )
+                .order_by(PortfolioFxRate.from_currency.asc(), desc(PortfolioFxRate.rate_date))
+            ).scalars().all()
+
+            latest_by_currency: Dict[str, PortfolioFxRate] = {}
+            for row in rows:
+                if row.from_currency not in latest_by_currency:
+                    latest_by_currency[row.from_currency] = row
+            return list(latest_by_currency.values())
+
     def list_daily_snapshots_for_risk(
         self,
         *,
@@ -833,6 +993,7 @@ class PortfolioRepository:
                         account_id=account_id,
                         cost_method=cost_method,
                         symbol=item["symbol"],
+                        name=item.get("name"),
                         market=item["market"],
                         currency=item["currency"],
                         quantity=float(item["quantity"]),
@@ -841,6 +1002,9 @@ class PortfolioRepository:
                         last_price=float(item["last_price"]),
                         market_value_base=float(item["market_value_base"]),
                         unrealized_pnl_base=float(item["unrealized_pnl_base"]),
+                        asset_category=item.get("asset_category"),
+                        asset_subcategory=item.get("asset_subcategory"),
+                        asset_risk_class=item.get("asset_risk_class"),
                         valuation_currency=valuation_currency,
                     )
                 )
@@ -863,12 +1027,10 @@ class PortfolioRepository:
             session.commit()
 
     def _invalidate_account_cache_in_session(self, *, session: Any, account_id: int, from_date: date) -> None:
-        session.execute(
-            delete(PortfolioPositionLot).where(PortfolioPositionLot.account_id == account_id)
-        )
-        session.execute(
-            delete(PortfolioPosition).where(PortfolioPosition.account_id == account_id)
-        )
+        # DISABLED: Do not delete portfolio_positions as it is the source of truth for asset management.
+        # This method was designed for event-replay workflow where positions are reconstructed from trades.
+        # In the current direct-write model, positions are managed directly and should not be invalidated.
+        # Only invalidate snapshot records from the given date onwards.
         session.execute(
             delete(PortfolioDailySnapshot).where(
                 and_(
@@ -1018,6 +1180,7 @@ class PortfolioRepository:
                         account_id=account_id,
                         cost_method=cost_method,
                         symbol=item["symbol"],
+                        name=item.get("name"),
                         market=item["market"],
                         currency=item["currency"],
                         quantity=float(item["quantity"]),
@@ -1026,6 +1189,9 @@ class PortfolioRepository:
                         last_price=float(item["last_price"]),
                         market_value_base=float(item["market_value_base"]),
                         unrealized_pnl_base=float(item["unrealized_pnl_base"]),
+                        asset_category=item.get("asset_category"),
+                        asset_subcategory=item.get("asset_subcategory"),
+                        asset_risk_class=item.get("asset_risk_class"),
                         valuation_currency=valuation_currency,
                     )
                 )

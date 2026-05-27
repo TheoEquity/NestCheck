@@ -12,12 +12,15 @@ import { useAgentChatStore } from './stores/agentChatStore';
 import './App.css';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
+const AssetDashboardPage = lazy(() => import('./pages/AssetDashboardPage'));
+const AssetManagementPage = lazy(() => import('./pages/AssetManagementPage'));
+const AssetInitializationPage = lazy(() => import('./pages/AssetInitializationPage'));
+const AssetEventsPage = lazy(() => import('./pages/AssetEventsPage'));
 const BacktestPage = lazy(() => import('./pages/BacktestPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
-const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 
 const AppContent: React.FC = () => {
@@ -74,9 +77,13 @@ const AppContent: React.FC = () => {
           </Shell>
         )}
       >
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<AssetDashboardPage />} />
+        <Route path="/analysis" element={<HomePage />} />
+        <Route path="/assets/manage" element={<AssetManagementPage />} />
+        <Route path="/assets/init" element={<AssetInitializationPage />} />
+        <Route path="/assets/events" element={<AssetEventsPage />} />
         <Route path="/chat" element={<ChatPage />} />
-        <Route path="/portfolio" element={<PortfolioPage />} />
+        <Route path="/portfolio" element={<AssetInitializationPage />} />
         <Route path="/backtest" element={<BacktestPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/settings" element={<SettingsPage />} />

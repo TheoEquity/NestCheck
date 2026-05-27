@@ -27,8 +27,19 @@ export interface PortfolioAccountCreateRequest {
   ownerId?: string;
 }
 
+export interface PortfolioAccountUpdateRequest {
+  name?: string;
+  broker?: string;
+  market?: 'cn' | 'hk' | 'us';
+  baseCurrency?: string;
+  ownerId?: string;
+  isActive?: boolean;
+}
+
 export interface PortfolioPositionItem {
+  id: number;
   symbol: string;
+  name?: string | null;
   market: string;
   currency: string;
   quantity: number;
@@ -38,12 +49,57 @@ export interface PortfolioPositionItem {
   marketValueBase: number;
   unrealizedPnlBase: number;
   unrealizedPnlPct?: number | null;
+  assetCategory?: string | null;
+  assetSubcategory?: string | null;
+  assetRiskClass?: string | null;
   valuationCurrency: string;
   priceSource?: 'realtime_quote' | 'history_close' | 'missing' | string;
   priceProvider?: string | null;
   priceDate?: string | null;
   priceStale?: boolean;
   priceAvailable?: boolean;
+}
+
+export interface PortfolioPositionRecordItem extends PortfolioPositionItem {
+  accountId: number;
+  accountName: string;
+  ownerId?: string | null;
+  baseCurrency: string;
+  costMethod: PortfolioCostMethod;
+  updatedAt?: string | null;
+}
+
+export interface PortfolioPositionListResponse {
+  items: PortfolioPositionRecordItem[];
+  total: number;
+}
+
+export interface PortfolioCashByCurrencyItem {
+  currency: string;
+  amount: number;
+  amountBase: number;
+}
+
+export interface PortfolioFxRateItem {
+  pair: string;
+  rate: number;
+  isStale?: boolean;
+}
+
+export interface PortfolioLatestFxRateItem {
+  pair: string;
+  fromCurrency: string;
+  toCurrency: string;
+  rate: number;
+  rateDate: string;
+  source: string;
+  isStale?: boolean;
+}
+
+export interface PortfolioLatestFxRateListResponse {
+  asOf: string;
+  toCurrency: string;
+  items: PortfolioLatestFxRateItem[];
 }
 
 export interface PortfolioAccountSnapshot {
@@ -63,6 +119,8 @@ export interface PortfolioAccountSnapshot {
   feeTotal: number;
   taxTotal: number;
   fxStale: boolean;
+  cashByCurrency: PortfolioCashByCurrencyItem[];
+  fxRates: PortfolioFxRateItem[];
   positions: PortfolioPositionItem[];
 }
 
@@ -146,6 +204,10 @@ export interface PortfolioRiskResponse {
 
 export interface PortfolioTradeCreateRequest {
   accountId: number;
+  assetCategory?: string;
+  assetSubcategory?: string;
+  assetRiskClass?: string;
+  riskLevel?: string;
   symbol: string;
   tradeDate: string;
   side: PortfolioSide;
@@ -161,6 +223,10 @@ export interface PortfolioTradeCreateRequest {
 
 export interface PortfolioCashLedgerCreateRequest {
   accountId: number;
+  assetCategory?: string;
+  assetSubcategory?: string;
+  assetRiskClass?: string;
+  riskLevel?: string;
   eventDate: string;
   direction: PortfolioCashDirection;
   amount: number;
@@ -192,6 +258,10 @@ export interface PortfolioTradeListItem {
   id: number;
   accountId: number;
   tradeUid?: string | null;
+  assetCategory?: string | null;
+  assetSubcategory?: string | null;
+  assetRiskClass?: string | null;
+  riskLevel?: string | null;
   symbol: string;
   market: string;
   currency: string;
@@ -215,6 +285,10 @@ export interface PortfolioTradeListResponse {
 export interface PortfolioCashLedgerListItem {
   id: number;
   accountId: number;
+  assetCategory?: string | null;
+  assetSubcategory?: string | null;
+  assetRiskClass?: string | null;
+  riskLevel?: string | null;
   eventDate: string;
   direction: PortfolioCashDirection;
   amount: number;
@@ -302,4 +376,60 @@ export interface PortfolioFxRefreshResponse {
   updatedCount: number;
   staleCount: number;
   errorCount: number;
+}
+
+export interface PortfolioPositionAdjustRequest {
+  quantity?: number;
+  avg_cost?: number;
+  last_price?: number;
+}
+
+export interface PortfolioPositionAdjustResponse {
+  id: number;
+  symbol: string;
+  market: string;
+  currency: string;
+  quantity: number;
+  avgCost: number;
+  lastPrice: number;
+  totalCost: number;
+  updatedAt?: string | null;
+}
+
+export interface PortfolioInitializeAssetRow {
+  assetCategory: string;
+  assetSubcategory?: string;
+  assetRiskClass?: string;
+  symbol: string;
+  name?: string;
+  market: 'cn' | 'hk' | 'us';
+  quantity: number;
+  avgCost: number;
+  currency: string;
+  note?: string;
+}
+
+export interface PortfolioInitializeCashRow {
+  assetCategory: string;
+  assetRiskClass?: string;
+  name?: string;
+  amount: number;
+  currency: string;
+  note?: string;
+}
+
+export interface PortfolioInitializeRequest {
+  accountId: number;
+  initDate: string;
+  assets: PortfolioInitializeAssetRow[];
+  cashItems: PortfolioInitializeCashRow[];
+}
+
+export interface PortfolioInitializeResponse {
+  accountId: number;
+  assetCount: number;
+  cashCount: number;
+  clearedTradeCount: number;
+  clearedCashCount: number;
+  clearedCorporateCount: number;
 }

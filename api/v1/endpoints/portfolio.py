@@ -21,10 +21,16 @@ from api.v1.schemas.portfolio import (
     PortfolioCorporateActionCreateRequest,
     PortfolioDeleteResponse,
     PortfolioEventCreatedResponse,
+    PortfolioLatestFxRateListResponse,
     PortfolioFxRefreshResponse,
     PortfolioImportBrokerListResponse,
     PortfolioImportCommitResponse,
     PortfolioImportParseResponse,
+    PortfolioInitializeRequest,
+    PortfolioInitializeResponse,
+    PortfolioPositionAdjustRequest,
+    PortfolioPositionAdjustResponse,
+    PortfolioPositionListResponse,
     PortfolioImportTradeItem,
     PortfolioRiskResponse,
     PortfolioSnapshotResponse,
@@ -151,23 +157,46 @@ def update_account(account_id: int, request: PortfolioAccountUpdateRequest) -> P
 
 @router.delete(
     "/accounts/{account_id}",
+    response_model=PortfolioDeleteResponse,
     responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Deactivate portfolio account",
+    summary="Delete portfolio account and related assets",
 )
-def delete_account(account_id: int):
+def delete_account(account_id: int) -> PortfolioDeleteResponse:
     service = PortfolioService()
     try:
-        ok = service.deactivate_account(account_id)
+        ok = service.delete_account(account_id)
         if not ok:
             raise HTTPException(
                 status_code=404,
                 detail={"error": "not_found", "message": f"Account not found: {account_id}"},
             )
-        return {"deleted": 1}
+        return PortfolioDeleteResponse(deleted=1)
     except HTTPException:
         raise
     except Exception as exc:
-        raise _internal_error("Deactivate account failed", exc)
+        raise _internal_error("Delete account failed", exc)
+
+
+@router.post(
+    "/initialize",
+    response_model=PortfolioInitializeResponse,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Initialize portfolio by directly writing positions and cash (bypasses event replay)",
+)
+def initialize_portfolio(request: PortfolioInitializeRequest) -> PortfolioInitializeResponse:
+    service = PortfolioService()
+    try:
+        result = service.initialize_portfolio(
+            account_id=request.account_id,
+            init_date=request.init_date,
+            assets=[asset.model_dump() for asset in request.assets],
+            cash_items=[item.model_dump() for item in request.cash_items],
+        )
+        return PortfolioInitializeResponse(**result)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Initialize portfolio failed", exc)
 
 
 @router.post(
@@ -181,6 +210,10 @@ def create_trade(request: PortfolioTradeCreateRequest) -> PortfolioEventCreatedR
     try:
         data = service.record_trade(
             account_id=request.account_id,
+            asset_category=request.asset_category,
+            asset_subcategory=request.asset_subcategory,
+            asset_risk_class=request.asset_risk_class,
+            risk_level=request.risk_level,
             symbol=request.symbol,
             trade_date=request.trade_date,
             side=request.side,
@@ -274,6 +307,10 @@ def create_cash_ledger(request: PortfolioCashLedgerCreateRequest) -> PortfolioEv
     try:
         data = service.record_cash_ledger(
             account_id=request.account_id,
+            asset_category=request.asset_category,
+            asset_subcategory=request.asset_subcategory,
+            asset_risk_class=request.asset_risk_class,
+            risk_level=request.risk_level,
             event_date=request.event_date,
             direction=request.direction,
             amount=request.amount,
@@ -431,6 +468,53 @@ def delete_corporate_action(action_id: int) -> PortfolioDeleteResponse:
 
 
 @router.get(
+    "/positions",
+    response_model=PortfolioPositionListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="List current portfolio positions",
+)
+def list_positions(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    cost_method: str = Query("fifo", description="Cost method: fifo or avg"),
+) -> PortfolioPositionListResponse:
+    service = PortfolioService()
+    try:
+        data = service.list_positions(account_id=account_id, cost_method=cost_method)
+        return PortfolioPositionListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("List positions failed", exc)
+
+
+@router.post(
+    "/positions/{position_id}/adjust",
+    response_model=PortfolioPositionAdjustResponse,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Manually adjust a single position (quantity, avg_cost, or last_price)",
+)
+def adjust_position(
+    position_id: int,
+    body: PortfolioPositionAdjustRequest,
+    account_id: Optional[int] = Query(None, description="Optional account id for extra scoping"),
+) -> PortfolioPositionAdjustResponse:
+    service = PortfolioService()
+    try:
+        data = service.adjust_position(
+            position_id=position_id,
+            account_id=account_id,
+            quantity=body.quantity,
+            avg_cost=body.avg_cost,
+            last_price=body.last_price,
+        )
+        return PortfolioPositionAdjustResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Adjust position failed", exc)
+
+
+@router.get(
     "/snapshot",
     response_model=PortfolioSnapshotResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
@@ -547,6 +631,26 @@ def refresh_fx_rates(
 
 
 @router.get(
+    "/fx/latest",
+    response_model=PortfolioLatestFxRateListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get latest cached FX rates",
+)
+def get_latest_fx_rates(
+    to_currency: str = Query("CNY", description="Quote currency, default CNY"),
+    as_of: Optional[date] = Query(None, description="Rate date, default today"),
+) -> PortfolioLatestFxRateListResponse:
+    service = PortfolioService()
+    try:
+        data = service.get_latest_fx_rates(to_currency=to_currency, as_of=as_of)
+        return PortfolioLatestFxRateListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get latest FX rates failed", exc)
+
+
+@router.get(
     "/risk",
     response_model=PortfolioRiskResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
@@ -565,3 +669,18 @@ def get_risk_report(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Get risk report failed", exc)
+
+
+@router.post(
+    "/prices/refresh",
+    response_model=dict,
+    responses={500: {"model": ErrorResponse}},
+    summary="Refresh all cached prices (positions, indices, FX rates)",
+)
+def refresh_all_prices() -> dict:
+    svc = PortfolioService()
+    try:
+        result = svc.refresh_all_prices()
+        return result
+    except Exception as exc:
+        raise _internal_error("Refresh prices failed", exc)

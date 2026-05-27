@@ -7,8 +7,10 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+
+from sqlalchemy import and_, select
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.config import get_config
@@ -68,6 +70,10 @@ class PortfolioOversellError(ValueError):
 class _AvgState:
     quantity: float = 0.0
     total_cost: float = 0.0
+    name: Optional[str] = None
+    asset_category: Optional[str] = None
+    asset_subcategory: Optional[str] = None
+    asset_risk_class: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,14 @@ class _ResolvedPositionPrice:
     is_stale: bool
     is_available: bool
     provider: Optional[str] = None
+
+
+@dataclass
+class _PositionMetadata:
+    name: Optional[str] = None
+    asset_category: Optional[str] = None
+    asset_subcategory: Optional[str] = None
+    asset_risk_class: Optional[str] = None
 
 
 class PortfolioService:
@@ -154,6 +168,151 @@ class PortfolioService:
     def deactivate_account(self, account_id: int) -> bool:
         return self.repo.deactivate_account(account_id)
 
+    def delete_account(self, account_id: int) -> bool:
+        return self.repo.delete_account(account_id)
+
+    # ------------------------------------------------------------------
+    # Initialization (direct write to asset tables, bypassing event replay)
+    # ------------------------------------------------------------------
+    def initialize_portfolio(
+        self,
+        *,
+        account_id: int,
+        init_date: date,
+        assets: List[Dict[str, Any]],
+        cash_items: List[Dict[str, Any]],
+        cost_method: str = "fifo",
+    ) -> Dict[str, Any]:
+        """Initialize an account's portfolio by directly writing positions.
+
+        This bypasses the event replay system. It clears all existing event records
+        (trades, cash ledger, corporate actions) and cached positions, then writes
+        all initial holdings (securities + cash) directly into portfolio_positions.
+        Cash is treated as an asset class and written to portfolio_positions alongside
+        securities.
+
+        Args:
+            account_id: Target account id
+            init_date: Initialization date
+            assets: List of asset dicts with keys: symbol, name, market, currency,
+                    quantity, avg_cost, asset_category, asset_subcategory, asset_risk_class
+            cash_items: List of cash dicts with keys: name, amount, currency,
+                        asset_category
+            cost_method: Cost method for position cache (default: fifo)
+
+        Returns:
+            Dict with asset_count, cash_count, and cleared event counts
+        """
+        account = self._require_active_account(account_id)
+        method = self._normalize_cost_method(cost_method)
+
+        # Step 1: Clear all existing event records and cached positions
+        cleared = self.repo.clear_account_events(account_id=account_id)
+
+        # Step 2: Build position records for securities
+        position_rows: List[Dict[str, Any]] = []
+        lot_rows: List[Dict[str, Any]] = []
+
+        for asset in assets:
+            symbol = self._normalize_symbol_for_storage(asset.get("symbol", ""))
+            if not symbol:
+                raise ValueError(f"Asset symbol is required, got: {asset.get('symbol')}")
+
+            market = self._normalize_market(asset.get("market", account.market))
+            currency = self._normalize_currency(asset.get("currency", account.base_currency))
+            quantity = float(asset.get("quantity", 0))
+            avg_cost = float(asset.get("avg_cost", 0))
+            if quantity <= 0:
+                raise ValueError(f"Asset quantity must be > 0 for {symbol}")
+            if avg_cost <= 0:
+                raise ValueError(f"Asset avg_cost must be > 0 for {symbol}")
+
+            total_cost = quantity * avg_cost
+            name = (asset.get("name") or "").strip() or None
+            asset_category = (asset.get("asset_category") or "").strip() or None
+            asset_subcategory = (asset.get("asset_subcategory") or "").strip() or None
+            asset_risk_class = (asset.get("asset_risk_class") or "").strip().upper() or None
+
+            position_rows.append({
+                "symbol": symbol,
+                "name": name,
+                "market": market,
+                "currency": currency,
+                "quantity": quantity,
+                "avg_cost": avg_cost,
+                "total_cost": total_cost,
+                "last_price": 0.0,
+                "market_value_base": 0.0,
+                "unrealized_pnl_base": 0.0,
+                "asset_category": asset_category,
+                "asset_subcategory": asset_subcategory,
+                "asset_risk_class": asset_risk_class,
+            })
+
+            lot_rows.append({
+                "symbol": symbol,
+                "market": market,
+                "currency": currency,
+                "open_date": init_date,
+                "remaining_quantity": quantity,
+                "unit_cost": avg_cost,
+                "source_trade_id": None,
+                "asset_category": asset_category,
+                "asset_subcategory": asset_subcategory,
+                "asset_risk_class": asset_risk_class,
+            })
+
+        # Step 3: Build position records for cash (cash is also an asset)
+        cash_written = 0
+        for cash in cash_items:
+            amount = float(cash.get("amount", 0))
+            if amount <= 0:
+                continue
+
+            cash_currency = self._normalize_currency(cash.get("currency", account.base_currency))
+            name = (cash.get("name") or "").strip() or None
+            asset_category = (cash.get("asset_category") or "cash").strip() or "cash"
+            asset_risk_class = cash.get("asset_risk_class")
+
+            # Use a special symbol for cash holdings
+            cash_symbol = f"CASH_{cash_currency}"
+
+            position_rows.append({
+                "symbol": cash_symbol,
+                "name": name,
+                "market": account.market,
+                "currency": cash_currency,
+                "quantity": amount,
+                "avg_cost": 1.0,
+                "total_cost": amount,
+                "last_price": 1.0,
+                "market_value_base": 0.0,
+                "unrealized_pnl_base": 0.0,
+                "asset_category": asset_category,
+                "asset_subcategory": None,
+                "asset_risk_class": asset_risk_class,
+            })
+
+            # Cash does not need lot records
+            cash_written += 1
+
+        # Step 4: Write all positions (securities + cash) in one transaction
+        self.repo.replace_positions_and_lots(
+            account_id=account_id,
+            cost_method=method,
+            positions=position_rows,
+            lots=lot_rows,
+            valuation_currency=account.base_currency,
+        )
+
+        return {
+            "account_id": account_id,
+            "asset_count": len(position_rows) - cash_written,
+            "cash_count": cash_written,
+            "cleared_trade_count": cleared["trade_count"],
+            "cleared_cash_count": cleared["cash_count"],
+            "cleared_corporate_count": cleared["corporate_count"],
+        }
     # ------------------------------------------------------------------
     # Event writes
     # ------------------------------------------------------------------
@@ -161,6 +320,10 @@ class PortfolioService:
         self,
         *,
         account_id: int,
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
+        asset_risk_class: Optional[str] = None,
+        risk_level: Optional[str] = None,
         symbol: str,
         trade_date: date,
         side: str,
@@ -211,6 +374,10 @@ class PortfolioService:
                     session=session,
                     account_id=account_id,
                     trade_uid=trade_uid_norm,
+                    asset_category=(asset_category or "").strip() or None,
+                    asset_subcategory=(asset_subcategory or "").strip() or None,
+                    asset_risk_class=(asset_risk_class or "").strip().upper() or None,
+                    risk_level=(risk_level or "").strip().upper() or None,
                     symbol=symbol_norm,
                     market=market_norm,
                     currency=currency_norm,
@@ -231,6 +398,10 @@ class PortfolioService:
         self,
         *,
         account_id: int,
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
+        asset_risk_class: Optional[str] = None,
+        risk_level: Optional[str] = None,
         event_date: date,
         direction: str,
         amount: float,
@@ -248,6 +419,10 @@ class PortfolioService:
             row = self.repo.add_cash_ledger_in_session(
                 session=session,
                 account_id=account_id,
+                asset_category=(asset_category or "").strip() or None,
+                asset_subcategory=(asset_subcategory or "").strip() or None,
+                asset_risk_class=(asset_risk_class or "").strip().upper() or None,
+                risk_level=(risk_level or "").strip().upper() or None,
                 event_date=event_date,
                 direction=direction_norm,
                 amount=float(amount),
@@ -472,26 +647,16 @@ class PortfolioService:
         }
 
         for account in account_rows:
-            account_snapshot = self._replay_account(account=account, as_of_date=as_of_date, cost_method=method)
-
-            self.repo.replace_positions_lots_and_snapshot(
-                account_id=account.id,
-                snapshot_date=as_of_date,
+            # Read directly from portfolio_positions instead of event replay.
+            account_snapshot = self._build_snapshot_from_positions(
+                account=account,
+                as_of_date=as_of_date,
                 cost_method=method,
-                base_currency=account.base_currency,
-                total_cash=account_snapshot["total_cash"],
-                total_market_value=account_snapshot["total_market_value"],
-                total_equity=account_snapshot["total_equity"],
-                unrealized_pnl=account_snapshot["unrealized_pnl"],
-                realized_pnl=account_snapshot["realized_pnl"],
-                fee_total=account_snapshot["fee_total"],
-                tax_total=account_snapshot["tax_total"],
-                fx_stale=account_snapshot["fx_stale"],
-                payload=json.dumps(account_snapshot["payload"], ensure_ascii=False),
-                positions=account_snapshot["positions_cache"],
-                lots=account_snapshot["lots_cache"],
-                valuation_currency=account.base_currency,
             )
+
+            # Do not replace positions - they are the source of truth.
+            # Only update snapshot records for historical tracking.
+            # DISABLED: self.repo.replace_positions_lots_and_snapshot(...)
 
             accounts_payload.append(account_snapshot["public"])
 
@@ -609,6 +774,84 @@ class PortfolioService:
             summary["stale_count"] += item["stale_count"]
             summary["error_count"] += item["error_count"]
         return summary
+
+    def get_latest_fx_rates(
+        self,
+        *,
+        to_currency: str = "CNY",
+        as_of: Optional[date] = None,
+    ) -> Dict[str, Any]:
+        as_of_date = as_of or date.today()
+        target_currency = self._normalize_currency(to_currency)
+        rows = self.repo.list_latest_fx_rates(to_currency=target_currency, as_of=as_of_date)
+        return {
+            "as_of": as_of_date.isoformat(),
+            "to_currency": target_currency,
+            "items": [
+                {
+                    "pair": f"{target_currency}/{row.from_currency}",
+                    "from_currency": row.from_currency,
+                    "to_currency": row.to_currency,
+                    "rate": float(row.rate),
+                    "rate_date": row.rate_date.isoformat(),
+                    "source": row.source or "unknown",
+                    "is_stale": bool(row.is_stale),
+                }
+                for row in sorted(rows, key=lambda item: item.from_currency)
+            ],
+        }
+
+    def list_positions(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        cost_method: str = "fifo",
+    ) -> Dict[str, Any]:
+        method = self._normalize_cost_method(cost_method)
+        rows = self.repo.list_positions(account_id=account_id, cost_method=method)
+        items: List[Dict[str, Any]] = []
+        for position, account in rows:
+            qty = float(position.quantity or 0.0)
+            avg_cost_val = float(position.avg_cost or 0.0)
+            last_price = float(position.last_price or 0.0)
+            market_base = qty * last_price
+            total_cost = float(position.total_cost or 0.0)
+            unrealized = market_base - total_cost
+            unrealized_pct = None
+            if abs(total_cost) > EPS:
+                unrealized_pct = unrealized / total_cost * 100.0
+            items.append(
+                {
+                    "id": int(position.id),
+                    "account_id": int(account.id),
+                    "account_name": account.name,
+                    "owner_id": account.owner_id,
+                    "base_currency": account.base_currency,
+                    "cost_method": position.cost_method,
+                    "symbol": position.symbol,
+                    "name": position.name or None,
+                    "market": position.market,
+                    "currency": position.currency,
+                    "quantity": qty,
+                    "avg_cost": avg_cost_val,
+                    "total_cost": total_cost,
+                    "last_price": round(last_price, 8),
+                    "market_value_base": round(market_base, 8),
+                    "unrealized_pnl_base": round(unrealized, 8),
+                    "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                    "asset_category": position.asset_category,
+                    "asset_subcategory": position.asset_subcategory,
+                    "asset_risk_class": position.asset_risk_class,
+                    "valuation_currency": position.valuation_currency,
+                    "price_source": "cached",
+                    "price_provider": None,
+                    "price_date": position.updated_at.isoformat() if position.updated_at else None,
+                    "price_stale": position.last_price is not None and position.last_price <= 0,
+                    "price_available": position.last_price is not None and position.last_price > 0,
+                    "updated_at": position.updated_at.isoformat() if position.updated_at else None,
+                }
+            )
+        return {"items": items, "total": len(items)}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -735,6 +978,140 @@ class PortfolioService:
 
         return quantity_held
 
+    def _build_snapshot_from_positions(
+        self,
+        *,
+        account: Any,
+        as_of_date: date,
+        cost_method: str,
+    ) -> Dict[str, Any]:
+        """Build snapshot by reading directly from portfolio_positions (source of truth).
+
+        This bypasses event replay and treats portfolio_positions as the authoritative
+        record of current holdings. Cash is managed as an asset class within positions.
+        """
+        from src.storage import PortfolioPosition
+
+        with self.repo.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioPosition)
+                .where(
+                    and_(
+                        PortfolioPosition.account_id == account.id,
+                        PortfolioPosition.cost_method == cost_method,
+                    )
+                )
+            ).scalars().all()
+
+        positions_cache: List[Dict[str, Any]] = []
+        cash_by_currency: List[Dict[str, Any]] = []
+        total_cash = 0.0
+        total_market_value = 0.0
+        total_cost = 0.0
+        fx_stale = False
+
+        for pos in rows:
+            is_cash = pos.asset_category == "cash" or pos.symbol.startswith("CASH_")
+            qty = float(pos.quantity or 0)
+            avg_cost = float(pos.avg_cost or 0)
+            last_price = float(pos.last_price or avg_cost) if not is_cash else 1.0
+
+            market_value = qty * last_price
+            total_cost += qty * avg_cost
+            total_market_value += market_value
+
+            if is_cash:
+                total_cash += market_value
+                cash_by_currency.append({
+                    "currency": pos.currency,
+                    "amount": market_value,
+                    "amount_base": market_value,  # Will be converted later
+                })
+
+            positions_cache.append({
+                "symbol": pos.symbol,
+                "name": pos.name,
+                "market": pos.market,
+                "currency": pos.currency,
+                "quantity": qty,
+                "avg_cost": avg_cost,
+                "total_cost": qty * avg_cost,
+                "last_price": last_price,
+                "market_value_base": market_value,
+                "unrealized_pnl_base": market_value - (qty * avg_cost),
+                "asset_category": pos.asset_category,
+                "asset_subcategory": pos.asset_subcategory,
+                "asset_risk_class": pos.asset_risk_class,
+            })
+
+        total_equity = total_cash + total_market_value
+
+        # Convert cash to base currency and collect FX rates
+        for cash_item in cash_by_currency:
+            if cash_item["currency"] != account.base_currency:
+                converted, stale, source = self._convert_amount(
+                    amount=cash_item["amount"],
+                    from_currency=cash_item["currency"],
+                    to_currency=account.base_currency,
+                    as_of_date=as_of_date,
+                )
+                cash_item["amount_base"] = converted
+                if stale or source == "fallback_1_to_1":
+                    fx_stale = True
+            else:
+                cash_item["amount_base"] = cash_item["amount"]
+
+        # Generate FX rates for non-base currencies
+        fx_rates: List[Dict[str, Any]] = []
+        for currency in sorted({item["currency"] for item in cash_by_currency if item["currency"] != account.base_currency}):
+            converted_one, stale_rate, source = self._convert_amount(
+                amount=1.0,
+                from_currency=currency,
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            fx_rates.append({
+                "pair": f"{account.base_currency}/{currency}",
+                "rate": round(float(converted_one), 6),
+                "is_stale": bool(stale_rate or source == "fallback_1_to_1"),
+            })
+
+        account_payload = {
+            "account_id": account.id,
+            "account_name": account.name,
+            "owner_id": account.owner_id,
+            "broker": account.broker,
+            "market": account.market,
+            "base_currency": account.base_currency,
+            "as_of": as_of_date.isoformat(),
+            "cost_method": cost_method,
+            "total_cash": round(total_cash, 6),
+            "total_market_value": round(total_market_value, 6),
+            "total_equity": round(total_equity, 6),
+            "realized_pnl": 0.0,
+            "unrealized_pnl": round(total_market_value - total_cost, 6),
+            "fee_total": 0.0,
+            "tax_total": 0.0,
+            "fx_stale": fx_stale,
+            "cash_by_currency": [],
+            "fx_rates": [],
+            "positions": positions_cache,
+        }
+
+        return {
+            "public": account_payload,
+            "payload": account_payload,
+            "positions_cache": positions_cache,
+            "lots_cache": [],
+            "total_cash": total_cash,
+            "total_market_value": total_market_value,
+            "total_equity": total_equity,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": total_market_value - total_cost,
+            "fee_total": 0.0,
+            "tax_total": 0.0,
+        }
+
     def _replay_account(self, *, account: Any, as_of_date: date, cost_method: str) -> Dict[str, Any]:
         trades = self.repo.list_trades(account.id, as_of=as_of_date)
         cash_ledger = self.repo.list_cash_ledger(account.id, as_of=as_of_date)
@@ -760,6 +1137,7 @@ class PortfolioService:
 
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
+        position_metadata: Dict[Tuple[str, str, str], _PositionMetadata] = defaultdict(_PositionMetadata)
 
         for event_type, event_date, _, event in events:
             if event_type == "cash":
@@ -789,6 +1167,12 @@ class PortfolioService:
                 gross = qty * price
                 side = (event.side or "").lower().strip()
                 if side == "buy":
+                    metadata = position_metadata[key]
+                    metadata.name = self._extract_asset_name_from_note(event.note) or metadata.name
+                    metadata.asset_category = (event.asset_category or "").strip() or metadata.asset_category
+                    metadata.asset_subcategory = (event.asset_subcategory or "").strip() or metadata.asset_subcategory
+                    metadata.asset_risk_class = (event.asset_risk_class or "").strip().upper() or metadata.asset_risk_class
+                if side == "buy":
                     cash_balances[key[2]] -= (gross + fee + tax)
                     if cost_method == "fifo":
                         unit_cost = (gross + fee + tax) / qty
@@ -801,12 +1185,19 @@ class PortfolioService:
                                 "remaining_quantity": qty,
                                 "unit_cost": unit_cost,
                                 "source_trade_id": event.id,
+                                "asset_category": position_metadata[key].asset_category,
+                                "asset_subcategory": position_metadata[key].asset_subcategory,
+                                "asset_risk_class": position_metadata[key].asset_risk_class,
                             }
                         )
                     else:
                         state = avg_state[key]
                         state.quantity += qty
                         state.total_cost += (gross + fee + tax)
+                        state.name = position_metadata[key].name
+                        state.asset_category = position_metadata[key].asset_category
+                        state.asset_subcategory = position_metadata[key].asset_subcategory
+                        state.asset_risk_class = position_metadata[key].asset_risk_class
                 elif side == "sell":
                     cash_balances[key[2]] += (gross - fee - tax)
                     proceeds_net = gross - fee - tax
@@ -894,10 +1285,12 @@ class PortfolioService:
             cost_method=cost_method,
             fifo_lots=fifo_lots,
             avg_state=avg_state,
+            position_metadata=position_metadata,
         )
         fx_stale = fx_stale or stale_pos
 
         total_cash_base = 0.0
+        cash_by_currency: List[Dict[str, Any]] = []
         for currency, amount in cash_balances.items():
             converted, stale, _ = self._convert_amount(
                 amount=amount,
@@ -907,6 +1300,29 @@ class PortfolioService:
             )
             total_cash_base += converted
             fx_stale = fx_stale or stale
+            cash_by_currency.append(
+                {
+                    "currency": currency,
+                    "amount": round(float(amount), 6),
+                    "amount_base": round(float(converted), 6),
+                }
+            )
+
+        fx_rates: List[Dict[str, Any]] = []
+        for currency in sorted({item["currency"] for item in cash_by_currency if item["currency"] != account.base_currency}):
+            converted_one, stale_rate, source = self._convert_amount(
+                amount=1.0,
+                from_currency=currency,
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            fx_rates.append(
+                {
+                    "pair": f"{account.base_currency}/{currency}",
+                    "rate": round(float(converted_one), 6),
+                    "is_stale": bool(stale_rate or source == "fallback_1_to_1"),
+                }
+            )
 
         unrealized_pnl_base = market_value_base - total_cost_base
         total_equity_base = total_cash_base + market_value_base
@@ -928,6 +1344,8 @@ class PortfolioService:
             "fee_total": round(fees_total_base, 6),
             "tax_total": round(taxes_total_base, 6),
             "fx_stale": fx_stale,
+            "cash_by_currency": cash_by_currency,
+            "fx_rates": fx_rates,
             "positions": position_rows,
         }
 
@@ -954,6 +1372,7 @@ class PortfolioService:
         cost_method: str,
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]],
         avg_state: Dict[Tuple[str, str, str], _AvgState],
+        position_metadata: Dict[Tuple[str, str, str], _PositionMetadata],
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float, float, bool]:
         position_rows: List[Dict[str, Any]] = []
         lot_rows: List[Dict[str, Any]] = []
@@ -969,6 +1388,7 @@ class PortfolioService:
 
         for key in sorted(keys):
             symbol, market, currency = key
+            metadata = position_metadata.get(key, _PositionMetadata())
 
             if cost_method == "fifo":
                 active_lots = [lot for lot in fifo_lots[key] if lot["remaining_quantity"] > EPS]
@@ -985,6 +1405,12 @@ class PortfolioService:
                 if qty <= EPS:
                     continue
                 avg_cost = total_cost / qty
+                metadata = _PositionMetadata(
+                    name=state.name,
+                    asset_category=state.asset_category,
+                    asset_subcategory=state.asset_subcategory,
+                    asset_risk_class=state.asset_risk_class,
+                )
                 lot_rows.append(
                     {
                         "symbol": symbol,
@@ -997,10 +1423,14 @@ class PortfolioService:
                     }
                 )
 
-            price_info = self._resolve_position_price(symbol=symbol, as_of_date=as_of_date)
-            last_price = price_info.price
+            price_info = self._resolve_cached_position_price(
+                symbol=symbol, market=market, currency=currency,
+                account_base_currency=account.base_currency, as_of_date=as_of_date,
+                asset_category=metadata.asset_category,
+            )
+            last_price = price_info["price"]
 
-            if price_info.is_available:
+            if price_info["available"]:
                 local_market_value = qty * float(last_price)
                 market_base, stale_market, _ = self._convert_amount(
                     amount=local_market_value,
@@ -1026,23 +1456,27 @@ class PortfolioService:
                 unrealized_pct = unrealized_base / cost_base * 100.0
 
             position_rows.append(
-                {
-                    "symbol": symbol,
-                    "market": market,
-                    "currency": currency,
-                    "quantity": round(qty, 8),
+                    {
+                        "symbol": symbol,
+                        "market": market,
+                        "currency": currency,
+                        "name": metadata.name,
+                        "quantity": round(qty, 8),
                     "avg_cost": round(avg_cost, 8),
                     "total_cost": round(total_cost, 8),
                     "last_price": round(float(last_price), 8),
                     "market_value_base": round(market_base, 8),
                     "unrealized_pnl_base": round(unrealized_base, 8),
                     "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                    "asset_category": metadata.asset_category,
+                    "asset_subcategory": metadata.asset_subcategory,
+                    "asset_risk_class": metadata.asset_risk_class,
                     "valuation_currency": account.base_currency,
-                    "price_source": price_info.source,
-                    "price_provider": price_info.provider,
-                    "price_date": price_info.price_date.isoformat() if price_info.price_date else None,
-                    "price_stale": price_info.is_stale,
-                    "price_available": price_info.is_available,
+                    "price_source": price_info["source"],
+                    "price_provider": price_info["provider"],
+                    "price_date": price_info["price_date"],
+                    "price_stale": price_info["stale"],
+                    "price_available": price_info["available"],
                 }
             )
 
@@ -1051,11 +1485,93 @@ class PortfolioService:
 
         return position_rows, lot_rows, market_value_base, total_cost_base, fx_stale
 
-    def _resolve_position_price(self, *, symbol: str, as_of_date: date) -> _ResolvedPositionPrice:
+    def _resolve_cached_position_price(
+        self,
+        *,
+        symbol: str,
+        market: str,
+        currency: str,
+        account_base_currency: str,
+        as_of_date: date,
+        asset_category: Optional[str],
+    ) -> Dict[str, Any]:
+        """Read price from cached portfolio_positions.last_price instead of real-time APIs."""
+        from src.storage import get_db, PortfolioPosition
+
+        db = get_db()
+        with db.get_session() as s:
+            pos = s.query(PortfolioPosition).filter_by(
+                symbol=self._normalize_symbol_for_storage(symbol),
+                currency=currency,
+                market=market,
+                cost_method="fifo",
+            ).first()
+            if pos is None:
+                pos = s.query(PortfolioPosition).filter_by(
+                    symbol=symbol,
+                ).first()
+
+            if pos and pos.last_price and pos.last_price > 0:
+                return {
+                    "price": float(pos.last_price),
+                    "source": "cached",
+                    "provider": None,
+                    "price_date": pos.updated_at.isoformat() if pos.updated_at else None,
+                    "stale": False,
+                    "available": True,
+                }
+
+        return {
+            "price": 0.0,
+            "source": "missing",
+            "provider": None,
+            "price_date": None,
+            "stale": True,
+            "available": False,
+        }
+
+    def _resolve_position_price(
+        self,
+        *,
+        symbol: str,
+        as_of_date: date,
+        asset_category: Optional[str] = None,
+    ) -> _ResolvedPositionPrice:
         today = date.today()
 
+        if (asset_category or "").lower() == "fund":
+            fund_nav, fund_date = self._fetch_fund_nav(symbol)
+            if fund_nav is not None and fund_nav > 0:
+                return _ResolvedPositionPrice(
+                    price=float(fund_nav),
+                    source="fund_nav",
+                    price_date=fund_date,
+                    is_stale=(fund_date < as_of_date if fund_date else True),
+                    is_available=True,
+                    provider="akshare",
+                )
+
+            close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
+            if close is not None:
+                close_price, close_date = close
+                if close_price > 0:
+                    return _ResolvedPositionPrice(
+                        price=float(close_price),
+                        source="history_close",
+                        price_date=close_date,
+                        is_stale=close_date < as_of_date,
+                        is_available=True,
+                    )
+            return _ResolvedPositionPrice(
+                price=0.0,
+                source="missing",
+                price_date=None,
+                is_stale=True,
+                is_available=False,
+            )
+
         if as_of_date == today:
-            realtime_price, provider = self._fetch_realtime_position_price(symbol)
+            realtime_price, provider, _ = self._fetch_realtime_position_price(symbol)
             if realtime_price is not None and realtime_price > 0:
                 return _ResolvedPositionPrice(
                     price=float(realtime_price),
@@ -1087,34 +1603,125 @@ class PortfolioService:
         )
 
     @staticmethod
-    def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:
+    def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str], Optional[str]]:
         try:
             from data_provider.base import DataFetcherManager
 
             quote = DataFetcherManager().get_realtime_quote(symbol, log_final_failure=False)
         except Exception as exc:
             logger.warning("Failed to fetch realtime portfolio price for %s: %s", symbol, exc)
-            return None, None
+            return None, None, None
 
         if quote is None:
-            return None, None
+            return None, None, None
 
         price = getattr(quote, "price", None)
         try:
             numeric_price = float(price)
         except (TypeError, ValueError):
-            return None, None
+            return None, None, None
 
         if numeric_price <= 0:
-            return None, None
+            return None, None, None
 
         source = getattr(quote, "source", None)
         provider = getattr(source, "value", None) or (str(source) if source is not None else None)
+        name = getattr(quote, "name", None)
+        return numeric_price, provider, name
+
+    @staticmethod
+    def _fetch_fund_nav(symbol: str) -> Tuple[Optional[float], Optional[str]]:
+        """Fetch open fund NAV from Akshare (fund_open_fund_info_em)."""
+        try:
+            import akshare as ak
+        except ImportError:
+            return None, None
+
+        try:
+            info = ak.fund_individual_basic_info_xq(symbol=symbol)
+            name = None
+            for _, row in info.iterrows():
+                if "基金名称" in str(row.get("item", "")):
+                    name = str(row.get("value", ""))
+                    break
+        except Exception:
+            name = None
+
+        try:
+            df = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值走势", period="3月")
+        except Exception as exc:
+            logger.warning("Failed to fetch fund NAV for %s: %s", symbol, exc)
+            return None, name
+
+        if df is None or df.empty:
+            return None, name
+
+        latest = df.iloc[-1]
+        try:
+            nav_str = str(latest.get("单位净值", ""))
+            nav = float(nav_str) if nav_str else None
+        except (TypeError, ValueError):
+            return None, name
+
+        if nav is None or nav <= 0:
+            return None, name
+
+        return nav, name
         return numeric_price, provider
 
     @staticmethod
     def _normalize_symbol_for_storage(symbol: str) -> str:
         return canonical_stock_code(symbol)
+
+    @staticmethod
+    def _extract_asset_name_from_note(note: Optional[str]) -> Optional[str]:
+        for segment in (note or "").split("|"):
+            entry = segment.strip()
+            if entry.startswith("name:"):
+                value = entry[5:].strip()
+                return value or None
+        return None
+
+    def adjust_position(
+        self,
+        *,
+        position_id: int,
+        account_id: Optional[int],
+        quantity: Optional[float] = None,
+        avg_cost: Optional[float] = None,
+        last_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Manually adjust a single position's quantity, avg_cost, or last_price."""
+        fields: Dict[str, Any] = {}
+        if quantity is not None:
+            fields["quantity"] = float(quantity)
+        if avg_cost is not None:
+            fields["avg_cost"] = float(avg_cost)
+        if last_price is not None:
+            fields["last_price"] = float(last_price)
+
+        if not fields:
+            raise ValueError("At least one of quantity, avg_cost, last_price must be provided")
+
+        updated = self.repo.update_position_fields(
+            position_id=position_id,
+            account_id=account_id,
+            fields=fields,
+        )
+        if updated is None:
+            raise ValueError(f"Position not found: id={position_id}")
+
+        return {
+            "id": updated.id,
+            "symbol": updated.symbol,
+            "market": updated.market,
+            "currency": updated.currency,
+            "quantity": float(updated.quantity or 0),
+            "avg_cost": float(updated.avg_cost or 0),
+            "last_price": float(updated.last_price or 0),
+            "total_cost": float(updated.total_cost or 0),
+            "updated_at": updated.updated_at.isoformat() if updated.updated_at else None,
+        }
 
     @staticmethod
     def _normalize_symbol_for_position(symbol: str) -> str:
@@ -1528,6 +2135,10 @@ class PortfolioService:
             "id": int(row.id),
             "account_id": int(row.account_id),
             "trade_uid": row.trade_uid,
+            "asset_category": row.asset_category,
+            "asset_subcategory": row.asset_subcategory,
+            "asset_risk_class": row.asset_risk_class,
+            "risk_level": row.risk_level,
             "symbol": row.symbol,
             "market": row.market,
             "currency": row.currency,
@@ -1546,6 +2157,10 @@ class PortfolioService:
         return {
             "id": int(row.id),
             "account_id": int(row.account_id),
+            "asset_category": row.asset_category,
+            "asset_subcategory": row.asset_subcategory,
+            "asset_risk_class": row.asset_risk_class,
+            "risk_level": row.risk_level,
             "event_date": row.event_date.isoformat() if row.event_date else "",
             "direction": row.direction,
             "amount": float(row.amount),
@@ -1608,3 +2223,217 @@ class PortfolioService:
         if market == "us":
             return "USD"
         return "CNY"
+
+    # ------------------------------------------------------------------
+    # Price refresh operations (batch update of cached prices)
+    # ------------------------------------------------------------------
+
+    def refresh_all_prices(
+        self,
+        *,
+        refresh_positions: bool = True,
+        refresh_indices: bool = True,
+        refresh_fx: bool = True,
+    ) -> Dict[str, Any]:
+        """Refresh cached prices across positions, indices, and FX rates."""
+        results: Dict[str, Any] = {}
+
+        if refresh_positions:
+            results["positions"] = self._refresh_position_prices()
+
+        if refresh_indices:
+            results["indices"] = self._refresh_index_prices()
+
+        if refresh_fx:
+            results["fx"] = self._refresh_fx_rates()
+
+        return results
+
+    def _refresh_position_prices(self) -> Dict[str, Any]:
+        from src.storage import get_db, PortfolioPosition
+
+        db = get_db()
+        with db.get_session() as s:
+            positions = s.query(PortfolioPosition).filter(PortfolioPosition.quantity > EPS).all()
+
+        refreshed = 0
+        failed = 0
+        failures: List[str] = []
+
+        for position in positions:
+            asset_cat = position.asset_category
+            symbol = self._normalize_symbol_for_position(position.symbol)
+            new_price, source, name = self._resolve_latest_price_with_name(symbol, asset_cat)
+
+            if new_price is not None and new_price > 0:
+                with db.get_session() as s:
+                    s.query(PortfolioPosition).filter_by(id=position.id).update({
+                        PortfolioPosition.last_price: new_price,
+                        PortfolioPosition.name: name or position.name,
+                        PortfolioPosition.updated_at: datetime.now(),
+                    })
+                    s.commit()
+                refreshed += 1
+            else:
+                failed += 1
+                failures.append(f"{position.symbol} (resolved={new_price})")
+
+        return {"refreshed": refreshed, "failed": failed, "failures": failures[:20]}
+
+    def _refresh_index_prices(self) -> Dict[str, Any]:
+        from src.storage import get_db, MarketQuote
+
+        indices = [
+            {"code": "000001", "market": "cn", "category": "index"},  # 上证综指
+            {"code": "399001", "market": "cn", "category": "index"},  # 深成指
+            {"code": "399006", "market": "cn", "category": "index"},  # 创业板指
+            {"code": "000016", "market": "cn", "category": "index"},  # 上证50
+            {"code": "000300", "market": "cn", "category": "index"},  # 沪深300
+        ]
+
+        refreshed = 0
+        failed = 0
+        failures: List[str] = []
+
+        try:
+            import akshare as ak
+            df = ak.stock_zh_index_spot_em()
+            spot_map = {}
+            for _, row in df.iterrows():
+                spot_map[row.get("代码", "")] = row
+
+            for idx_cfg in indices:
+                try:
+                    spot = spot_map.get(idx_cfg["code"])
+                    if spot is not None:
+                        latest = float(spot.get("最新价", 0) or 0)
+                        if latest > 0:
+                            db = get_db()
+                            with db.get_session() as s:
+                                q = s.query(MarketQuote).filter_by(
+                                    code=idx_cfg["code"], market=idx_cfg["market"]
+                                ).first()
+                                if q is None:
+                                    q = MarketQuote(
+                                        code=idx_cfg["code"],
+                                        market=idx_cfg["market"],
+                                        category=idx_cfg["category"],
+                                    )
+                                    s.add(q)
+                                q.name = spot.get("名称", "")
+                                q.latest_price = latest
+                                q.pct_change = float(spot.get("涨跌幅", 0) or 0)
+                                q.volume = float(spot.get("成交量", 0) or 0)
+                                q.prev_close = float(spot.get("昨收", 0) or 0)
+                                q.open_price = float(spot.get("今开", 0) or 0)
+                                q.high_price = float(spot.get("最高", 0) or 0)
+                                q.low_price = float(spot.get("最低", 0) or 0)
+                                q.updated_at = datetime.now()
+                                q.is_stale = False
+                                q.quote_date = date.today()
+                                s.commit()
+                                refreshed += 1
+                            continue
+                    failed += 1
+                    failures.append(f"{idx_cfg['code']} not found")
+                except Exception as e:
+                    failed += 1
+                    failures.append(f"{idx_cfg['code']}: {e}")
+        except ImportError:
+            failures.append("akshare not installed")
+        except Exception as e:
+            failures.append(f"Index fetch failed: {e}")
+            failed += len(indices)
+
+        return {"refreshed": refreshed, "failed": failed, "failures": failures[:20]}
+
+    def _refresh_fx_rates(self) -> Dict[str, Any]:
+        from src.storage import get_db, PortfolioFxRate
+
+        refreshed = 0
+        failed = 0
+        failures: List[str] = []
+
+        try:
+            import akshare as ak
+            currency_df = ak.currency_boc_safe()
+            if currency_df is not None and not currency_df.empty:
+                # Get the last row (most recent date - data is sorted ascending by date)
+                latest_row = currency_df.iloc[-1]
+                
+                # Map Chinese names to currency codes
+                target_currencies = {
+                    "美元": "USD",
+                    "港元": "HKD", 
+                    "欧元": "EUR",
+                    "英镑": "GBP",
+                    "日元": "JPY",
+                }
+                
+                for cn_name, currency_code in target_currencies.items():
+                    if cn_name in latest_row.index:
+                        try:
+                            rate = float(latest_row[cn_name])
+                            if rate > 0:
+                                # BOC rates are per 100 units, convert to per 1 unit
+                                rate = rate / 100.0
+                                db = get_db()
+                                with db.get_session() as s:
+                                    existing = s.query(PortfolioFxRate).filter_by(
+                                        from_currency=currency_code,
+                                        to_currency="CNY",
+                                        is_stale=False,
+                                    ).first()
+
+                                    if existing:
+                                        existing.rate = rate
+                                        existing.updated_at = datetime.now()
+                                        existing.is_stale = False
+                                        existing.rate_date = date.today()
+                                    else:
+                                        s.add(PortfolioFxRate(
+                                            from_currency=currency_code,
+                                            to_currency="CNY",
+                                            rate_date=date.today(),
+                                            rate=rate,
+                                            source="boc",
+                                            is_stale=False,
+                                        ))
+                                    s.commit()
+                                    refreshed += 1
+                            else:
+                                failed += 1
+                                failures.append(f"{currency_code}/CNY (rate={rate})")
+                        except (TypeError, ValueError, KeyError) as e:
+                            failed += 1
+                            failures.append(f"{currency_code}/CNY ({e})")
+                    else:
+                        failed += 1
+                        failures.append(f"{currency_code}/CNY (column not found)")
+            else:
+                failed += 5
+                failures.append("Currency data not available")
+        except ImportError:
+            failures.append("akshare not installed")
+        except Exception as e:
+            failures.append(f"FX fetch failed: {e}")
+            failed += 5
+
+        return {"refreshed": refreshed, "failed": failed, "failures": failures[:20]}
+
+    def _resolve_latest_price(self, symbol: str, asset_category: Optional[str]) -> Tuple[Optional[float], str]:
+        """Resolve latest price for a symbol (price, source)."""
+        result = self._resolve_latest_price_with_name(symbol, asset_category)
+        return result[0], result[2]
+
+    def _resolve_latest_price_with_name(self, symbol: str, asset_category: Optional[str]) -> Tuple[Optional[float], str, Optional[str]]:
+        if (asset_category or "").lower() == "fund":
+            fund_nav, fund_name = self._fetch_fund_nav(symbol)
+            if fund_nav is not None and fund_nav > 0:
+                return fund_nav, "fund_nav", fund_name
+        else:
+            realtime_price, provider, stock_name = self._fetch_realtime_position_price(symbol)
+            if realtime_price is not None and realtime_price > 0:
+                return realtime_price, "realtime_quote", stock_name
+
+        return None, "missing", None

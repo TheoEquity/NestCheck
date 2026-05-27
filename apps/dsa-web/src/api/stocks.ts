@@ -1,4 +1,6 @@
 import apiClient from './index';
+import type { StockHistoryResponse } from '../types/stocks';
+import { toCamelCase } from './utils';
 
 export type ExtractItem = {
   code?: string | null;
@@ -13,6 +15,13 @@ export type ExtractFromImageResponse = {
 };
 
 export const stocksApi = {
+  async getHistory(stockCode: string, days = 30): Promise<StockHistoryResponse> {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/stocks/${encodeURIComponent(stockCode)}/history`, {
+      params: { period: 'daily', days },
+    });
+    return toCamelCase<StockHistoryResponse>(response.data);
+  },
+
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
     formData.append('file', file);

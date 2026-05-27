@@ -19,6 +19,7 @@ import logging
 import mimetypes
 import os
 import re
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -131,11 +132,65 @@ from src.services.system_config_service import SystemConfigService
 async def app_lifespan(app: FastAPI):
     """Initialize and release shared services for the app lifecycle."""
     app.state.system_config_service = SystemConfigService()
+
+    # Start background price refresh task
+    refresh_task = asyncio.create_task(_periodic_price_refresh_loop())
+    app.state._price_refresh_task = refresh_task
+
     try:
         yield
     finally:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
         if hasattr(app.state, "system_config_service"):
             delattr(app.state, "system_config_service")
+        if hasattr(app.state, "_price_refresh_task"):
+            delattr(app.state, "_price_refresh_task")
+
+
+async def _periodic_price_refresh_loop():
+    """Background loop that refreshes prices every 5 minutes during trading hours."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    refresh_interval_seconds = 300  # 5 minutes
+
+    # Wait before first refresh so server can start normally
+    await asyncio.sleep(30)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        while True:
+            try:
+                now = datetime.now()
+                if now.weekday() < 5 and 9 <= now.hour < 15:
+                    logger.info("Background price refresh started")
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(executor, _run_price_refresh)
+                    logger.info("Background price refresh completed")
+            except Exception as exc:
+                logger.error("Price refresh loop error: %s", exc)
+
+            await asyncio.sleep(refresh_interval_seconds)
+
+
+def _run_price_refresh():
+    """Synchronous wrapper for price refresh (runs in thread pool)."""
+    from src.services.portfolio_service import PortfolioService
+
+    svc = PortfolioService()
+    result = svc.refresh_all_prices()
+    pos = result.get("positions", {})
+    idx = result.get("indices", {})
+    fx = result.get("fx", {})
+    logger.info(
+        "Price refresh: pos=%d/%d, indices=%d/%d, fx=%d/%d",
+        pos.get("refreshed", 0), pos.get("failed", 0),
+        idx.get("refreshed", 0), idx.get("failed", 0),
+        fx.get("refreshed", 0), fx.get("failed", 0),
+    )
 
 
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:

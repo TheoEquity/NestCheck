@@ -43,6 +43,7 @@ from sqlalchemy import (
     desc,
     event,
     func,
+    inspect,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import (
@@ -435,6 +436,10 @@ class PortfolioTrade(Base):
     price = Column(Float, nullable=False)
     fee = Column(Float, default=0.0)
     tax = Column(Float, default=0.0)
+    asset_category = Column(String(32))
+    asset_subcategory = Column(String(64))
+    asset_risk_class = Column(String(8))
+    risk_level = Column(String(8))
     note = Column(String(255))
     dedup_hash = Column(String(64), index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
@@ -457,6 +462,10 @@ class PortfolioCashLedger(Base):
     direction = Column(String(8), nullable=False)  # in/out
     amount = Column(Float, nullable=False)
     currency = Column(String(8), nullable=False, default='CNY')
+    asset_category = Column(String(32))
+    asset_subcategory = Column(String(64))
+    asset_risk_class = Column(String(8))
+    risk_level = Column(String(8))
     note = Column(String(255))
     created_at = Column(DateTime, default=datetime.now, index=True)
 
@@ -496,6 +505,7 @@ class PortfolioPosition(Base):
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     cost_method = Column(String(8), nullable=False, default='fifo')
     symbol = Column(String(16), nullable=False, index=True)
+    name = Column(String(64), nullable=True)
     market = Column(String(8), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     quantity = Column(Float, nullable=False, default=0.0)
@@ -504,6 +514,9 @@ class PortfolioPosition(Base):
     last_price = Column(Float, nullable=False, default=0.0)
     market_value_base = Column(Float, nullable=False, default=0.0)
     unrealized_pnl_base = Column(Float, nullable=False, default=0.0)
+    asset_category = Column(String(32))
+    asset_subcategory = Column(String(64))
+    asset_risk_class = Column(String(8))
     valuation_currency = Column(String(8), nullable=False, default='CNY')
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
 
@@ -595,6 +608,38 @@ class PortfolioFxRate(Base):
             name='uix_portfolio_fx_pair_date',
         ),
     )
+
+
+class MarketQuote(Base):
+    """Cached real-time or latest quotes for market indices and other non-portfolio symbols."""
+
+    __tablename__ = 'market_quotes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(16), nullable=False, index=True)
+    name = Column(String(64), nullable=True)
+    latest_price = Column(Float, nullable=True)
+    open_price = Column(Float, nullable=True)
+    high_price = Column(Float, nullable=True)
+    low_price = Column(Float, nullable=True)
+    prev_close = Column(Float, nullable=True)
+    pct_change = Column(Float, nullable=True)
+    volume = Column(Float, nullable=True)
+    amount = Column(Float, nullable=True)
+    market = Column(String(8), nullable=False, default='cn')
+    category = Column(String(32), nullable=False, default='index')
+    quote_date = Column(Date, nullable=True)
+    quote_time = Column(DateTime, nullable=True)
+    source = Column(String(32), nullable=False, default='auto')
+    is_stale = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('code', 'market', name='uix_market_quote_code_market'),
+    )
+
+    def __repr__(self):
+        return f"<MarketQuote(code={self.code}, name={self.name}, latest_price={self.latest_price})>"
 
 
 class ConversationMessage(Base):
@@ -843,6 +888,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
             # 创建所有表
             Base.metadata.create_all(self._engine)
+            self._ensure_portfolio_asset_metadata_columns()
 
             self._initialized = True
             logger.info(f"数据库初始化完成: {db_url}")
@@ -916,6 +962,38 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     def _is_file_sqlite_database(self) -> bool:
         database = (self._engine.url.database or "").strip()
         return bool(database) and database.lower() != ":memory:"
+
+    def _ensure_portfolio_asset_metadata_columns(self) -> None:
+        required_columns = {
+            "portfolio_trades": {
+                "asset_category": "VARCHAR(32)",
+                "asset_subcategory": "VARCHAR(64)",
+                "asset_risk_class": "VARCHAR(8)",
+                "risk_level": "VARCHAR(8)",
+            },
+            "portfolio_cash_ledger": {
+                "asset_category": "VARCHAR(32)",
+                "asset_subcategory": "VARCHAR(64)",
+                "asset_risk_class": "VARCHAR(8)",
+                "risk_level": "VARCHAR(8)",
+            },
+            "portfolio_positions": {
+                "asset_category": "VARCHAR(32)",
+                "asset_subcategory": "VARCHAR(64)",
+                "asset_risk_class": "VARCHAR(8)",
+            },
+        }
+
+        inspector = inspect(self._engine)
+        with self._engine.begin() as connection:
+            for table_name, columns in required_columns.items():
+                existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+                for column_name, column_type in columns.items():
+                    if column_name in existing_columns:
+                        continue
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+                    )
 
     def _run_write_transaction(
         self,

@@ -30,6 +30,22 @@ vi.mock('./pages/HomePage', () => ({
   default: () => <div data-testid="home-page">Home</div>,
 }));
 
+vi.mock('./pages/AssetDashboardPage', () => ({
+  default: () => <div data-testid="asset-dashboard-page">Asset Dashboard</div>,
+}));
+
+vi.mock('./pages/AssetManagementPage', () => ({
+  default: () => <div data-testid="asset-management-page">Asset Management</div>,
+}));
+
+vi.mock('./pages/AssetInitializationPage', () => ({
+  default: () => <div data-testid="asset-initialization-page">Asset Initialization</div>,
+}));
+
+vi.mock('./pages/AssetEventsPage', () => ({
+  default: () => <div data-testid="asset-events-page">Asset Events</div>,
+}));
+
 vi.mock('./pages/ChatPage', () => ({
   default: () => {
     if (chatPageShouldThrow.value) {
@@ -132,7 +148,7 @@ describe('App routing behavior', () => {
 
     render(<App />);
 
-    expect(await screen.findByTestId('home-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('asset-dashboard-page')).toBeInTheDocument();
     expect(screen.queryByTestId('login-page')).not.toBeInTheDocument();
   });
 
@@ -150,9 +166,9 @@ describe('App routing behavior', () => {
       expect(screen.getByRole('button', { name: '返回首页' })).toBeInTheDocument();
 
       chatPageShouldThrow.value = false;
-      fireEvent.click(screen.getByRole('link', { name: '持仓' }));
+      fireEvent.click(screen.getByRole('link', { name: '资产初始化' }));
 
-      expect(await screen.findByTestId('portfolio-page')).toBeInTheDocument();
+      expect(await screen.findByTestId('asset-initialization-page')).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: '页面加载失败' })).not.toBeInTheDocument();
     } finally {
       consoleError.mockRestore();

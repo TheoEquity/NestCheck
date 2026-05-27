@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] 新增 #1391 Phase 0 运行诊断契约文档，明确 trace_id、诊断摘要、关键链路范围与脱敏/fail-open/retention 边界。
 - [新功能] 落地 #1391 Phase 1 运行诊断最小链路：任务/SSE 追加 trace_id，并记录日线与实时行情 ProviderRun 快照。
 - [改进] Web 路由页面改为按需加载，降低首包体积并增加路由加载失败恢复提示。
+- [改进] 资产初始化页重构为三段式建账工作台，资产事件页升级为高密度筛选与表格式台账视图。
 - [修复] Docker 默认部署移除 `.env` 单文件挂载，避免 WebUI 保存配置时因 `os.replace` 更新挂载点触发 `Device or resource busy`。
 - [修复] 收敛 #1391 Phase 0 A 股代码归属边界：补齐 `SH`/`SZ` 前缀场景的归属一致性，明确 `data_provider/baostock_fetcher.py`、`data_provider/pytdx_fetcher.py`、`data_provider/tushare_fetcher.py` 的本轮修复范围。
 - [改进] Web 完整报告 Markdown 抽屉改为按需加载。
@@ -30,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 新增运行态市场阶段上下文构造与降级测试。
 - [文档] 新增 AnalysisContextPack P0 上下文盘点，明确字段质量状态、现有状态映射和首版 pack 边界。
 - [新功能] 落地 #1391 Phase 2 运行诊断摘要：生成用户可读 RunDiagnosticSummary，提供历史报告诊断 API 与脱敏复制文本。
+- [改进] 收紧资产主界面、资产管理、资产初始化与资产事件页的页头、卡片、筛选区和表格密度，进一步贴近传统金融后台风格。
+- [改进] 资产初始化页改为独立单页工作台，只保留建账户与表格录入初始资产两段流程，去掉历史明细干扰。
 - [文档] 明确 #1391 Phase 2 的结构化检测告警为非配置迁移信号：`agent_max_steps`/`agent_orchestrator_timeout_s` 非法值会 fallback 至默认并产生日志告警，新增诊断链路仅新增 `context_snapshot`/`RunDiagnosticSummary` 读写字段，不改写 `litellm_model`、`agent_litellm_model`、`openai_base_url`、LLM channel 路由或配置迁移语义。
 - [新功能] 落地 #1391 Phase 3 运行诊断可见性：报告详情和任务面板默认折叠展示运行状态、trace 与可复制排障信息；后端通过 `api/v1/history/{record_id}/diagnostics` 与 `context_snapshot.diagnostics` 提供历史链路回填。
 - [文档] 补充 #1391 Phase 3 兼容性说明：记录后端诊断持久化、历史查询与通知回写链路变更边界与回滚策略，并补齐后端门禁级验证要求。
@@ -43,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 问股新增默认关闭的可见对话上下文压缩，支持 Web 开关、Agent 高级 preset、滚动摘要和最近轮次原文保护，降低长会话 token 消耗。
 - [改进] P2-min：LLM Prompt 注入市场阶段上下文。
 - [修复] 问股 single-agent 新增 provider-aware trace 分轨，跨轮保留 DeepSeek V4 thinking + tool-call 的 `reasoning_content` 与工具协议材料。
+- [改进] Web 资产模块新增资产主界面、资产管理、资产初始化与资产事件四页拆分，首页切换为资产驾驶舱视图。
+- [改进] 资产初始化页改为单行建账加高密度资产明细表，移除税费/手续费列，新增资产大类、资产细类和风险分类录入字段，并同步扩展后端资产台账存储字段。
+- [改进] 资产初始化页新增可展开的已建账户列表，支持回填当前账户信息与已入库资产；账户删除同步彻底清空该账户关联资产台账。
+- [改进] 资产初始化页的“风险分类”改为独立使用 `asset_risk_class` 字段，与系统原有 `risk_level` 语义隔离，避免混用。
+- [改进] 资产管理页升级为更高密度的组合监控台，新增账户维度总览、筛选后摘要和更完整的持仓明细列。
 
 ## [3.18.0] - 2026-05-21
 

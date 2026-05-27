@@ -74,6 +74,18 @@ describe('SidebarNav', () => {
     expect(alertsLink).toHaveClass('font-medium');
   });
 
+  it('renders the asset initialization navigation item', () => {
+    render(
+      <MemoryRouter initialEntries={['/assets/init']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    const initLink = screen.getByRole('link', { name: '资产初始化' });
+    expect(initLink).toHaveAttribute('href', '/assets/init');
+    expect(initLink).toHaveClass('font-medium');
+  });
+
   it('opens the logout confirmation and confirms logout', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>

@@ -65,6 +65,18 @@ def summarize_exception(exc: Exception) -> Tuple[str, str]:
     return error_type, " ".join(message.split())
 
 
+def is_forex_or_bond_code(stock_code: str) -> bool:
+    """Check if code is forex or bond symbol that should only be handled by Yfinance."""
+    code = stock_code.strip().upper()
+    # Forex: DX-Y.NYB, USDCNY=X, EURUSD=X, etc.
+    # Bonds: ^TNX (10Y Treasury), ^TYX (30Y), etc.
+    if code.startswith('^'):
+        return True
+    if 'NYB' in code or 'NXB' in code or '=X' in code or 'USD' in code or 'EUR' in code or 'GBP' in code or 'JPY' in code:
+        return True
+    return False
+
+
 def normalize_stock_code(stock_code: str) -> str:
     """
     Normalize stock code by stripping exchange prefixes/suffixes.
@@ -1487,20 +1499,28 @@ class DataFetcherManager:
 
         # ----------------------------------------------------------
         # 美股 (指数 + 个股) / 港股 — 专用双源路由
-        #   配置长桥后: Longbridge 首选, YFinance/AkShare 补充
-        #   未配置长桥: YFinance/AkShare 首选, Longbridge 补充
-        #   美股指数:   始终 YFinance 首选（Longbridge 不提供指数行情）
+        #   配置长桥后：Longbridge 首选，YFinance/AkShare 补充
+        #   未配置长桥：YFinance/AkShare 首选，Longbridge 补充
+        #   美股指数：始终 YFinance 首选（Longbridge 不提供指数行情）
+        #   外汇/债券：仅 YFinance 支持
         # ----------------------------------------------------------
         is_us_index = is_us_index_code(stock_code)
-        is_us = is_us_index or _is_us_code(stock_code)
+        is_forex_bond = is_forex_or_bond_code(stock_code)
+        is_us = is_us_index or is_forex_bond or _is_us_code(stock_code)
         is_hk = (not is_us) and _is_hk_market(stock_code)
 
         if is_us or is_hk:
             prefer_lb = self._longbridge_preferred() and not is_us_index
             if is_us:
-                primary_src = "LongbridgeFetcher" if prefer_lb else "YfinanceFetcher"
-                secondary_src = "YfinanceFetcher" if prefer_lb else "LongbridgeFetcher"
-                market_label = "美股指数" if is_us_index else "美股"
+                # 外汇/债券只能用 Yfinance
+                if is_forex_bond:
+                    primary_src = "YfinanceFetcher"
+                    secondary_src = None
+                    market_label = "外汇/债券"
+                else:
+                    primary_src = "LongbridgeFetcher" if prefer_lb else "YfinanceFetcher"
+                    secondary_src = "YfinanceFetcher" if prefer_lb else "LongbridgeFetcher"
+                    market_label = "美股指数" if is_us_index else "美股"
                 primary_kw: dict = {}
                 secondary_kw: dict = {}
             else:

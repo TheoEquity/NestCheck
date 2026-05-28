@@ -31,7 +31,7 @@ from tenacity import (
     before_sleep_log,
 )
 
-from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code
+from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code, is_forex_or_bond_code
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
 from .us_index_mapping import get_us_index_yf_symbol, is_us_stock_code
 
@@ -647,23 +647,77 @@ class YfinanceFetcher(BaseFetcher):
             logger.info(f"[Yfinance] 获取美股指数 {user_code} 实时行情成功: 价格={price}")
             return quote
         except Exception as e:
-            logger.warning(f"[Yfinance] 获取美股指数 {user_code} 实时行情失败: {e}")
+            logger.warning(f"[Yfinance] 获取美股指数 {user_code} 实时行情失败：{e}")
+            return None
+
+    def _get_forex_or_bond_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+        """
+        获取外汇或债券实时行情（通过 yfinance）
+        
+        支持：
+        - 外汇：DX-Y.NYB (美元指数), USDCNY=X (美元/人民币)
+        - 债券：^TNX (10 年期美债), ^TYX (30 年期美债)
+        
+        Args:
+            stock_code: 外汇或债券代码
+            
+        Returns:
+            UnifiedRealtimeQuote 对象，获取失败返回 None
+        """
+        import yfinance as yf
+        
+        symbol = stock_code.strip()
+        logger.debug(f"[Yfinance] 获取外汇/债券 {symbol} 实时行情")
+        
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            if not info or info.get('regularMarketPrice') is None:
+                logger.warning(f"[Yfinance] {symbol} 无数据")
+                return None
+            
+            price = float(info.get('regularMarketPrice', 0))
+            prev_close = float(info.get('previousClose', price))
+            change = price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+            
+            return UnifiedRealtimeQuote(
+                code=symbol,
+                name=info.get('shortName', info.get('symbol', symbol)),
+                price=price,
+                change_amount=change,
+                change_pct=change_pct,
+                open_price=float(info.get('regularMarketOpen', 0)) or None,
+                high=float(info.get('dayHigh', 0)) or None,
+                low=float(info.get('dayLow', 0)) or None,
+                pre_close=prev_close,
+                volume=int(info.get('regularMarketVolume', 0)) or None,
+                amount=None,  # 外汇/债券无成交额
+            )
+            
+        except Exception as e:
+            logger.warning(f"[Yfinance] 获取外汇/债券 {symbol} 失败：{e}")
             return None
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
-        获取美股/美股指数实时行情数据
+        获取美股/美股指数/外汇/债券实时行情数据
 
-        支持美股股票（AAPL、TSLA）和美股指数（SPX、DJI 等）。
+        支持美股股票（AAPL、TSLA）、美股指数（SPX、DJI 等）、外汇（USDCNY=X）和美债（^TNX）。
         数据来源：yfinance Ticker.info
 
         Args:
-            stock_code: 美股代码或指数代码，如 'AMD', 'AAPL', 'SPX', 'DJI'
+            stock_code: 美股代码、指数代码、外汇或债券代码
 
         Returns:
             UnifiedRealtimeQuote 对象，获取失败返回 None
         """
         import yfinance as yf
+
+        # 外汇/债券：直接使用代码（如 DX-Y.NYB, USDCNY=X, ^TNX）
+        if is_forex_or_bond_code(stock_code):
+            return self._get_forex_or_bond_quote(stock_code)
 
         # 美股指数：使用映射（SPX -> ^GSPC）
         yf_symbol, index_name = get_us_index_yf_symbol(stock_code)

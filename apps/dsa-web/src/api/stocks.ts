@@ -1,5 +1,5 @@
 import apiClient from './index';
-import type { StockHistoryResponse } from '../types/stocks';
+import type { StockHistoryResponse, StockQuote } from '../types/stocks';
 import { toCamelCase } from './utils';
 
 export type ExtractItem = {
@@ -15,6 +15,11 @@ export type ExtractFromImageResponse = {
 };
 
 export const stocksApi = {
+  async getQuote(stockCode: string): Promise<StockQuote> {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/stocks/${encodeURIComponent(stockCode)}/quote`);
+    return toCamelCase<StockQuote>(response.data);
+  },
+
   async getHistory(stockCode: string, days = 30): Promise<StockHistoryResponse> {
     const response = await apiClient.get<Record<string, unknown>>(`/api/v1/stocks/${encodeURIComponent(stockCode)}/history`, {
       params: { period: 'daily', days },

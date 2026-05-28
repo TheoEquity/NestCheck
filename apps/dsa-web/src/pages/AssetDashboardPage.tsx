@@ -1,9 +1,9 @@
 import type React from 'react';
-import { useEffect, useMemo, useState } from 'react';
-import { Area, AreaChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { stocksApi } from '../api/stocks';
-import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader, StatCard } from '../components/common';
-import type { KLineData } from '../types/stocks';
+import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader } from '../components/common';
+import type { StockQuote } from '../types/stocks';
 import {
   formatMoney,
   formatPct,
@@ -18,18 +18,16 @@ type MarketCard = {
   code: string;
 };
 
-const INDEX_LABELS: Record<string, string> = {
-  '000001': '上证指数',
-  '399001': '深证成指',
-  '399006': '创业板指',
-  '000016': '上证50',
-  '000300': '沪深300',
-};
-
 const MARKET_CARDS: MarketCard[] = [
   { key: 'sh', label: '上证指数', code: 'sh000001' },
-  { key: 'sz', label: '深证成指', code: 'sz399001' },
+  { key: 'sz', label: '深圳成指', code: 'sz399001' },
   { key: 'cyb', label: '创业板指', code: 'sz399006' },
+  { key: 'dji', label: '道琼斯', code: '^DJI' },
+  { key: 'ixic', label: '纳斯达克', code: '^IXIC' },
+  { key: 'gspc', label: '标普500', code: '^GSPC' },
+  { key: 'dxy', label: '美元指数', code: 'DX-Y.NYB' },
+  { key: 'usdcny', label: '美元/人民币汇率', code: 'USDCNY=X' },
+  { key: 'tnx', label: '10年期美债', code: '^TNX' },
 ];
 
 const getStaticHealthTone = (score: number): 'success' | 'warning' | 'danger' => {
@@ -47,27 +45,37 @@ const getStaticHealthLabel = (score: number): string => {
 
 const AssetDashboardPage: React.FC = () => {
   useEffect(() => {
-    document.title = '资产主界面 - DSA';
+    document.title = '资产主界面 - NestCheck';
   }, []);
 
-  const { accounts, positions, indices, error, syncData, isRefreshing } = usePortfolioOverview();
-  const [seriesMap, setSeriesMap] = useState<Record<string, KLineData[]>>({});
+  const { positions, error, syncData, isRefreshing } = usePortfolioOverview();
+  const [quoteMap, setQuoteMap] = useState<Record<string, StockQuote | null>>({});
+  const [isRefreshingMarketData, setIsRefreshingMarketData] = useState(false);
+  const marketScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
-    void Promise.all(
+    const loadMarketSeries = async () => {
+      setIsRefreshingMarketData(true);
+      await Promise.all(
       MARKET_CARDS.map(async (item) => {
         try {
-          const response = await stocksApi.getHistory(item.code, 60);
-          return [item.key, response.data] as const;
+          const response = await stocksApi.getQuote(item.code);
+          return [item.key, response] as const;
         } catch {
-          return [item.key, []] as const;
+          return [item.key, null] as const;
         }
       }),
-    ).then((entries) => {
-      if (!active) return;
-      setSeriesMap(Object.fromEntries(entries));
-    });
+      ).then((entries) => {
+        if (!active) return;
+        setQuoteMap(Object.fromEntries(entries));
+      }).finally(() => {
+        if (!active) return;
+        setIsRefreshingMarketData(false);
+      });
+    };
+
+    void loadMarketSeries();
     return () => {
       active = false;
     };
@@ -122,12 +130,22 @@ const AssetDashboardPage: React.FC = () => {
     ] as const;
   }, [highRiskPositionCount, topHoldings, topPositionPct, totalCost, totalMarketValue, totalUnrealizedPnl]);
 
+  const scrollMarketCards = (direction: 'left' | 'right') => {
+    const container = marketScrollRef.current;
+    if (!container) return;
+    const step = Math.max(container.clientWidth * 0.92, 320);
+    container.scrollBy({
+      left: direction === 'left' ? -step : step,
+      behavior: 'smooth',
+    });
+  };
+
   return (
     <AppPage className="max-w-[1600px] space-y-3">
       <PageHeader
-        eyebrow="Asset Cockpit"
-        title="资产主界面"
-        description="先把资产全局看清楚，再进入分类管理、初始化与事件录入。"
+        eyebrow="NestCheck"
+        title="稳巢"
+        description={'给个人投资者的资产体检与价值配置助手：不为你交易，只帮你把"巢"搭稳。'}
         className="!rounded-xl !px-4 !py-3"
         actions={
           <Button
@@ -144,67 +162,99 @@ const AssetDashboardPage: React.FC = () => {
 
       {error ? <ApiErrorAlert error={error} /> : null}
 
-      <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="总资产" value={formatMoney(totalMarketValue, 'CNY')} className="!rounded-xl !p-3" />
-        <StatCard label="总收益" value={formatMoney(totalUnrealizedPnl, 'CNY')} hint={formatPct(totalCost > 0 ? (totalUnrealizedPnl / totalCost) * 100 : 0)} className="!rounded-xl !p-3" />
-        <StatCard label="账户数量" value={accounts.length} hint={`持仓标的 ${positions.length} 个`} className="!rounded-xl !p-3" />
-        <StatCard label="健康度" value={getStaticHealthLabel(healthScore)} hint={`Top1 ${formatPct(topPositionPct)}`} tone={getStaticHealthTone(healthScore)} className="!rounded-xl !p-3" />
-      </section>
-
-      {indices.length > 0 && (
-        <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          {indices.map((idx) => (
-            <div key={idx.code} className="rounded-xl border border-border/60 bg-surface/60 p-3">
-              <div className="text-xs text-secondary-text">{INDEX_LABELS[idx.code] || idx.code}</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">
-                {idx.latestPrice != null ? idx.latestPrice.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'}
-              </div>
-              {idx.pctChange != null && (
-                <div className={`mt-0.5 text-xs ${idx.pctChange >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                  {idx.pctChange >= 0 ? '+' : ''}{idx.pctChange.toFixed(2)}%
-                </div>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
-
       <section className="grid gap-2 xl:grid-cols-12">
         <Card className="xl:col-span-8 !rounded-xl" padding="sm">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">主要市场日线概览</h2>
-            <span className="text-xs text-secondary-text">近 60 个交易日，非实时</span>
+            <h2 className="text-base font-semibold text-foreground">市场实时风向</h2>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setIsRefreshingMarketData(true);
+                  void Promise.all(
+                    MARKET_CARDS.map(async (item) => {
+                      try {
+                        const response = await stocksApi.getQuote(item.code);
+                        return [item.key, response] as const;
+                      } catch {
+                        return [item.key, null] as const;
+                      }
+                    }),
+                  ).then((entries) => {
+                    setQuoteMap(Object.fromEntries(entries));
+                  }).finally(() => {
+                    setIsRefreshingMarketData(false);
+                  });
+                }}
+                disabled={isRefreshingMarketData}
+                className="!px-3 !py-1"
+              >
+                {isRefreshingMarketData ? '刷新中...' : '刷新数据'}
+              </Button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="向左查看市场卡片"
+                  onClick={() => scrollMarketCards('left')}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-background/60 text-secondary-text transition-colors hover:text-foreground"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="向右查看市场卡片"
+                  onClick={() => scrollMarketCards('right')}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-background/60 text-secondary-text transition-colors hover:text-foreground"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            ref={marketScrollRef}
+            className="flex gap-2 overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {MARKET_CARDS.map((item) => {
-              const points = seriesMap[item.key] || [];
-              const latest = points.at(-1);
-              const first = points[0];
-              const change = latest && first ? ((latest.close - first.close) / first.close) * 100 : null;
+              const quote = quoteMap[item.key];
+              const tone = quote?.changePercent != null && quote.changePercent >= 0 ? 'success' : 'danger';
+              const changeText = quote?.change == null
+                ? '--'
+                : `${quote.change >= 0 ? '+' : ''}${quote.change.toLocaleString('zh-CN', { maximumFractionDigits: 4 })}`;
+              const changePctText = quote?.changePercent == null
+                ? '--'
+                : `${quote.changePercent >= 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%`;
+              const priceText = quote?.currentPrice != null
+                ? quote.currentPrice.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
+                : '--';
               return (
-                <div key={item.key} className="rounded-lg border border-border/60 bg-background/60 p-2.5">
+                <div
+                  key={item.key}
+                  className="w-[85%] shrink-0 rounded-lg border border-border/60 bg-background/60 p-2.5 sm:w-[48%] xl:w-[calc((100%-1rem)/3)]"
+                >
                   <div className="mb-1.5 flex items-center justify-between">
                     <div>
                       <div className="text-sm font-medium text-foreground">{item.label}</div>
                       <div className="text-[11px] text-secondary-text">{item.code}</div>
                     </div>
-                    <Badge variant={change != null && change >= 0 ? 'success' : 'danger'}>
-                      {change == null ? '--' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
+                    <Badge variant={tone}>
+                      {changePctText}
                     </Badge>
                   </div>
-                  <div className="h-24">
-                    {points.length > 1 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={points}>
-                          <Tooltip />
-                          <Area type="monotone" dataKey="close" stroke="var(--color-cyan)" fill="rgba(0, 212, 255, 0.12)" strokeWidth={1.6} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-secondary-text">暂无日线数据</div>
-                    )}
+                  <div className="rounded-lg border border-border/40 bg-surface/50 px-3 py-4">
+                    <div className="text-2xl font-semibold text-foreground">{priceText}</div>
+                    <div className={`mt-1 text-sm ${quote?.changePercent != null && quote.changePercent >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                      {changeText}
+                      <span className="ml-1">{quote?.changePercent == null ? '' : changePctText}</span>
+                    </div>
                   </div>
-                  <div className="mt-1.5 text-[11px] text-secondary-text">最新收盘 {latest?.close?.toFixed(2) ?? '--'}</div>
+                  <div className="mt-2 space-y-1 text-[11px] text-secondary-text">
+                    <div>开盘 {quote?.open != null ? quote.open.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</div>
+                    <div>昨收 {quote?.prevClose != null ? quote.prevClose.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</div>
+                    <div>更新时间 {quote?.updateTime ? quote.updateTime.slice(11, 19) : '--'}</div>
+                  </div>
                 </div>
               );
             })}

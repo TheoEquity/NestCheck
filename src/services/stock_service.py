@@ -7,31 +7,76 @@
 职责：
 1. 封装股票数据获取逻辑
 2. 提供实时行情和历史数据接口
+3. 本地缓存行情数据，减少频繁 API 调用
 """
 
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+from pathlib import Path
+import json
 
 from src.repositories.stock_repo import StockRepository
 
 logger = logging.getLogger(__name__)
+
+# 行情缓存配置
+QUOTE_CACHE_DIR = Path("/tmp/nestcheck_quote")
+QUOTE_CACHE_DIR.mkdir(exist_ok=True)
+QUOTE_CACHE_EXPIRY_SECONDS = 60  # 行情缓存过期时间（秒）
 
 
 class StockService:
     """
     股票数据服务
     
-    封装股票数据获取的业务逻辑
+    封装股票数据获取的业务逻辑，含本地缓存机制
     """
     
     def __init__(self):
         """初始化股票数据服务"""
         self.repo = StockRepository()
     
+    def _load_quote_cache(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        """加载行情缓存"""
+        cache_file = QUOTE_CACHE_DIR / f"{stock_code}.json"
+        if not cache_file.exists():
+            return None
+        
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 检查缓存是否过期
+            cached_at = datetime.fromisoformat(data.get("_cached_at", "1970-01-01"))
+            if datetime.now() - cached_at > timedelta(seconds=QUOTE_CACHE_EXPIRY_SECONDS):
+                logger.debug(f"行情缓存已过期 {stock_code}")
+                return None
+            
+            return data
+        except Exception as e:
+            logger.warning(f"读取行情缓存失败 {stock_code}: {e}")
+            return None
+    
+    def _save_quote_cache(self, stock_code: str, data: Dict[str, Any]):
+        """保存行情缓存"""
+        cache_file = QUOTE_CACHE_DIR / f"{stock_code}.json"
+        data_with_timestamp = {
+            **data,
+            "_cached_at": datetime.now().isoformat()
+        }
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(data_with_timestamp, f, ensure_ascii=False, indent=2)
+            logger.debug(f"行情缓存已保存 {stock_code}")
+        except Exception as e:
+            logger.error(f"保存行情缓存失败 {stock_code}: {e}")
+    
     def get_realtime_quote(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """
         获取股票实时行情
+        
+        优先从缓存读取，缓存过期后再调用数据源
         
         Args:
             stock_code: 股票代码
@@ -39,6 +84,12 @@ class StockService:
         Returns:
             实时行情数据字典
         """
+        # 先查缓存
+        cache = self._load_quote_cache(stock_code)
+        if cache:
+            logger.debug(f"缓存命中：{stock_code}")
+            return cache
+        
         try:
             # 调用数据获取器获取实时行情
             from data_provider.base import DataFetcherManager
@@ -49,6 +100,45 @@ class StockService:
             if quote is None:
                 logger.warning(f"获取 {stock_code} 实时行情失败")
                 return None
+            
+            # UnifiedRealtimeQuote 是 dataclass，使用 getattr 安全访问字段
+            # 字段映射：UnifiedRealtimeQuote -> API 响应
+            # - code -> stock_code
+            # - name -> stock_name
+            # - price -> current_price
+            # - change_amount -> change
+            # - change_pct -> change_percent
+            # - open_price -> open
+            # - high -> high
+            # - low -> low
+            # - pre_close -> prev_close
+            # - volume -> volume
+            # - amount -> amount
+            result = {
+                "stock_code": getattr(quote, "code", stock_code),
+                "stock_name": getattr(quote, "name", None),
+                "current_price": getattr(quote, "price", 0.0) or 0.0,
+                "change": getattr(quote, "change_amount", None),
+                "change_percent": getattr(quote, "change_pct", None),
+                "open": getattr(quote, "open_price", None),
+                "high": getattr(quote, "high", None),
+                "low": getattr(quote, "low", None),
+                "prev_close": getattr(quote, "pre_close", None),
+                "volume": getattr(quote, "volume", None),
+                "amount": getattr(quote, "amount", None),
+                "update_time": datetime.now().isoformat(),
+            }
+            
+            # 保存到缓存
+            self._save_quote_cache(stock_code, result)
+            return result
+            
+        except ImportError:
+            logger.warning("DataFetcherManager 未找到，使用占位数据")
+            return self._get_placeholder_quote(stock_code)
+        except Exception as e:
+            logger.error(f"获取实时行情失败：{e}", exc_info=True)
+            return None
             
             # UnifiedRealtimeQuote 是 dataclass，使用 getattr 安全访问字段
             # 字段映射: UnifiedRealtimeQuote -> API 响应

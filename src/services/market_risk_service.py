@@ -4,14 +4,10 @@
 市场风险指标服务
 ===================================
 
-职责：
-1. 计算股市、债市、汇市的风险指标
-2. 生成市场综合体温和配置建议
-3. 为 LLM 评论提供数据基础
+参考：/workspace/Code_01.py
 """
 
 import akshare as ak
-import pandas as pd
 from datetime import datetime
 from typing import Dict, Any
 import logging
@@ -40,40 +36,11 @@ def _fetch_with_timeout(func, timeout=10, default=None):
         signal.signal(signal.SIGALRM, old_handler)
 
 
-def _stock_valuation_percentile() -> Dict[str, Any]:
-    """
-    股市：用汇率市场的美元预期间接反映 A 股情绪
-    
-    注：A 股实时接口不稳定，后续寻找替代数据源
-    """
-    # 简化返回占位，等待更好的数据源
-    return {
-        "status": "数据维护中",
-        "badge": "default",
-        "description": "A 股实时数据接口维护中"
-    }
-
-
-def _bond_market_signal() -> Dict[str, Any]:
-    """
-    债市信号：中美 10 年期国债收益率
-    
-    数据源：bond_zh_us_rate
-    注：接口有时不稳定，返回占位数据
-    """
-    # 简化：返回占位，等待接口稳定
-    return {
-        "status": "数据维护中",
-        "badge": "default",
-        "description": "债券数据接口维护中"
-    }
-
-
 def _dollar_index() -> Dict[str, Any]:
     """
-    美元强弱：用美元对人民币汇率代表
+    美元指数：用美元对人民币汇率代表
     
-    数据源：currency_boc_safe
+    数据源：currency_boc_safe (中国银行外汇牌价)
     """
     def _fetch():
         df = ak.currency_boc_safe()
@@ -113,9 +80,67 @@ def _dollar_index() -> Dict[str, Any]:
     })
 
 
+def _bond_spread() -> Dict[str, Any]:
+    """
+    债市信号：中美 10 年期国债收益率利差
+    
+    数据源：bond_zh_us_rate
+    """
+    def _fetch():
+        df = ak.bond_zh_us_rate()
+        latest = df.iloc[-1]
+        
+        us_10y = float(latest['美国国债收益率 10 年'])
+        cn_10y = float(latest['中国国债收益率 10 年'])
+        spread = us_10y - cn_10y
+        
+        # 根据利差判断
+        if spread > 3:
+            status = "倒挂扩大"
+            badge = "danger"
+            description = "中美利差高位，人民币贬值压力大"
+        elif spread > 2:
+            status = "偏高水平"
+            badge = "warning"
+            description = "中美利差偏高，关注汇率波动"
+        else:
+            status = "正常"
+            badge = "success"
+            description = "利率环境稳定"
+        
+        return {
+            "us_10y": round(us_10y, 2),
+            "cn_10y": round(cn_10y, 2),
+            "spread": round(spread, 2),
+            "status": status,
+            "badge": badge,
+            "description": description
+        }
+    
+    return _fetch_with_timeout(_fetch, timeout=10, default={
+        "status": "获取失败",
+        "badge": "default",
+        "description": "请稍后刷新"
+    })
+
+
+def _stock_market() -> Dict[str, Any]:
+    """
+    股市：用美元汇率预判反映市场情绪
+    
+    注：A 股实时接口不稳定，暂用汇率替代
+    """
+    # 简化：暂无合适数据源
+    return {
+        "status": "数据维护中",
+        "badge": "default",
+        "description": "A 股数据接口维护中"
+    }
+
+
 def _vix_index() -> Dict[str, Any]:
     """
-    VIX 恐慌指数：暂无合适数据源，返回占位
+    VIX 恐慌指数
     
     注：index_vix 接口已失效，后续寻找替代数据源
     """
@@ -129,22 +154,9 @@ def _vix_index() -> Dict[str, Any]:
 def calculate_market_risk() -> Dict[str, Any]:
     """
     计算综合市场风险指标
-    
-    返回：
-    {
-        "snapshot_date": str,
-        "stock_valuation": {...},
-        "bond_signal": {...},
-        "dollar_strength": {...},
-        "vix": {...},
-        "temperature": str,
-        "badge": str,
-        "advice": str,
-        "llm_prompt": str
-    }
     """
-    stock = _stock_valuation_percentile()
-    bond = _bond_market_signal()
+    stock = _stock_market()
+    bond = _bond_spread()
     dollar = _dollar_index()
     vix = _vix_index()
     
@@ -177,7 +189,6 @@ def calculate_market_risk() -> Dict[str, Any]:
 - 综合体温：{temperature}
 
 请以 NestCheck（稳巢）的理性口吻，写一段 100 字以内的市场点评。
-要求：不预测涨跌，重点提示风险管理和资产配置建议。
 """
     
     return {

@@ -3166,7 +3166,7 @@ class DataFetcherManager:
         Returns:
             分钟线数据列表
         """
-        # 优先使用 yfinance 获取分钟线（支持国际指数和外汇）
+        # 1. 优先使用 yfinance（美股/指数/外汇）
         from .yfinance_fetcher import YfinanceFetcher
         
         yf_fetcher = YfinanceFetcher()
@@ -3175,7 +3175,18 @@ class DataFetcherManager:
         if result is not None:
             return result
         
-        # yfinance 失败时，尝试 akshare（仅 A 股）
+        # 2. A 股使用腾讯财经（更稳定）
+        if stock_code.startswith(('sh', 'sz')):
+            try:
+                from . import tencent_minute
+                
+                result = tencent_minute.get_stock_minute_data_tencent(stock_code, days)
+                if result is not None:
+                    return result
+            except Exception as e:
+                logger.debug(f"[Tencent 分钟线] 失败：{e}")
+        
+        # 3. akshare 作为备用
         try:
             from . import akshare_minute
             

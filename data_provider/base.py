@@ -3159,6 +3159,11 @@ class DataFetcherManager:
         """
         获取分钟线数据（用于分时图）
         
+        数据源优先级：
+        1. yfinance - 美股/指数/外汇（5 分钟线）
+        2. akshare - A 股指数（5 分钟线）
+        3. tencent - A 股（备用，历史数据）
+        
         Args:
             stock_code: 股票/指数代码
             days: 获取天数（最多 5 天）
@@ -3166,7 +3171,7 @@ class DataFetcherManager:
         Returns:
             分钟线数据列表
         """
-        # 1. 优先使用 yfinance（美股/指数/外汇）
+        # 1. 优先使用 yfinance（美股/指数/外汇/港股）
         from .yfinance_fetcher import YfinanceFetcher
         
         yf_fetcher = YfinanceFetcher()
@@ -3175,26 +3180,26 @@ class DataFetcherManager:
         if result is not None:
             return result
         
-        # 2. A 股使用腾讯财经（更稳定）
+        # 2. A 股指数使用 akshare（底层东财数据源）
         if stock_code.startswith(('sh', 'sz')):
             try:
-                from . import tencent_minute
+                from . import akshare_minute
                 
-                result = tencent_minute.get_stock_minute_data_tencent(stock_code, days)
+                result = akshare_minute.get_stock_minute_data_akshare(stock_code, days)
                 if result is not None:
                     return result
             except Exception as e:
-                logger.debug(f"[Tencent 分钟线] 失败：{e}")
+                logger.debug(f"[AKShare 分钟线] 失败：{e}")
         
-        # 3. akshare 作为备用
+        # 3. tencent 作为备用（历史数据）
         try:
-            from . import akshare_minute
+            from . import tencent_minute
             
-            result = akshare_minute.get_stock_minute_data_akshare(stock_code, days)
+            result = tencent_minute.get_stock_minute_data_tencent(stock_code, days)
             if result is not None:
                 return result
         except Exception as e:
-            logger.debug(f"[Akshare 分钟线] 失败：{e}")
+            logger.debug(f"[Tencent 分钟线] 失败：{e}")
         
         logger.warning(f"[分钟线] 所有数据源均失败：{stock_code}")
         return None

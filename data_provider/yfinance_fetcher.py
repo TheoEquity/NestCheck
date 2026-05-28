@@ -709,7 +709,7 @@ class YfinanceFetcher(BaseFetcher):
             days: 获取天数（最多 5 天）
             
         Returns:
-            分钟线数据列表，每项包含 date, open, high, low, close, volume
+            分钟线数据列表
         """
         import yfinance as yf
         
@@ -718,7 +718,8 @@ class YfinanceFetcher(BaseFetcher):
         
         try:
             ticker = yf.Ticker(stock_code)
-            hist = ticker.history(period=period, interval='1m')
+            # 使用 5 分钟线（更稳定）
+            hist = ticker.history(period=period, interval='5m')
             
             if hist is None or hist.empty:
                 logger.debug(f"[Yfinance] {stock_code} 无分钟线数据")

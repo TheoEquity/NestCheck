@@ -92,6 +92,10 @@ const getHealthScore = (positions: PortfolioPositionRecordItem[]) => {
   return Math.max(18, Math.min(96, score));
 };
 
+const getLocalMarketValue = (position: PortfolioPositionRecordItem) => Number(position.quantity || 0) * Number(position.lastPrice || 0);
+
+const getLocalUnrealizedPnl = (position: PortfolioPositionRecordItem) => getLocalMarketValue(position) - Number(position.totalCost || 0);
+
 type AdjustModalProps = {
   position: PortfolioPositionRecordItem | null;
   onClose: () => void;
@@ -230,7 +234,7 @@ const HealthGauge: React.FC<{ score: number; tone: 'success' | 'warning' | 'dang
 const MiniPieCard: React.FC<{
   title: string;
   subtitle?: React.ReactNode;
-  data: Array<{ name: string; value: number; displayValue?: number }>;
+  data: Array<{ name: string; value: number; displayValue?: number; secondaryLabel?: string }>;
   showCurrency?: boolean;
 }> = ({ title, subtitle, data, showCurrency = true }) => {
   const nonZeroData = data.filter((item) => item.value > 0);
@@ -269,8 +273,11 @@ const MiniPieCard: React.FC<{
               return (
                 <div key={item.name} className="flex items-center justify-between rounded-lg border border-border/40 bg-background/20 px-3 py-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getPieColor(index) }} />
-                    <span className="text-foreground">{item.name}</span>
+                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getPieColor(index) }} />
+                    <div>
+                      <div className="text-foreground">{item.name}</div>
+                      {item.secondaryLabel ? <div className="text-xs text-secondary-text">{item.secondaryLabel}</div> : null}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="font-medium text-foreground">{formatPct(weight)}</div>
@@ -288,7 +295,7 @@ const MiniPieCard: React.FC<{
 
 const AssetManagementPage: React.FC = () => {
   useEffect(() => {
-    document.title = '资产管理 - DSA';
+    document.title = '资产管理 - NestCheck';
   }, []);
 
   const { accounts, positions, error, syncData, isRefreshing } = usePortfolioOverview();
@@ -386,7 +393,11 @@ const AssetManagementPage: React.FC = () => {
       return category === 'stock';
     });
     const sorted = [...stockRows].sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0));
-    const topFive = sorted.slice(0, 5).map((item) => ({ name: normalizePositionSymbol(item.symbol), value: Number(item.marketValueBase || 0) }));
+    const topFive = sorted.slice(0, 5).map((item) => ({
+      name: normalizePositionSymbol(item.symbol),
+      secondaryLabel: item.name || undefined,
+      value: Number(item.marketValueBase || 0),
+    }));
     const otherValue = sorted.slice(5).reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0);
     return otherValue > 0 ? [...topFive, { name: '其他', value: otherValue }] : topFive;
   }, [positions]);
@@ -592,10 +603,10 @@ const AssetManagementPage: React.FC = () => {
                   <th className="px-2 py-1.5 text-right">现价</th>
                   <th className="px-2 py-1.5 text-right">
                     <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort('marketValueBase')}>
-                      市值 {getSortLabel('marketValueBase')}
+                      市值(CNY) {getSortLabel('marketValueBase')}
                     </button>
                   </th>
-                  <th className="px-2 py-1.5 text-right">未实现盈亏</th>
+                  <th className="px-2 py-1.5 text-right">未实现盈亏(CNY)</th>
                   <th className="px-2 py-1.5 text-right">
                     <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort('unrealizedPnlPct')}>
                       收益率 {getSortLabel('unrealizedPnlPct')}
@@ -605,7 +616,10 @@ const AssetManagementPage: React.FC = () => {
                 </tr>
               </thead>
                 <tbody>
-                  {filteredPositions.map((row) => (
+                  {filteredPositions.map((row) => {
+                    const localMarketValue = getLocalMarketValue(row);
+                    const localUnrealizedPnl = getLocalUnrealizedPnl(row);
+                    return (
                     <tr key={`${row.accountId}-${row.symbol}-${row.market}`} className="border-t border-border/30 odd:bg-background/70 even:bg-surface/15">
                       <td className="px-2 py-1.5 font-medium text-foreground whitespace-nowrap" style={{minWidth: '128px', maxWidth: '160px'}}>{row.accountName}</td>
                       <td className="px-2 py-1.5">{getMarketLabel(row.market)}</td>
@@ -621,8 +635,14 @@ const AssetManagementPage: React.FC = () => {
                       <td className="px-1 py-1.5 text-right text-[11px]">{row.currency}</td>
                       <td className="px-3 py-1.5 text-right" style={{minWidth: '112px'}}>{formatMoney(row.avgCost, row.currency)}</td>
                       <td className="px-2 py-1.5 text-right">{formatMoney(row.lastPrice, row.currency)}</td>
-                      <td className="px-2 py-1.5 text-right font-medium">{formatMoney(row.marketValueBase, 'CNY')}</td>
-                      <td className="px-2 py-1.5 text-right">{formatMoney(row.unrealizedPnlBase, 'CNY')}</td>
+                      <td className="px-2 py-1.5 text-right font-medium">
+                        <div>{formatMoney(row.marketValueBase, 'CNY')}</div>
+                        <div className="text-[11px] font-normal text-secondary-text">{formatMoney(localMarketValue, row.currency)}</div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <div>{formatMoney(row.unrealizedPnlBase, 'CNY')}</div>
+                        <div className="text-[11px] text-secondary-text">{formatMoney(localUnrealizedPnl, row.currency)}</div>
+                      </td>
                       <td className="px-2 py-1.5 text-right">{formatSignedPct(row.unrealizedPnlPct)}</td>
                       <td className="px-2 py-1.5">
                         <button
@@ -634,11 +654,11 @@ const AssetManagementPage: React.FC = () => {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-border/60 bg-background/50 text-sm font-medium">
-                    <td className="px-2 py-2" colSpan={9}>当前筛选汇总</td>
+                    <td className="px-2 py-2" colSpan={10}>当前筛选汇总</td>
                     <td className="px-2 py-2 text-right">{formatMoney(filteredMarketValue, 'CNY')}</td>
                     <td className="px-2 py-2 text-right">{formatMoney(filteredPositions.reduce((sum, item) => sum + Number(item.unrealizedPnlBase || 0), 0), 'CNY')}</td>
                     <td className="px-2 py-2 text-right">{formatSignedPct(filteredAvgReturn)}</td>

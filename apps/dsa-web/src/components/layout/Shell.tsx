@@ -48,8 +48,8 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
 
       <div className="mx-auto flex min-h-screen w-full max-w-[1680px] px-3 py-3 sm:px-4 sm:py-4 lg:px-5">
         <div className="flex min-h-full w-full flex-1 flex-col gap-3">
-          <header className="hidden lg:block">
-            <div className="rounded-[1.35rem] border border-[var(--shell-sidebar-border)] bg-card/72 px-3 py-2 shadow-soft-card backdrop-blur-sm">
+          <header className="relative z-[140] hidden overflow-visible lg:block">
+            <div className="relative overflow-visible rounded-[1.35rem] border border-[var(--shell-sidebar-border)] bg-card/72 px-3 py-2 shadow-soft-card backdrop-blur-sm">
               <SidebarNav orientation="horizontal" onNavigate={() => setMobileOpen(false)} />
             </div>
           </header>

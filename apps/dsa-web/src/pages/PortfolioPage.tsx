@@ -222,7 +222,7 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
   const initializationOnly = mode === 'initialization';
   // Set page title
   useEffect(() => {
-    document.title = initializationOnly ? '资产初始化 - DSA' : '持仓分析 - DSA';
+    document.title = initializationOnly ? '资产初始化 - NestCheck' : '持仓分析 - NestCheck';
   }, [initializationOnly]);
 
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);

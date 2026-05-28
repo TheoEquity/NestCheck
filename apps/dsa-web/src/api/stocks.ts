@@ -27,6 +27,13 @@ export const stocksApi = {
     return toCamelCase<StockHistoryResponse>(response.data);
   },
 
+  async getIntraday(stockCode: string, days = 1): Promise<StockHistoryResponse> {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/stocks/${encodeURIComponent(stockCode)}/intraday`, {
+      params: { days },
+    });
+    return toCamelCase<StockHistoryResponse>(response.data);
+  },
+
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
     formData.append('file', file);

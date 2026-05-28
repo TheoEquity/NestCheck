@@ -15,7 +15,7 @@ const LoginPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '登录 - DSA';
+    document.title = '登录 - NestCheck';
   }, []);
   const [searchParams] = useSearchParams();
   const rawRedirect = searchParams.get('redirect') ?? '';

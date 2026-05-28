@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { stocksApi } from '../api/stocks';
 import { marketApi, type MarketRiskResponse } from '../api/market';
 import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader } from '../components/common';
+import { MiniSparkline } from '../components/MiniSparkline';
 import type { StockQuote } from '../types/stocks';
 import {
   formatMoney,
@@ -51,6 +52,7 @@ const AssetDashboardPage: React.FC = () => {
 
   const { positions, error, syncData, isRefreshing } = usePortfolioOverview();
   const [quoteMap, setQuoteMap] = useState<Record<string, StockQuote | null>>({});
+  const [intradayDataMap, setIntradayDataMap] = useState<Record<string, any[]>>({});
   const [marketRisk, setMarketRisk] = useState<MarketRiskResponse | null>(null);
   const [isRefreshingMarketData, setIsRefreshingMarketData] = useState(false);
   const [hasLoadedMarketRisk, setHasLoadedMarketRisk] = useState(false);
@@ -58,28 +60,41 @@ const AssetDashboardPage: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    const loadMarketQuotes = async () => {
+    const loadMarketData = async () => {
       setIsRefreshingMarketData(true);
       try {
-        const results = await Promise.all(
-          MARKET_CARDS.map(async (item) => {
-            try {
-              const response = await stocksApi.getQuote(item.code);
-              return [item.key, response] as const;
-            } catch {
-              return [item.key, null] as const;
-            }
-          }),
-        );
+        const [quoteResults, intradayResults] = await Promise.all([
+          Promise.all(
+            MARKET_CARDS.map(async (item) => {
+              try {
+                const response = await stocksApi.getQuote(item.code);
+                return [item.key, response] as const;
+              } catch {
+                return [item.key, null] as const;
+              }
+            }),
+          ),
+          Promise.all(
+            MARKET_CARDS.map(async (item) => {
+              try {
+                const response = await stocksApi.getIntraday(item.code, 1);
+                return [item.key, response.data || []] as const;
+              } catch {
+                return [item.key, []] as const;
+              }
+            }),
+          ),
+        ]);
         if (!active) return;
-        setQuoteMap(Object.fromEntries(results));
+        setQuoteMap(Object.fromEntries(quoteResults));
+        setIntradayDataMap(Object.fromEntries(intradayResults));
       } finally {
         if (!active) return;
         setIsRefreshingMarketData(false);
       }
     };
 
-    void loadMarketQuotes();
+    void loadMarketData();
     return () => {
       active = false;
     };
@@ -223,7 +238,9 @@ const AssetDashboardPage: React.FC = () => {
           >
             {MARKET_CARDS.map((item) => {
               const quote = quoteMap[item.key];
+              const intradayData = intradayDataMap[item.key] || [];
               const tone = quote?.changePercent != null && quote.changePercent >= 0 ? 'success' : 'danger';
+              const lineColor = quote?.changePercent != null && quote.changePercent >= 0 ? '#22c55e' : '#ef4443';
               const changePctText = quote?.changePercent == null
                 ? '--'
                 : `${quote.changePercent >= 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%`;
@@ -245,6 +262,9 @@ const AssetDashboardPage: React.FC = () => {
                         {changePctText}
                       </Badge>
                     </div>
+                  </div>
+                  <div className="mb-2 h-[40px]">
+                    <MiniSparkline data={intradayData} color={lineColor} height={40} />
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-secondary-text">
                     <span>O: {quote?.open != null ? quote.open.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</span>

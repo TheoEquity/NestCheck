@@ -48,7 +48,7 @@ const formatMoneyCell = (amount: number | string | undefined | null, currency?: 
 
 const AssetEventsPage: React.FC = () => {
   useEffect(() => {
-    document.title = '资产事件 - DSA';
+    document.title = '资产事件 - NestCheck';
   }, []);
 
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);

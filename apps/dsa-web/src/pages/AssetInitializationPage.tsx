@@ -144,7 +144,7 @@ const buildNextOwnerId = (accounts: PortfolioAccountItem[], currency: CurrencyCo
 
 const AssetInitializationPage: React.FC = () => {
   useEffect(() => {
-    document.title = '资产初始化 - DSA';
+    document.title = '资产初始化 - NestCheck';
   }, []);
 
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);

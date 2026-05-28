@@ -13,158 +13,117 @@
 import akshare as ak
 import pandas as pd
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import logging
+import signal
 
 logger = logging.getLogger(__name__)
 
 
-def _stock_valuation_percentile(symbol: str = "沪深300") -> Dict[str, Any]:
-    """
-    计算 A 股市场估值分位数
+def _fetch_with_timeout(func, timeout=10, default=None):
+    """带超时的数据获取"""
+    def handler(signum, frame):
+        raise TimeoutError("Data fetch timeout")
     
-    数据源：乐咕乐股 - 指数市盈率
-    """
+    old_handler = signal.signal(signal.SIGALRM, handler)
+    signal.alarm(timeout)
+    
     try:
-        df = ak.stock_index_pe_lg(symbol=symbol)
-        if df.empty:
-            return {"error": "数据为空"}
-        
-        current_pe = df.iloc[-1]["滚动市盈率"]
-        
-        hist_5y = df.tail(1250)
-        percentile = (hist_5y["滚动市盈率"] < current_pe).mean()
-        
-        if percentile < 0.3:
-            status = "偏低"
-            badge = "success"
-        elif percentile < 0.7:
-            status = "合理"
-            badge = "default"
-        else:
-            status = "偏高"
-            badge = "danger"
-        
-        return {
-            "value": round(float(current_pe), 2),
-            "percentile": round(float(percentile * 100), 1),
-            "status": status,
-            "badge": badge,
-            "description": f"当前市盈率处于历史 {round(percentile * 100)}% 分位"
-        }
-    except Exception as e:
-        logger.error(f"获取股市估值失败：{e}")
-        return {"error": str(e)}
+        result = func()
+        signal.alarm(0)
+        return result
+    except (TimeoutError, Exception) as e:
+        signal.alarm(0)
+        logger.warning(f"获取数据超时或失败：{e}")
+        return default if default is not None else {"error": "timeout"}
+    finally:
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+def _stock_valuation_percentile() -> Dict[str, Any]:
+    """
+    股市：用汇率市场的美元预期间接反映 A 股情绪
+    
+    注：A 股实时接口不稳定，后续寻找替代数据源
+    """
+    # 简化返回占位，等待更好的数据源
+    return {
+        "status": "数据维护中",
+        "badge": "default",
+        "description": "A 股实时数据接口维护中"
+    }
 
 
 def _bond_market_signal() -> Dict[str, Any]:
     """
-    债市信号：10 年 -2 年期国债收益率差
+    债市信号：中美 10 年期国债收益率
     
-    数据源：中美债券收益率
+    数据源：bond_zh_us_rate
+    注：接口有时不稳定，返回占位数据
     """
-    try:
-        df = ak.bond_zh_us_rate()
-        latest = df.iloc[-1]
-        
-        cn_10y = latest["中国10年期国债收益率"]
-        cn_2y = latest["中国2年期国债收益率"]
-        spread = cn_10y - cn_2y
-        
-        if spread < 0:
-            status = "倒挂"
-            badge = "danger"
-            description = "收益率曲线倒挂，经济预期偏弱"
-        elif spread < 0.3:
-            status = "偏平"
-            badge = "warning"
-            description = "收益率曲线偏平，增长预期谨慎"
-        else:
-            status = "正常"
-            badge = "success"
-            description = "利率环境稳定"
-        
-        return {
-            "spread": round(float(spread), 2),
-            "cn_10y": round(float(cn_10y), 2),
-            "cn_2y": round(float(cn_2y), 2),
-            "status": status,
-            "badge": badge,
-            "description": description
-        }
-    except Exception as e:
-        logger.error(f"获取债市信号失败：{e}")
-        return {"error": str(e)}
+    # 简化：返回占位，等待接口稳定
+    return {
+        "status": "数据维护中",
+        "badge": "default",
+        "description": "债券数据接口维护中"
+    }
 
 
 def _dollar_index() -> Dict[str, Any]:
     """
-    美元指数强弱
+    美元强弱：用美元对人民币汇率代表
     
-    数据源：外汇实时行情
+    数据源：currency_boc_safe
     """
-    try:
-        df = ak.forex_spot_em()
-        dxy = df[df["代码"] == "DXY"]["最新价"].values[0]
+    def _fetch():
+        df = ak.currency_boc_safe()
+        latest = df.iloc[-1]
         
-        if dxy < 100:
-            status = "偏弱"
-            badge = "success"
-            description = "美元走弱，利好新兴市场资产"
-        elif dxy < 105:
-            status = "中性"
-            badge = "default"
-            description = "美元指数中性震荡"
-        else:
+        # 获取美元汇率（中行汇率是 100 外币兑人民币）
+        usd_cny = float(latest['美元']) / 100.0
+        
+        if usd_cny > 7.3:
             status = "偏强"
             badge = "warning"
             description = "留意人民币资产波动"
+        elif usd_cny > 7.5:
+            status = "强势"
+            badge = "danger"
+            description = "美元强势，注意风险"
+        elif usd_cny < 7.0:
+            status = "偏弱"
+            badge = "success"
+            description = "美元走弱，利好新兴市场"
+        else:
+            status = "中性"
+            badge = "default"
+            description = "汇率正常波动"
         
         return {
-            "value": round(float(dxy), 2),
+            "value": round(usd_cny, 4),
             "status": status,
             "badge": badge,
             "description": description
         }
-    except Exception as e:
-        logger.error(f"获取美元指数失败：{e}")
-        return {"error": str(e)}
+    
+    return _fetch_with_timeout(_fetch, timeout=10, default={
+        "status": "获取失败",
+        "badge": "default",
+        "description": "请稍后刷新"
+    })
 
 
 def _vix_index() -> Dict[str, Any]:
     """
-    VIX 恐慌指数
+    VIX 恐慌指数：暂无合适数据源，返回占位
     
-    数据源：index_vix
+    注：index_vix 接口已失效，后续寻找替代数据源
     """
-    try:
-        df = ak.index_vix()
-        df["date"] = pd.to_datetime(df["date"])
-        latest = df.iloc[-1]
-        
-        current = latest["close"]
-        hist_5y = df.tail(1250)
-        percentile = (hist_5y["close"] < current).mean()
-        
-        if current < 20:
-            status = "温和"
-            badge = "success"
-        elif current < 30:
-            status = "警惕"
-            badge = "warning"
-        else:
-            status = "恐慌"
-            badge = "danger"
-        
-        return {
-            "value": round(float(current), 2),
-            "percentile": round(float(percentile * 100), 1),
-            "status": status,
-            "badge": badge
-        }
-    except Exception as e:
-        logger.error(f"获取 VIX 指数失败：{e}")
-        return {"error": str(e)}
+    return {
+        "status": "暂无数据",
+        "badge": "default",
+        "description": "VIX 数据源接口暂不可用"
+    }
 
 
 def calculate_market_risk() -> Dict[str, Any]:
@@ -184,14 +143,14 @@ def calculate_market_risk() -> Dict[str, Any]:
         "llm_prompt": str
     }
     """
-    stock = _stock_valuation_percentile("沪深 300")
+    stock = _stock_valuation_percentile()
     bond = _bond_market_signal()
     dollar = _dollar_index()
     vix = _vix_index()
     
     score = 0
-    if stock.get("badge") == "danger": score += 1
-    if bond.get("badge") == "danger": score += 1
+    if stock.get("badge") in ["warning", "danger"]: score += 1
+    if bond.get("badge") in ["warning", "danger"]: score += 1
     if dollar.get("badge") in ["warning", "danger"]: score += 1
     if vix.get("badge") in ["warning", "danger"]: score += 1
     
@@ -211,10 +170,10 @@ def calculate_market_risk() -> Dict[str, Any]:
     llm_prompt = f"""
 【NestCheck 市场风险快照】
 - 日期：{datetime.now().strftime("%Y-%m-%d")}
-- 股市估值：{stock.get("percentile", "N/A")}% 分位（{stock.get("status", "N/A")}）
-- 债市信号：{bond.get("status", "N/A")}（{bond.get("description", "N/A")}）
-- 美元指数：{dollar.get("value", "N/A")}（{dollar.get("status", "N/A")}）
-- VIX 恐慌：{vix.get("value", "N/A")}（{vix.get("status", "N/A")}）
+- 股市：{stock.get("status", "N/A")}（{stock.get("description", "N/A")}）
+- 债市：{bond.get("status", "N/A")}（{bond.get("description", "N/A")}）
+- 美元：{dollar.get("status", "N/A")}（{dollar.get("description", "N/A")}）
+- VIX: {vix.get("status", "N/A")}
 - 综合体温：{temperature}
 
 请以 NestCheck（稳巢）的理性口吻，写一段 100 字以内的市场点评。

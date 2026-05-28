@@ -5,35 +5,63 @@
 ===================================
 
 参考：/workspace/Code_01.py
+特点：
+1. 本地 JSON 缓存，避免频繁调用 AkShare
+2. 缓存过期时间可配置
+3. 失败时返回缓存数据
 """
 
 import akshare as ak
-from datetime import datetime
-from typing import Dict, Any
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
 import logging
-import signal
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# 缓存配置
+CACHE_DIR = Path("/tmp/nestcheck_market_risk")
+CACHE_DIR.mkdir(exist_ok=True)
+CACHE_EXPIRY_HOURS = 12  # 缓存过期时间（小时）
 
-def _fetch_with_timeout(func, timeout=10, default=None):
-    """带超时的数据获取"""
-    def handler(signum, frame):
-        raise TimeoutError("Data fetch timeout")
-    
-    old_handler = signal.signal(signal.SIGALRM, handler)
-    signal.alarm(timeout)
+
+def _load_cache(name: str) -> Optional[Dict[str, Any]]:
+    """加载缓存数据"""
+    cache_file = CACHE_DIR / f"{name}.json"
+    if not cache_file.exists():
+        return None
     
     try:
-        result = func()
-        signal.alarm(0)
-        return result
-    except (TimeoutError, Exception) as e:
-        signal.alarm(0)
-        logger.warning(f"获取数据超时或失败：{e}")
-        return default if default is not None else {"error": "timeout"}
-    finally:
-        signal.signal(signal.SIGALRM, old_handler)
+        with open(cache_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # 检查缓存是否过期
+        cached_at = datetime.fromisoformat(data.get("_cached_at", "1970-01-01"))
+        if datetime.now() - cached_at > timedelta(hours=CACHE_EXPIRY_HOURS):
+            logger.info(f"缓存 {name} 已过期")
+            return None
+        
+        return data
+    except Exception as e:
+        logger.warning(f"读取缓存失败 {name}: {e}")
+        return None
+
+
+def _save_cache(name: str, data: Dict[str, Any]):
+    """保存缓存数据"""
+    cache_file = CACHE_DIR / f"{name}.json"
+    data_with_timestamp = {
+        **data,
+        "_cached_at": datetime.now().isoformat()
+    }
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(data_with_timestamp, f, ensure_ascii=False, indent=2)
+        logger.info(f"缓存已保存 {name}")
+    except Exception as e:
+        logger.error(f"保存缓存失败 {name}: {e}")
 
 
 def _dollar_index() -> Dict[str, Any]:
@@ -42,7 +70,13 @@ def _dollar_index() -> Dict[str, Any]:
     
     数据源：currency_boc_safe (中国银行外汇牌价)
     """
-    def _fetch():
+    # 先查缓存
+    cache = _load_cache("dollar")
+    if cache:
+        return cache
+    
+    # 获取新数据
+    try:
         df = ak.currency_boc_safe()
         latest = df.iloc[-1]
         
@@ -66,18 +100,23 @@ def _dollar_index() -> Dict[str, Any]:
             badge = "default"
             description = "汇率正常波动"
         
-        return {
+        result = {
             "value": round(usd_cny, 4),
             "status": status,
             "badge": badge,
-            "description": description
+            "description": description,
+            "date": str(latest.get('日期', datetime.now().strftime("%Y-%m-%d")))
         }
+        _save_cache("dollar", result)
+        return result
     
-    return _fetch_with_timeout(_fetch, timeout=10, default={
-        "status": "获取失败",
-        "badge": "default",
-        "description": "请稍后刷新"
-    })
+    except Exception as e:
+        logger.warning(f"获取美元汇率失败：{e}")
+        return {
+            "status": "获取失败",
+            "badge": "default",
+            "description": "请稍后刷新"
+        }
 
 
 def _bond_spread() -> Dict[str, Any]:
@@ -86,12 +125,19 @@ def _bond_spread() -> Dict[str, Any]:
     
     数据源：bond_zh_us_rate
     """
-    def _fetch():
+    # 先查缓存
+    cache = _load_cache("bond")
+    if cache:
+        return cache
+    
+    # 获取新数据
+    try:
         df = ak.bond_zh_us_rate()
         latest = df.iloc[-1]
         
-        us_10y = float(latest['美国国债收益率 10 年'])
-        cn_10y = float(latest['中国国债收益率 10 年'])
+        # 直接使用确切列名
+        us_10y = float(latest['美国国债收益率10年'])
+        cn_10y = float(latest['中国国债收益率10年'])
         spread = us_10y - cn_10y
         
         # 根据利差判断
@@ -108,34 +154,46 @@ def _bond_spread() -> Dict[str, Any]:
             badge = "success"
             description = "利率环境稳定"
         
-        return {
+        result = {
             "us_10y": round(us_10y, 2),
             "cn_10y": round(cn_10y, 2),
             "spread": round(spread, 2),
             "status": status,
             "badge": badge,
-            "description": description
+            "description": description,
+            "date": str(latest.get('日期', datetime.now().strftime("%Y-%m-%d")))
         }
+        _save_cache("bond", result)
+        return result
     
-    return _fetch_with_timeout(_fetch, timeout=10, default={
-        "status": "获取失败",
-        "badge": "default",
-        "description": "请稍后刷新"
-    })
+    except Exception as e:
+        logger.warning(f"获取债市数据失败：{e}")
+        return {
+            "status": "获取失败",
+            "badge": "default",
+            "description": "请稍后刷新"
+        }
 
 
 def _stock_market() -> Dict[str, Any]:
     """
-    股市：用美元汇率预判反映市场情绪
+    股市：暂用占位数据
     
-    注：A 股实时接口不稳定，暂用汇率替代
+    注：A 股实时接口不稳定，后续寻找替代数据源
     """
-    # 简化：暂无合适数据源
-    return {
+    cache = _load_cache("stock")
+    if cache:
+        return cache
+    
+    # 占位数据
+    result = {
         "status": "数据维护中",
         "badge": "default",
-        "description": "A 股数据接口维护中"
+        "description": "A 股数据接口维护中",
+        "date": datetime.now().strftime("%Y-%m-%d")
     }
+    _save_cache("stock", result)
+    return result
 
 
 def _vix_index() -> Dict[str, Any]:
@@ -144,7 +202,13 @@ def _vix_index() -> Dict[str, Any]:
     
     数据源：index_option_300etf_qvix (沪深 300ETF 波动率指数)
     """
-    def _fetch():
+    # 先查缓存
+    cache = _load_cache("vix")
+    if cache:
+        return cache
+    
+    # 获取新数据
+    try:
         df = ak.index_option_300etf_qvix()
         if df.empty:
             return {"error": "数据为空"}
@@ -163,19 +227,24 @@ def _vix_index() -> Dict[str, Any]:
             status = "恐慌"
             badge = "danger"
         
-        return {
+        result = {
             "value": round(current, 2),
             "percentile": round(float(percentile * 100), 1),
             "status": status,
             "badge": badge,
-            "description": f"中国波指 {round(current, 2)} (历史{round(percentile*100)}% 分位)"
+            "description": f"中国波指 {round(current, 2)} (历史{round(percentile*100)}% 分位)",
+            "date": df.iloc[-1]['date'].strftime("%Y-%m-%d") if hasattr(df.iloc[-1]['date'], 'strftime') else str(df.iloc[-1]['date'])
         }
+        _save_cache("vix", result)
+        return result
     
-    return _fetch_with_timeout(_fetch, timeout=10, default={
-        "status": "获取失败",
-        "badge": "default",
-        "description": "请稍后刷新"
-    })
+    except Exception as e:
+        logger.warning(f"获取 VIX 失败：{e}")
+        return {
+            "status": "获取失败",
+            "badge": "default",
+            "description": "请稍后刷新"
+        }
 
 
 def calculate_market_risk() -> Dict[str, Any]:
@@ -230,3 +299,11 @@ def calculate_market_risk() -> Dict[str, Any]:
         "advice": advice,
         "llm_prompt": llm_prompt
     }
+
+
+def clear_cache():
+    """清空所有缓存"""
+    if CACHE_DIR.exists():
+        for f in CACHE_DIR.glob("*.json"):
+            f.unlink()
+        logger.info("缓存已清空")

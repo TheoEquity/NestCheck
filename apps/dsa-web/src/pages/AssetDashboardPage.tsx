@@ -262,36 +262,31 @@ const AssetDashboardPage: React.FC = () => {
         </Card>
 
         <Card className="xl:col-span-4 !rounded-xl" padding="sm">
-          <div className="mb-2 flex items-center justify-between border-b border-border/50 pb-2">
-            <h2 className="text-base font-semibold text-foreground">驾驶舱摘要</h2>
-            <Badge variant={highRiskPositionCount > 0 ? 'warning' : 'success'}>{highRiskPositionCount > 0 ? '关注高风险仓位' : '结构稳定'}</Badge>
+          <div className="mb-3 border-b border-border/50 pb-2">
+            <h2 className="text-base font-semibold text-foreground">市场风险</h2>
           </div>
-          {assetSummary.length === 0 ? (
-            <EmptyState title="暂无资产" description="先在资产初始化页创建账户并录入初始资产。" className="border-none bg-transparent px-2 py-8 shadow-none" />
-          ) : (
-            <div className="space-y-1.5">
-              {assetSummary.map((item) => (
-                <div key={item.market} className="grid grid-cols-[88px_1fr_112px] items-center gap-2 border-b border-border/40 py-1.5 text-[13px]">
-                  <span className="text-secondary-text">{getMarketLabel(item.market)}</span>
-                  <div className="h-2 overflow-hidden rounded-full bg-border/40">
-                    <div
-                      className="h-full rounded-full bg-cyan"
-                      style={{ width: `${Math.min(100, totalMarketValue ? (item.marketValue / totalMarketValue) * 100 : 0)}%` }}
-                    />
-                  </div>
-                  <span className="text-right font-medium text-foreground">{formatMoney(item.marketValue, 'CNY')}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-3 grid gap-1.5 border-t border-border/50 pt-3 text-sm">
-            {marketAlertRows.map((row) => (
-              <div key={row.label} className="flex items-center justify-between rounded-lg bg-background/55 px-2.5 py-1.5">
-                <span className="text-secondary-text">{row.label}</span>
-                <Badge variant={row.tone === 'danger' ? 'danger' : row.tone === 'warning' ? 'warning' : 'success'}>{row.value}</Badge>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
+              <div className="text-xs text-secondary-text">股市情绪</div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-sm text-foreground">--</span>
+                <Badge variant="success">平稳</Badge>
               </div>
-            ))}
+            </div>
+            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
+              <div className="text-xs text-secondary-text">债市情绪</div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-sm text-foreground">--</span>
+                <Badge variant="success">平稳</Badge>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
+              <div className="text-xs text-secondary-text">汇市情绪</div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-sm text-foreground">--</span>
+                <Badge variant="success">平稳</Badge>
+              </div>
+            </div>
           </div>
         </Card>
       </section>
@@ -339,24 +334,50 @@ const AssetDashboardPage: React.FC = () => {
         </Card>
 
         <Card className="xl:col-span-5 !rounded-xl" padding="sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">健康度备注</h2>
-            <Badge variant={getStaticHealthTone(healthScore) === 'danger' ? 'danger' : getStaticHealthTone(healthScore) === 'warning' ? 'warning' : 'success'}>
-              {getStaticHealthLabel(healthScore)}
-            </Badge>
+          <div className="mb-3 border-b border-border/50 pb-2">
+            <h2 className="text-base font-semibold text-foreground">组合风险</h2>
           </div>
-          <div className="space-y-2 text-sm text-secondary-text">
-            <div className="rounded-lg border border-border/50 bg-background/60 p-2.5">
-              <div className="text-foreground">组合健康结论</div>
-              <div className="mt-1">当前页面按静态持仓结构展示，重点看仓位集中度、收益水平和高风险标的数量。</div>
+          {assetSummary.length === 0 ? (
+            <EmptyState title="暂无资产" description="先在资产初始化页创建账户并录入初始资产。" className="border-none bg-transparent px-2 py-4 shadow-none" />
+          ) : (
+            <div className="space-y-2">
+              <div className="text-xs text-secondary-text">市场分布</div>
+              {assetSummary.map((item) => (
+                <div key={item.market} className="grid grid-cols-[64px_1fr_96px] items-center gap-2 py-1 text-[12px]">
+                  <span className="text-secondary-text">{getMarketLabel(item.market)}</span>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-border/40">
+                    <div
+                      className="h-full rounded-full bg-cyan"
+                      style={{ width: `${Math.min(100, totalMarketValue ? (item.marketValue / totalMarketValue) * 100 : 0)}%` }}
+                    />
+                  </div>
+                  <span className="text-right font-medium text-foreground">{formatMoney(item.marketValue, 'CNY')}</span>
+                </div>
+              ))}
             </div>
-            <div className="rounded-lg border border-border/50 bg-background/60 p-2.5">
-              <div className="text-foreground">当前关注点</div>
-              <ul className="mt-1 space-y-1">
-                <li>Top1 仓位占比：{formatPct(topPositionPct)}</li>
-                <li>高风险标的：{highRiskPositionCount} 项</li>
-                <li>静态未实现收益：{formatMoney(totalUnrealizedPnl, 'CNY')}</li>
-              </ul>
+          )}
+
+          <div className="mt-4 space-y-2 border-t border-border/50 pt-3">
+            <div className="text-xs text-secondary-text">风险指标</div>
+            {marketAlertRows.map((row) => (
+              <div key={row.label} className="flex items-center justify-between rounded-lg bg-background/55 px-2.5 py-1.5 text-sm">
+                <span className="text-secondary-text">{row.label}</span>
+                <Badge variant={row.tone === 'danger' ? 'danger' : row.tone === 'warning' ? 'warning' : 'success'}>{row.value}</Badge>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 border-t border-border/50 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-foreground">健康度</span>
+              <Badge variant={getStaticHealthTone(healthScore) === 'danger' ? 'danger' : getStaticHealthTone(healthScore) === 'warning' ? 'warning' : 'success'}>
+                {getStaticHealthLabel(healthScore)}
+              </Badge>
+            </div>
+            <div className="mt-2 space-y-1.5 text-xs text-secondary-text">
+              <div>Top1 仓位 {formatPct(topPositionPct)}</div>
+              <div>高风险 {highRiskPositionCount} 项</div>
+              <div>未实现收益 {formatMoney(totalUnrealizedPnl, 'CNY')}</div>
             </div>
           </div>
         </Card>

@@ -88,7 +88,7 @@ class StockService:
             days: 获取天数（默认 1 天）
             
         Returns:
-            分时图数据字典，包含 prices 列表
+            分时图数据字典，包含 data 列表
         """
         # 先查缓存
         cache = self._load_intraday_cache(stock_code, days)
@@ -97,19 +97,19 @@ class StockService:
             return cache
         
         try:
-            # 调用数据获取器获取历史数据
+            # 调用数据获取器获取分钟线数据
             from data_provider.base import DataFetcherManager
             
             manager = DataFetcherManager()
-            history = manager.get_history_data(stock_code, period="1m", days=days)
+            minute_data = manager.get_minute_data(stock_code, days=days)
             
-            if not history or 'data' not in history:
+            if not minute_data:
                 logger.warning(f"获取 {stock_code} 分时图数据失败")
                 return None
             
             result = {
                 "stock_code": stock_code,
-                "data": history.get('data', []),
+                "data": minute_data,
                 "_cached_at": datetime.now().isoformat()
             }
             

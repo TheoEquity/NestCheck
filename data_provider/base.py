@@ -3152,5 +3152,38 @@ class DataFetcherManager:
                 last_error = f"{fetcher.name} ({error_type}) {error_reason}"
                 logger.warning(f"[{fetcher.name}] 获取涨停池失败: {error_reason}")
         if last_error:
-            logger.warning(f"[涨停池] 所有数据源均失败，最终错误: {last_error}")
+            logger.warning(f"[涨停池] 所有数据源均失败，最终错误：{last_error}")
         return []
+
+    def get_minute_data(self, stock_code: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取分钟线数据（用于分时图）
+        
+        Args:
+            stock_code: 股票/指数代码
+            days: 获取天数（最多 5 天）
+            
+        Returns:
+            分钟线数据列表
+        """
+        # 优先使用 yfinance 获取分钟线（支持国际指数和外汇）
+        from .yfinance_fetcher import YfinanceFetcher
+        
+        yf_fetcher = YfinanceFetcher()
+        result = yf_fetcher.get_minute_data(stock_code, days)
+        
+        if result is not None:
+            return result
+        
+        # yfinance 失败时，尝试 akshare（仅 A 股）
+        try:
+            from . import akshare_minute
+            
+            result = akshare_minute.get_stock_minute_data_akshare(stock_code, days)
+            if result is not None:
+                return result
+        except Exception as e:
+            logger.debug(f"[Akshare 分钟线] 失败：{e}")
+        
+        logger.warning(f"[分钟线] 所有数据源均失败：{stock_code}")
+        return None

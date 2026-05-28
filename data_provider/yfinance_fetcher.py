@@ -700,6 +700,50 @@ class YfinanceFetcher(BaseFetcher):
             logger.warning(f"[Yfinance] 获取外汇/债券 {symbol} 失败：{e}")
             return None
 
+    def get_minute_data(self, stock_code: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取分钟线数据（用于分时图）
+        
+        Args:
+            stock_code: 股票/指数代码
+            days: 获取天数（最多 5 天）
+            
+        Returns:
+            分钟线数据列表，每项包含 date, open, high, low, close, volume
+        """
+        import yfinance as yf
+        
+        days = min(days, 5)  # yfinance 最多支持 7 天，我们限制 5 天
+        period = f"{days}d"
+        
+        try:
+            ticker = yf.Ticker(stock_code)
+            hist = ticker.history(period=period, interval='1m')
+            
+            if hist is None or hist.empty:
+                logger.debug(f"[Yfinance] {stock_code} 无分钟线数据")
+                return None
+            
+            result = []
+            for timestamp, row in hist.iterrows():
+                result.append({
+                    "date": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "open": float(row.get('Open', 0)),
+                    "high": float(row.get('High', 0)),
+                    "low": float(row.get('Low', 0)),
+                    "close": float(row.get('Close', 0)),
+                    "volume": int(row.get('Volume', 0)) if row.get('Volume') is not None else None,
+                    "amount": None,  # yfinance 不提供成交额
+                    "change_percent": None,  # 由前端或后端计算
+                })
+            
+            logger.debug(f"[Yfinance] 获取 {stock_code} 分钟线 {len(result)} 条")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"[Yfinance] 获取 {stock_code} 分钟线失败：{e}")
+            return None
+
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
         获取美股/美股指数/外汇/债券实时行情数据

@@ -9,6 +9,7 @@ Akshare 分钟线数据获取
 
 import logging
 from typing import Optional, List, Dict, Any
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +42,37 @@ def get_stock_minute_data_akshare(stock_code: str, days: int = 1) -> Optional[Li
             logger.debug(f"[Akshare] 不支持的代码格式：{stock_code}")
             return None
         
-        # 获取分钟线数据
-        df = ak.stock_zh_a_hist_min_em(symbol=symbol, period='1', adjust='qfq')
-        
-        if df is None or df.empty:
-            return None
-        
-        result = []
-        for _, row in df.iterrows():
-            result.append({
-                "date": str(row.get('时间', '')),
-                "open": float(row.get('开盘', 0)),
-                "high": float(row.get('最高', 0)),
-                "low": float(row.get('最低', 0)),
-                "close": float(row.get('收盘', 0)),
-                "volume": int(row.get('成交量', 0)) if row.get('成交量') is not None else None,
-                "amount": float(row.get('成交额', 0)) if row.get('成交额') is not None else None,
-                "change_percent": None,
-            })
-        
-        logger.debug(f"[Akshare] 获取 {symbol} 分钟线 {len(result)} 条")
-        return result
+        # 重试机制
+        for attempt in range(3):
+            try:
+                # 获取分钟线数据
+                df = ak.stock_zh_a_hist_min_em(symbol=symbol, period='1', adjust='qfq')
+                
+                if df is None or df.empty:
+                    return None
+                
+                result = []
+                for _, row in df.iterrows():
+                    result.append({
+                        "date": str(row.get('时间', '')),
+                        "open": float(row.get('开盘', 0)),
+                        "high": float(row.get('最高', 0)),
+                        "low": float(row.get('最低', 0)),
+                        "close": float(row.get('收盘', 0)),
+                        "volume": int(row.get('成交量', 0)) if row.get('成交量') is not None else None,
+                        "amount": float(row.get('成交额', 0)) if row.get('成交额') is not None else None,
+                        "change_percent": None,
+                    })
+                
+                logger.debug(f"[Akshare] 获取 {symbol} 分钟线 {len(result)} 条")
+                return result
+                
+            except Exception as e:
+                logger.warning(f"[Akshare] 尝试 {attempt + 1} 失败：{e}")
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # 指数退避
+                else:
+                    raise
         
     except Exception as e:
         logger.warning(f"[Akshare] 获取 {stock_code} 分钟线失败：{e}")

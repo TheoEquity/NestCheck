@@ -810,16 +810,30 @@ class PortfolioService:
         method = self._normalize_cost_method(cost_method)
         rows = self.repo.list_positions(account_id=account_id, cost_method=method)
         items: List[Dict[str, Any]] = []
+        as_of_date = date.today()
+        valuation_currency = "CNY"
         for position, account in rows:
             qty = float(position.quantity or 0.0)
             avg_cost_val = float(position.avg_cost or 0.0)
             last_price = float(position.last_price or 0.0)
-            market_base = qty * last_price
             total_cost = float(position.total_cost or 0.0)
-            unrealized = market_base - total_cost
+            local_market_value = qty * last_price
+            market_base, stale_market, _ = self._convert_amount(
+                amount=local_market_value,
+                from_currency=position.currency,
+                to_currency=valuation_currency,
+                as_of_date=as_of_date,
+            )
+            cost_base, stale_cost, _ = self._convert_amount(
+                amount=total_cost,
+                from_currency=position.currency,
+                to_currency=valuation_currency,
+                as_of_date=as_of_date,
+            )
+            unrealized = market_base - cost_base
             unrealized_pct = None
-            if abs(total_cost) > EPS:
-                unrealized_pct = unrealized / total_cost * 100.0
+            if abs(cost_base) > EPS:
+                unrealized_pct = unrealized / cost_base * 100.0
             items.append(
                 {
                     "id": int(position.id),
@@ -842,11 +856,11 @@ class PortfolioService:
                     "asset_category": position.asset_category,
                     "asset_subcategory": position.asset_subcategory,
                     "asset_risk_class": position.asset_risk_class,
-                    "valuation_currency": position.valuation_currency,
+                    "valuation_currency": valuation_currency,
                     "price_source": "cached",
                     "price_provider": None,
                     "price_date": position.updated_at.isoformat() if position.updated_at else None,
-                    "price_stale": position.last_price is not None and position.last_price <= 0,
+                    "price_stale": (position.last_price is not None and position.last_price <= 0) or stale_market or stale_cost,
                     "price_available": position.last_price is not None and position.last_price > 0,
                     "updated_at": position.updated_at.isoformat() if position.updated_at else None,
                 }

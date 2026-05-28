@@ -266,26 +266,34 @@ const AssetDashboardPage: React.FC = () => {
             <h2 className="text-base font-semibold text-foreground">市场风险</h2>
           </div>
           <div className="space-y-3">
-            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
-              <div className="text-xs text-secondary-text">股市情绪</div>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-sm text-foreground">--</span>
-                <Badge variant="success">平稳</Badge>
+            <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/60 p-3">
+              <div>
+                <div className="text-xs text-secondary-text">股市估值</div>
+                <div className={`mt-0.5 text-sm font-medium ${true ? 'text-red-500' : 'text-foreground'}`}>🔴 偏高</div>
               </div>
+              <div className="text-xs text-secondary-text">当前市盈率处于历史 75% 分位</div>
             </div>
-            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
-              <div className="text-xs text-secondary-text">债市情绪</div>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-sm text-foreground">--</span>
-                <Badge variant="success">平稳</Badge>
+            <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/60 p-3">
+              <div>
+                <div className="text-xs text-secondary-text">债市信号</div>
+                <div className="mt-0.5 text-sm font-medium text-green-600">🟢 正常</div>
               </div>
+              <div className="text-xs text-secondary-text">利率环境稳定</div>
             </div>
-            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
-              <div className="text-xs text-secondary-text">汇市情绪</div>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-sm text-foreground">--</span>
-                <Badge variant="success">平稳</Badge>
+            <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/60 p-3">
+              <div>
+                <div className="text-xs text-secondary-text">美元强弱</div>
+                <div className="mt-0.5 text-sm font-medium text-yellow-600">🟡 偏强</div>
               </div>
+              <div className="text-xs text-secondary-text">留意人民币资产波动</div>
+            </div>
+            <div className="mt-4 rounded-lg border border-border/60 bg-surface/60 p-3">
+              <div className="text-xs font-medium text-secondary-text">综合体温</div>
+              <div className="mt-1.5 flex items-center justify-between">
+                <div className="text-sm font-medium text-yellow-600">🟡 中性偏热</div>
+                <Badge variant="warning">维持现有仓位</Badge>
+              </div>
+              <div className="mt-2 text-xs text-secondary-text">建议维持现有仓位，暂缓激进加仓</div>
             </div>
           </div>
         </Card>

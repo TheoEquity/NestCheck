@@ -224,9 +224,6 @@ const AssetDashboardPage: React.FC = () => {
             {MARKET_CARDS.map((item) => {
               const quote = quoteMap[item.key];
               const tone = quote?.changePercent != null && quote.changePercent >= 0 ? 'success' : 'danger';
-              const changeText = quote?.change == null
-                ? '--'
-                : `${quote.change >= 0 ? '+' : ''}${quote.change.toLocaleString('zh-CN', { maximumFractionDigits: 4 })}`;
               const changePctText = quote?.changePercent == null
                 ? '--'
                 : `${quote.changePercent >= 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%`;
@@ -238,26 +235,23 @@ const AssetDashboardPage: React.FC = () => {
                   key={item.key}
                   className="w-[85%] shrink-0 rounded-lg border border-border/60 bg-background/60 p-2.5 sm:w-[48%] xl:w-[calc((100%-1rem)/3)]"
                 >
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-medium text-foreground">{item.label}</div>
-                      <div className="text-[11px] text-secondary-text">{item.code}</div>
+                  <div className="mb-2 flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="text-xs text-secondary-text">{item.label}</div>
+                      <div className="mt-0.5 text-2xl font-semibold text-foreground">{priceText}</div>
                     </div>
-                    <Badge variant={tone}>
-                      {changePctText}
-                    </Badge>
-                  </div>
-                  <div className="rounded-lg border border-border/40 bg-surface/50 px-3 py-4">
-                    <div className="text-2xl font-semibold text-foreground">{priceText}</div>
-                    <div className={`mt-1 text-sm ${quote?.changePercent != null && quote.changePercent >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                      {changeText}
-                      <span className="ml-1">{quote?.changePercent == null ? '' : changePctText}</span>
+                    <div className="mt-1 text-right">
+                      <Badge variant={tone}>
+                        {changePctText}
+                      </Badge>
                     </div>
                   </div>
-                  <div className="mt-2 space-y-1 text-[11px] text-secondary-text">
-                    <div>开盘 {quote?.open != null ? quote.open.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</div>
-                    <div>昨收 {quote?.prevClose != null ? quote.prevClose.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</div>
-                    <div>更新时间 {quote?.updateTime ? quote.updateTime.slice(11, 19) : '--'}</div>
+                  <div className="flex items-center gap-2 text-[10px] text-secondary-text">
+                    <span>O: {quote?.open != null ? quote.open.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</span>
+                    <span>•</span>
+                    <span>C: {quote?.prevClose != null ? quote.prevClose.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</span>
+                    <span>•</span>
+                    <span>{quote?.updateTime ? quote.updateTime.slice(11, 16) : '--'}</span>
                   </div>
                 </div>
               );

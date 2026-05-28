@@ -25,6 +25,11 @@ QUOTE_CACHE_DIR = Path("/tmp/nestcheck_quote")
 QUOTE_CACHE_DIR.mkdir(exist_ok=True)
 QUOTE_CACHE_EXPIRY_SECONDS = 60  # 行情缓存过期时间（秒）
 
+# 分时图缓存配置
+INTRADAY_CACHE_DIR = Path("/tmp/nestcheck_intraday")
+INTRADAY_CACHE_DIR.mkdir(exist_ok=True)
+INTRADAY_CACHE_EXPIRY_SECONDS = 60  # 分时图缓存过期时间（秒）
+
 
 class StockService:
     """
@@ -71,6 +76,81 @@ class StockService:
             logger.debug(f"行情缓存已保存 {stock_code}")
         except Exception as e:
             logger.error(f"保存行情缓存失败 {stock_code}: {e}")
+    
+    def get_intraday_data(self, stock_code: str, days: int = 1) -> Optional[Dict[str, Any]]:
+        """
+        获取分时图数据（分钟线）
+        
+        优先从缓存读取，缓存过期后再调用数据源
+        
+        Args:
+            stock_code: 股票代码
+            days: 获取天数（默认 1 天）
+            
+        Returns:
+            分时图数据字典，包含 prices 列表
+        """
+        # 先查缓存
+        cache = self._load_intraday_cache(stock_code, days)
+        if cache:
+            logger.debug(f"分时图缓存命中：{stock_code}")
+            return cache
+        
+        try:
+            # 调用数据获取器获取历史数据
+            from data_provider.base import DataFetcherManager
+            
+            manager = DataFetcherManager()
+            history = manager.get_history_data(stock_code, period="1m", days=days)
+            
+            if not history or 'data' not in history:
+                logger.warning(f"获取 {stock_code} 分时图数据失败")
+                return None
+            
+            result = {
+                "stock_code": stock_code,
+                "data": history.get('data', []),
+                "_cached_at": datetime.now().isoformat()
+            }
+            
+            # 保存到缓存
+            self._save_intraday_cache(stock_code, days, result)
+            return result
+            
+        except Exception as e:
+            logger.error(f"获取分时图失败：{e}", exc_info=True)
+            return None
+    
+    def _load_intraday_cache(self, stock_code: str, days: int) -> Optional[Dict[str, Any]]:
+        """加载分时图缓存"""
+        cache_file = INTRADAY_CACHE_DIR / f"{stock_code}_{days}d.json"
+        if not cache_file.exists():
+            return None
+        
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 检查缓存是否过期
+            cached_at = datetime.fromisoformat(data.get("_cached_at", "1970-01-01"))
+            if datetime.now() - cached_at > timedelta(seconds=INTRADAY_CACHE_EXPIRY_SECONDS):
+                logger.debug(f"分时图缓存已过期 {stock_code}")
+                return None
+            
+            return data
+        except Exception as e:
+            logger.warning(f"读取分时图缓存失败 {stock_code}: {e}")
+            return None
+    
+    def _save_intraday_cache(self, stock_code: str, days: int, data: Dict[str, Any]):
+        """保存分时图缓存"""
+        cache_file = INTRADAY_CACHE_DIR / f"{stock_code}_{days}d.json"
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.debug(f"分时图缓存已保存 {stock_code}")
+        except Exception as e:
+            logger.error(f"保存分时图缓存失败 {stock_code}: {e}")
     
     def get_realtime_quote(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """

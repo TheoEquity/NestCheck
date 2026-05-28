@@ -140,15 +140,42 @@ def _stock_market() -> Dict[str, Any]:
 
 def _vix_index() -> Dict[str, Any]:
     """
-    VIX 恐慌指数
+    VIX 恐慌指数（中国波指）
     
-    注：index_vix 接口已失效，后续寻找替代数据源
+    数据源：index_option_300etf_qvix (沪深 300ETF 波动率指数)
     """
-    return {
-        "status": "暂无数据",
+    def _fetch():
+        df = ak.index_option_300etf_qvix()
+        if df.empty:
+            return {"error": "数据为空"}
+        
+        current = float(df.iloc[-1]['close'])
+        hist_5y = df.tail(1250)
+        percentile = (hist_5y['close'] < current).mean()
+        
+        if current < 20:
+            status = "温和"
+            badge = "success"
+        elif current < 30:
+            status = "警惕"
+            badge = "warning"
+        else:
+            status = "恐慌"
+            badge = "danger"
+        
+        return {
+            "value": round(current, 2),
+            "percentile": round(float(percentile * 100), 1),
+            "status": status,
+            "badge": badge,
+            "description": f"中国波指 {round(current, 2)} (历史{round(percentile*100)}% 分位)"
+        }
+    
+    return _fetch_with_timeout(_fetch, timeout=10, default={
+        "status": "获取失败",
         "badge": "default",
-        "description": "VIX 数据源接口暂不可用"
-    }
+        "description": "请稍后刷新"
+    })
 
 
 def calculate_market_risk() -> Dict[str, Any]:

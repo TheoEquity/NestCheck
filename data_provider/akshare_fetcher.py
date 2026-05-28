@@ -228,8 +228,19 @@ def _is_us_code(stock_code: str) -> bool:
 
 
 def _to_sina_tx_symbol(stock_code: str) -> str:
-    """Convert 6-digit A-share code to sh/sz/bj prefixed symbol for Sina/Tencent APIs."""
+    """Convert 6-digit A-share code to sh/sz/bj prefixed symbol for Sina/Tencent APIs.
+    
+    Special handling for market indices:
+    - If code already has sh/sz prefix and is 8 chars long (e.g. sh000001, sz399001),
+      return as-is without adding extra prefix
+    - For 6-digit codes, add appropriate prefix based on code pattern
+    """
     base = (stock_code.strip().split(".")[0] if "." in stock_code else stock_code).strip()
+    
+    # Market indices already have prefix (e.g. sh000001, sz399001)
+    if len(base) == 8 and base[:2].lower() in ('sh', 'sz') and base[2:].isdigit():
+        return base.lower()
+    
     if is_bse_code(base):
         return f"bj{base}"
     # Shanghai: 60xxxx, 5xxxx (ETF), 90xxxx (B-shares)

@@ -77,19 +77,36 @@ def normalize_stock_code(stock_code: str) -> str:
     - 'SZ.000001'   -> '000001'   (strip SZ. prefix)
     - 'BJ920748'    -> '920748'   (strip BJ prefix, BSE)
     - 'BJ.920748'   -> '920748'   (strip BJ. prefix, BSE)
-    - 'sh600519'    -> '600519'   (case-insensitive)
+    - 'sh600000'    -> '600000'   (case-insensitive)
     - '600519.SH'   -> '600519'   (strip .SH suffix)
     - '000001.SZ'   -> '000001'   (strip .SZ suffix)
     - '920748.BJ'   -> '920748'   (strip .BJ suffix, BSE)
     - 'HK00700'     -> 'HK00700'  (keep HK prefix for HK stocks)
     - '1810.HK'     -> 'HK01810'  (normalize HK suffix to canonical prefix form)
     - 'AAPL'        -> 'AAPL'     (keep US stock ticker as-is)
+    - 'sh000001'    -> 'sh000001' (keep A 股指数 format)
+    - 'sz399001'    -> 'sz399001' (keep A 股指数 format)
+    
+    Special handling for market indices:
+    - A 股大盘指数（sh/sz开头 + 6 位数字，且第二位是 0-5 开头）保留原始格式
+    - 美股指数（^GSPC, ^IXIC, ^DJI）保留原始格式
+    - 外汇/债券（DX-Y.NYB, USDCNY=X, ^TNX）保留原始格式
 
     This function is applied at the DataProviderManager layer so that
     all individual fetchers receive a clean 6-digit code (for A-shares/ETFs).
     """
     code = stock_code.strip()
     upper = code.upper()
+
+    # A 股大盘指数保留原始格式（sh/sz开头 + 6 位数字）
+    # 例如：sh000001 (上证指数), sz399001 (深证成指)
+    if (code.startswith('sh') or code.startswith('sz')) and len(code) == 8 and code[2:].isdigit():
+        return code.lower()
+    
+    # Detect US/Global indices and forex/bond symbols (keep as-is)
+    # Examples: ^GSPC, ^IXIC, ^DJI, DX-Y.NYB, USDCNY=X, ^TNX
+    if code.startswith('^') or '.' in code or 'USDCNY' in code.upper() or 'DX-' in code.upper():
+        return code
 
     # Normalize HK prefix to a canonical 5-digit form (e.g. hk1810 -> HK01810)
     if upper.startswith('HK') and not upper.startswith('HK.'):

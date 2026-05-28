@@ -117,10 +117,18 @@ def get_stock_minute_data_tencent(stock_code: str, days: int = 1) -> Optional[Li
         days: 获取天数（当前只支持 1 天）
         
     Returns:
-        分钟线数据列表
+        分钟线数据列表（正序排列）
     """
     # 只支持 A 股
     if not stock_code.startswith(('sh', 'sz')):
         return None
     
-    return parse_tencent_minute_data(stock_code)
+    data = parse_tencent_minute_data(stock_code)
+    
+    if not data:
+        return None
+    
+    # 按时间排序确保正序
+    sorted_data = sorted(data, key=lambda x: x['date'])
+    
+    return sorted_data

@@ -3155,7 +3155,7 @@ class DataFetcherManager:
             logger.warning(f"[涨停池] 所有数据源均失败，最终错误：{last_error}")
         return []
 
-    def get_minute_data(self, stock_code: str, days: int = 1, akshare_max_retries: int = 10) -> Optional[List[Dict[str, Any]]]:
+    def get_minute_data(self, stock_code: str, days: int = 1, akshare_max_retries: int = 3) -> Optional[List[Dict[str, Any]]]:
         """
         获取分钟线数据（用于分时图）
         

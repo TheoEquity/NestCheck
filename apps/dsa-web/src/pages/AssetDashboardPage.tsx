@@ -53,40 +53,33 @@ const AssetDashboardPage: React.FC = () => {
   const [quoteMap, setQuoteMap] = useState<Record<string, StockQuote | null>>({});
   const [marketRisk, setMarketRisk] = useState<MarketRiskResponse | null>(null);
   const [isRefreshingMarketData, setIsRefreshingMarketData] = useState(false);
+  const [hasLoadedMarketRisk, setHasLoadedMarketRisk] = useState(false);
   const marketScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
-    const loadMarketData = async () => {
+    const loadMarketQuotes = async () => {
       setIsRefreshingMarketData(true);
       try {
-        const [quoteResults, riskResult] = await Promise.all([
-          Promise.all(MARKET_CARDS.map(async (item) => {
+        const results = await Promise.all(
+          MARKET_CARDS.map(async (item) => {
             try {
               const response = await stocksApi.getQuote(item.code);
               return [item.key, response] as const;
             } catch {
               return [item.key, null] as const;
             }
-          })),
-          (async () => {
-            try {
-              return await marketApi.getRisk();
-            } catch {
-              return null;
-            }
-          })(),
-        ]);
+          }),
+        );
         if (!active) return;
-        setQuoteMap(Object.fromEntries(quoteResults));
-        if (riskResult) setMarketRisk(riskResult);
+        setQuoteMap(Object.fromEntries(results));
       } finally {
         if (!active) return;
         setIsRefreshingMarketData(false);
       }
     };
 
-    void loadMarketData();
+    void loadMarketQuotes();
     return () => {
       active = false;
     };
@@ -283,6 +276,8 @@ const AssetDashboardPage: React.FC = () => {
                 setIsRefreshingMarketData(true);
                 void marketApi.getRisk().then((response) => {
                   setMarketRisk(response);
+                  setHasLoadedMarketRisk(true);
+                }).catch(() => {
                 }).finally(() => {
                   setIsRefreshingMarketData(false);
                 });
@@ -293,7 +288,27 @@ const AssetDashboardPage: React.FC = () => {
               {isRefreshingMarketData ? '刷新中...' : '刷新'}
             </Button>
           </div>
-          {!marketRisk ? (
+          {!hasLoadedMarketRisk ? (
+            <div className="space-y-2 text-xs text-secondary-text">
+              <div className="flex items-center justify-between">
+                <span>股市估值</span>
+                <span className="text-foreground">点击刷新获取</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>债市信号</span>
+                <span className="text-foreground">点击刷新获取</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>美元强弱</span>
+                <span className="text-foreground">点击刷新获取</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between rounded bg-surface/50 px-2 py-1.5">
+                <span>综合体温</span>
+                <span className="text-foreground">等待数据</span>
+              </div>
+              <div>请先点击"刷新"按钮加载市场风险数据</div>
+            </div>
+          ) : !marketRisk ? (
             <div className="space-y-2">
               <div className="h-6 animate-pulse rounded bg-border/20" />
               <div className="h-6 animate-pulse rounded bg-border/20" />

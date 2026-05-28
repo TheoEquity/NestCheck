@@ -3155,18 +3155,19 @@ class DataFetcherManager:
             logger.warning(f"[涨停池] 所有数据源均失败，最终错误：{last_error}")
         return []
 
-    def get_minute_data(self, stock_code: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
+    def get_minute_data(self, stock_code: str, days: int = 1, akshare_max_retries: int = 10) -> Optional[List[Dict[str, Any]]]:
         """
         获取分钟线数据（用于分时图）
         
         数据源优先级：
         1. yfinance - 美股/指数/外汇（5 分钟线）
-        2. akshare - A 股指数（5 分钟线）
+        2. akshare - A 股指数（5 分钟线，支持重试）
         3. tencent - A 股（备用，历史数据）
         
         Args:
             stock_code: 股票/指数代码
             days: 获取天数（最多 5 天）
+            akshare_max_retries: AKShare 最大重试次数（默认 10 次，网络不好时会等待 2-20 秒）
             
         Returns:
             分钟线数据列表
@@ -3180,18 +3181,23 @@ class DataFetcherManager:
         if result is not None:
             return result
         
-        # 2. A 股指数使用 akshare（底层东财数据源）
+        # 2. A 股指数使用 akshare（底层东财数据源，支持重试）
         if stock_code.startswith(('sh', 'sz')):
             try:
                 from . import akshare_minute
                 
-                result = akshare_minute.get_stock_minute_data_akshare(stock_code, days)
+                # 网络不稳定时增加重试次数（默认 10 次，最多等待 2+4+6+8+10+12+14+16+18+20=110 秒）
+                result = akshare_minute.get_stock_minute_data_akshare(
+                    stock_code, 
+                    days, 
+                    max_retries=akshare_max_retries
+                )
                 if result is not None:
                     return result
             except Exception as e:
                 logger.debug(f"[AKShare 分钟线] 失败：{e}")
         
-        # 3. tencent 作为备用（历史数据）
+        # 3. tencent 作为最后备用（历史数据）
         try:
             from . import tencent_minute
             
@@ -3201,5 +3207,5 @@ class DataFetcherManager:
         except Exception as e:
             logger.debug(f"[Tencent 分钟线] 失败：{e}")
         
-        logger.warning(f"[分钟线] 所有数据源均失败：{stock_code}")
+        logger.warning(f"[分钟线] 所有数据源均失败：{stock_code} (AKShare 重试{akshare_max_retries}次)")
         return None

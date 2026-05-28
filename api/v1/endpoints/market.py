@@ -9,6 +9,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 
 from src.storage import get_db, MarketQuote
+from src.services.market_risk_service import calculate_market_risk
 
 logger = logging.getLogger(__name__)
 
@@ -49,3 +50,15 @@ def get_market_indices() -> list:
             ]
     except Exception as exc:
         raise _internal_error("Get market indices failed", exc)
+
+
+@router.get(
+    "/risk",
+    response_model=dict,
+    summary="Get market risk indicators",
+)
+def get_market_risk() -> dict:
+    try:
+        return calculate_market_risk()
+    except Exception as exc:
+        raise _internal_error("Get market risk failed", exc)

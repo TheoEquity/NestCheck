@@ -2,6 +2,7 @@ import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { stocksApi } from '../api/stocks';
+import { marketApi, type MarketRiskResponse } from '../api/market';
 import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader } from '../components/common';
 import type { StockQuote } from '../types/stocks';
 import {
@@ -50,32 +51,42 @@ const AssetDashboardPage: React.FC = () => {
 
   const { positions, error, syncData, isRefreshing } = usePortfolioOverview();
   const [quoteMap, setQuoteMap] = useState<Record<string, StockQuote | null>>({});
+  const [marketRisk, setMarketRisk] = useState<MarketRiskResponse | null>(null);
   const [isRefreshingMarketData, setIsRefreshingMarketData] = useState(false);
   const marketScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
-    const loadMarketSeries = async () => {
+    const loadMarketData = async () => {
       setIsRefreshingMarketData(true);
-      await Promise.all(
-      MARKET_CARDS.map(async (item) => {
-        try {
-          const response = await stocksApi.getQuote(item.code);
-          return [item.key, response] as const;
-        } catch {
-          return [item.key, null] as const;
-        }
-      }),
-      ).then((entries) => {
+      try {
+        const [quoteResults, riskResult] = await Promise.all([
+          Promise.all(MARKET_CARDS.map(async (item) => {
+            try {
+              const response = await stocksApi.getQuote(item.code);
+              return [item.key, response] as const;
+            } catch {
+              return [item.key, null] as const;
+            }
+          })),
+          (async () => {
+            try {
+              return await marketApi.getRisk();
+            } catch {
+              return null;
+            }
+          })(),
+        ]);
         if (!active) return;
-        setQuoteMap(Object.fromEntries(entries));
-      }).finally(() => {
+        setQuoteMap(Object.fromEntries(quoteResults));
+        if (riskResult) setMarketRisk(riskResult);
+      } finally {
         if (!active) return;
         setIsRefreshingMarketData(false);
-      });
+      }
     };
 
-    void loadMarketSeries();
+    void loadMarketData();
     return () => {
       active = false;
     };
@@ -262,37 +273,63 @@ const AssetDashboardPage: React.FC = () => {
         </Card>
 
         <Card className="xl:col-span-4 !rounded-xl" padding="sm">
-          <div className="mb-2 border-b border-border/50 pb-2">
+          <div className="mb-2 flex items-center justify-between border-b border-border/50 pb-2">
             <h2 className="text-base font-semibold text-foreground">市场风险</h2>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setIsRefreshingMarketData(true);
+                void marketApi.getRisk().then((response) => {
+                  setMarketRisk(response);
+                }).finally(() => {
+                  setIsRefreshingMarketData(false);
+                });
+              }}
+              disabled={isRefreshingMarketData}
+              className="!px-2 !py-0.5 text-xs"
+            >
+              {isRefreshingMarketData ? '刷新中...' : '刷新'}
+            </Button>
           </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-secondary-text">股市估值</div>
-              <div className="flex items-center gap-2">
-                <Badge variant="danger">偏高</Badge>
-                <span className="text-xs text-secondary-text">市盈率历史 75% 分位</span>
+          {!marketRisk ? (
+            <div className="space-y-2">
+              <div className="h-6 animate-pulse rounded bg-border/20" />
+              <div className="h-6 animate-pulse rounded bg-border/20" />
+              <div className="h-6 animate-pulse rounded bg-border/20" />
+              <div className="h-8 animate-pulse rounded bg-border/20" />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-secondary-text">股市估值</div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={marketRisk.stockValuation.badge as any}>{marketRisk.stockValuation.status}</Badge>
+                  <span className="text-xs text-secondary-text">{marketRisk.stockValuation.description}</span>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-secondary-text">债市信号</div>
-              <div className="flex items-center gap-2">
-                <Badge variant="success">正常</Badge>
-                <span className="text-xs text-secondary-text">利率环境稳定</span>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-secondary-text">债市信号</div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={marketRisk.bondSignal.badge as any}>{marketRisk.bondSignal.status}</Badge>
+                  <span className="text-xs text-secondary-text">{marketRisk.bondSignal.description}</span>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-secondary-text">美元强弱</div>
-              <div className="flex items-center gap-2">
-                <Badge variant="warning">偏强</Badge>
-                <span className="text-xs text-secondary-text">留意人民币波动</span>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-secondary-text">美元强弱</div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={marketRisk.dollarStrength.badge as any}>{marketRisk.dollarStrength.status}</Badge>
+                  <span className="text-xs text-secondary-text">{marketRisk.dollarStrength.description}</span>
+                </div>
               </div>
+              <div className="mt-2 flex items-center justify-between rounded bg-surface/50 px-2 py-1.5">
+                <span className="text-xs text-secondary-text">综合体温</span>
+                <Badge variant={marketRisk.badge as any}>{marketRisk.temperature}</Badge>
+              </div>
+              <div className="text-xs text-secondary-text">{marketRisk.advice}</div>
             </div>
-            <div className="mt-2 flex items-center justify-between rounded bg-surface/50 px-2 py-1.5">
-              <span className="text-xs text-secondary-text">综合体温</span>
-              <Badge variant="warning">中性偏热</Badge>
-            </div>
-            <div className="text-xs text-secondary-text">建议维持现有仓位，暂缓激进加仓</div>
-          </div>
+          )}
         </Card>
       </section>
 

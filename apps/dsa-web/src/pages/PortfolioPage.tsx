@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pie, PieChart, ResponsiveContainer, Tooltip, Legend, Cell } from 'recharts';
 import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
@@ -13,7 +13,6 @@ import type {
   PortfolioCorporateActionListItem,
   PortfolioCorporateActionType,
   PortfolioCostMethod,
-  PortfolioFxRefreshResponse,
   PortfolioLatestFxRateItem,
   PortfolioImportBrokerItem,
   PortfolioImportCommitResponse,
@@ -38,16 +37,6 @@ type PendingDelete =
   | { eventType: 'trade'; id: number; message: string }
   | { eventType: 'cash'; id: number; message: string }
   | { eventType: 'corporate'; id: number; message: string };
-
-type FxRefreshFeedback = {
-  tone: 'neutral' | 'success' | 'warning';
-  text: string;
-};
-
-type FxRefreshContext = {
-  viewKey: string;
-  requestId: number;
-};
 
 type SummaryBlockItem = {
   label: string;
@@ -139,48 +128,6 @@ function formatBrokerLabel(value: string, displayName?: string): string {
   return value;
 }
 
-function buildFxRefreshFeedback(data: PortfolioFxRefreshResponse): FxRefreshFeedback {
-  if (data.refreshEnabled === false) {
-    return {
-      tone: 'neutral',
-      text: '汇率在线刷新已被禁用。',
-    };
-  }
-
-  if (data.pairCount === 0) {
-    return {
-      tone: 'neutral',
-      text: '当前范围无可刷新的汇率对。',
-    };
-  }
-
-  if (data.updatedCount > 0 && data.staleCount === 0 && data.errorCount === 0) {
-    return {
-      tone: 'success',
-      text: `汇率已刷新，共更新 ${data.updatedCount} 对。`,
-    };
-  }
-
-  const summary = `更新 ${data.updatedCount} 对，仍过期 ${data.staleCount} 对，失败 ${data.errorCount} 对。`;
-  if (data.staleCount > 0) {
-    return {
-      tone: 'warning',
-      text: `已尝试刷新，但仍有部分货币对使用 stale/fallback 汇率。${summary}`,
-    };
-  }
-
-  return {
-    tone: 'warning',
-    text: `在线刷新未完全成功。${summary}`,
-  };
-}
-
-function getFxRefreshFeedbackVariant(tone: FxRefreshFeedback['tone']): PortfolioAlertVariant {
-  if (tone === 'success') return 'success';
-  if (tone === 'warning') return 'warning';
-  return 'info';
-}
-
 function getCsvParseVariant(result: PortfolioImportParseResponse): PortfolioAlertVariant {
   return result.errorCount > 0 || result.skippedCount > 0 ? 'warning' : 'info';
 }
@@ -241,8 +188,6 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
   const [positions, setPositions] = useState<PortfolioPositionRecordItem[]>([]);
   const [fxRates, setFxRates] = useState<PortfolioLatestFxRateItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [fxRefreshing, setFxRefreshing] = useState(false);
-  const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
 
@@ -300,8 +245,6 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
   });
 
   const queryAccountId = selectedAccount === 'all' ? undefined : selectedAccount;
-  const refreshViewKey = `${selectedAccount === 'all' ? 'all' : `account:${selectedAccount}`}:cost:${costMethod}`;
-  const refreshContextRef = useRef<FxRefreshContext>({ viewKey: refreshViewKey, requestId: 0 });
   const hasAccounts = accounts.length > 0;
   const writableAccount = selectedAccount === 'all' ? undefined : accounts.find((item) => item.id === selectedAccount);
   const writableAccountId = writableAccount?.id;
@@ -312,13 +255,6 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
     : eventType === 'cash'
       ? cashEvents.length
       : corporateEvents.length;
-
-  const isActiveRefreshContext = (requestedViewKey: string, requestedRequestId: number) => {
-    return (
-      refreshContextRef.current.viewKey === requestedViewKey
-      && refreshContextRef.current.requestId === requestedRequestId
-    );
-  };
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -383,42 +319,6 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
       setIsLoading(false);
     }
   }, [queryAccountId, costMethod]);
-
-  const refreshStaticDataForScope = useCallback(async (
-    requestedViewKey: string,
-    requestedRequestId: number,
-    requestedAccountId: number | undefined,
-    requestedCostMethod: PortfolioCostMethod,
-  ): Promise<boolean> => {
-    if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-      return false;
-    }
-
-    try {
-      const [positionsData, latestFxData] = await Promise.all([
-        portfolioApi.listPositions({
-          accountId: requestedAccountId,
-          costMethod: requestedCostMethod,
-        }),
-        portfolioApi.getLatestFxRates({ toCurrency: 'CNY' }),
-      ]);
-      if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-        return false;
-      }
-      setPositions((positionsData.items || []).slice().sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0)));
-      setFxRates(latestFxData.items || []);
-      setError(null);
-      return true;
-    } catch (err) {
-      if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-        return false;
-      }
-      setPositions([]);
-      setFxRates([]);
-      setError(getParsedApiError(err));
-      return false;
-    }
-  }, []);
 
   const loadEventsPage = useCallback(async (page: number) => {
     setEventLoading(true);
@@ -495,15 +395,6 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
-
-  useEffect(() => {
-    refreshContextRef.current = {
-      viewKey: refreshViewKey,
-      requestId: refreshContextRef.current.requestId + 1,
-    };
-    setFxRefreshing(false);
-    setFxRefreshFeedback(null);
-  }, [refreshViewKey]);
 
   useEffect(() => {
     setEventPage(1);
@@ -746,51 +637,6 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
     await Promise.all([loadAccounts(), loadPositions(), loadEvents(), loadBrokers()]);
   };
 
-  const handleRefreshFx = async () => {
-    if (!hasAccounts || isLoading || fxRefreshing) {
-      return;
-    }
-
-    const requestedViewKey = refreshViewKey;
-    const requestedAccountId = queryAccountId;
-    const requestedCostMethod = costMethod;
-    const requestedRequestId = refreshContextRef.current.requestId + 1;
-    refreshContextRef.current = {
-      viewKey: requestedViewKey,
-      requestId: requestedRequestId,
-    };
-
-    try {
-      setFxRefreshing(true);
-      setFxRefreshFeedback(null);
-      const result = await portfolioApi.refreshFx({
-        accountId: requestedAccountId,
-      });
-      if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-        return;
-      }
-      const reloaded = await refreshStaticDataForScope(
-        requestedViewKey,
-        requestedRequestId,
-        requestedAccountId,
-        requestedCostMethod,
-      );
-      if (!reloaded || !isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-        return;
-      }
-      setFxRefreshFeedback(buildFxRefreshFeedback(result));
-    } catch (err) {
-      if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-        return;
-      }
-      setError(getParsedApiError(err));
-    } finally {
-      if (isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-        setFxRefreshing(false);
-      }
-    }
-  };
-
   const pageTitle = initializationOnly ? '资产初始化' : '持仓管理';
   const pageDescription = initializationOnly
     ? '先完成账户建账、初始资产录入和券商 CSV 导入，再转入资产事件页维护持续流水。'
@@ -931,7 +777,7 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
                 <button
                   type="button"
                   onClick={() => void handleRefresh()}
-                  disabled={isLoading || fxRefreshing}
+                  disabled={isLoading}
                   className="btn-secondary text-sm flex-1"
                 >
                   {isLoading ? '刷新中...' : '刷新数据'}
@@ -1042,26 +888,9 @@ const PortfolioPage: React.FC<PortfolioPageProps> = ({ mode = 'full' }) => {
           <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(totalCash, 'CNY')}</p>
         </Card>
         <Card className="!rounded-xl" variant="gradient" padding="sm">
-          <div className="flex items-start justify-between gap-3">
-            <p className="text-xs text-secondary">汇率状态</p>
-            <button
-              type="button"
-              className="btn-secondary !px-3 !py-1 !text-xs shrink-0"
-              onClick={() => void handleRefreshFx()}
-              disabled={!hasAccounts || isLoading || fxRefreshing}
-            >
-              {fxRefreshing ? '刷新中...' : '刷新汇率'}
-            </button>
-          </div>
+          <p className="text-xs text-secondary">汇率口径</p>
           <div className="mt-2">{fxStale ? <Badge variant="warning">过期</Badge> : <Badge variant="success">最新</Badge>}</div>
-          {fxRefreshFeedback ? (
-            <InlineAlert
-              variant={getFxRefreshFeedbackVariant(fxRefreshFeedback.tone)}
-              title="汇率刷新结果"
-              message={fxRefreshFeedback.text}
-              className="mt-2 rounded-lg px-3 py-2 text-xs shadow-none"
-            />
-          ) : null}
+          <p className="mt-1 text-xs text-secondary">使用数据库日线汇率换算</p>
         </Card>
       </section>
 

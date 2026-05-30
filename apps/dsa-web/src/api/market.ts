@@ -16,18 +16,95 @@ export interface MarketRiskItem {
   description?: string;
   value?: number;
   percentile?: number;
+  spread?: number;
+  us10y?: number;
+  cn10y?: number;
 }
 
 export interface MarketRiskResponse {
   snapshotDate: string;
-  stockValuation: MarketRiskItem;
-  bondSignal: MarketRiskItem;
+  chineseVix: MarketRiskItem;
+  usVix: MarketRiskItem;
   dollarStrength: MarketRiskItem;
-  vix: MarketRiskItem;
-  temperature: string;
-  badge: string;
-  advice: string;
-  score: number;
+  bondSpread: MarketRiskItem;
+}
+
+export interface WeeklyDataPoint {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  ma10?: number | null;
+  ma20?: number | null;
+  ma50?: number | null;
+}
+
+export interface MarketEnvironment {
+  trend: string;
+  volatility: string;
+  supportPct: number | null;
+  supportStatus: string;
+  label: string;
+  color: string;
+}
+
+export interface MarketTrendItem {
+  label: string;
+  code: string;
+  close: number;
+  dailyClose: number | null;
+  dailyPctChg: number | null;
+  ma10: number;
+  ma20: number;
+  ma50: number;
+  weeklyData: WeeklyDataPoint[];
+  environment: MarketEnvironment;
+  error?: string;
+}
+
+export interface MarketTrendResponse {
+  snapshotDate: string;
+  data: Record<string, MarketTrendItem>;
+}
+
+export interface MonthlySeasonalityResponse {
+  index: string;
+  yearsStat: number;
+  months: string[];
+  avgReturns: number[];
+  winRates: number[];
+}
+
+export interface RiskRadarResponse {
+  volatility: number;
+  drawdown: number;
+  correlation: number;
+  spread: number;
+  fx: number;
+  valuation: number;
+  details: Record<string, number | null>;
+  error: string | null;
+  label: string;
+}
+
+export interface CorrelationMatrixResponse {
+  labels: string[];
+  data: Array<[number, number, number]>;
+  error: string | null;
+}
+
+export interface MarketRefreshResponse {
+  refreshedAt: string;
+  items: Record<string, { status: string; refreshedAt?: string | null; error?: string }>;
+}
+
+export interface EquityRatioResponse {
+  equityRatio: number;
+  totalCny: number;
+  equityCny: number;
+  detail: Record<string, { total: number; equity: number; weight: number }>;
 }
 
 export const marketApi = {
@@ -39,5 +116,35 @@ export const marketApi = {
   async getRisk(): Promise<MarketRiskResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/risk');
     return toCamelCase<MarketRiskResponse>(response.data);
+  },
+
+  async getTrend(): Promise<MarketTrendResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/trend');
+    return toCamelCase<MarketTrendResponse>(response.data);
+  },
+
+  async getSeasonality(): Promise<MonthlySeasonalityResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/seasonality');
+    return toCamelCase<MonthlySeasonalityResponse>(response.data);
+  },
+
+  async getRadar(): Promise<RiskRadarResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/radar');
+    return toCamelCase<RiskRadarResponse>(response.data);
+  },
+
+  async getCorrelation(): Promise<CorrelationMatrixResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/correlation');
+    return toCamelCase<CorrelationMatrixResponse>(response.data);
+  },
+
+  async refreshDashboard(): Promise<MarketRefreshResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/market/refresh');
+    return toCamelCase<MarketRefreshResponse>(response.data);
+  },
+
+  async getEquityRatio(): Promise<EquityRatioResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/equity-ratio');
+    return toCamelCase<EquityRatioResponse>(response.data);
   },
 };

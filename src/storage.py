@@ -642,6 +642,40 @@ class MarketQuote(Base):
         return f"<MarketQuote(code={self.code}, name={self.name}, latest_price={self.latest_price})>"
 
 
+class MarketCache(Base):
+    """SQLite-backed cache for derived market dashboard payloads."""
+
+    __tablename__ = 'market_cache'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key = Column(String(64), nullable=False, unique=True, index=True)
+    payload = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, default='success')
+    error = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    refreshed_at = Column(DateTime, default=datetime.now, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class ScheduledTask(Base):
+    """定时任务定义：名称、调度配置、启用状态等。"""
+
+    __tablename__ = 'scheduled_task'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_key = Column(String(64), nullable=False, unique=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=True)
+    schedule_type = Column(String(16), nullable=False, default='daily')  # daily / interval / cron
+    schedule_time = Column(String(32), nullable=True)  # HH:MM for daily; cron expr for cron
+    interval_seconds = Column(Integer, nullable=True)  # for interval type
+    enabled = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class ConversationMessage(Base):
     """
     Agent 对话历史记录表
@@ -1155,6 +1189,47 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             ).scalars().all()
             
             return list(results)
+
+    def get_daily_history_df(self, code: str, days: int = 500) -> pd.DataFrame:
+        """
+        从数据库读取指定股票/指数最近 N 天的日线数据，返回 DataFrame
+        
+        Args:
+            code: 代码 (如 600519, sh000300, ^GSPC)
+            days: 获取天数
+            
+        Returns:
+            包含 date, open, high, low, close, volume, amount, pct_chg 的 DataFrame
+        """
+        with self.get_session() as session:
+            # Use desc to get newest rows, then reverse to get ascending order
+            results = session.execute(
+                select(StockDaily)
+                .where(StockDaily.code == code)
+                .order_by(desc(StockDaily.date))
+                .limit(days)
+            ).scalars().all()
+            
+            if not results:
+                return pd.DataFrame()
+            
+            # Reverse to get ascending date order
+            results = list(reversed(results))
+            
+            records = []
+            for r in results:
+                records.append({
+                    'date': r.date,
+                    'open': r.open,
+                    'high': r.high,
+                    'low': r.low,
+                    'close': r.close,
+                    'volume': r.volume,
+                    'amount': r.amount,
+                    'pct_chg': r.pct_chg,
+                })
+            
+            return pd.DataFrame(records)
 
     def save_news_intel(
         self,
@@ -2657,6 +2732,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 def get_db() -> DatabaseManager:
     """获取数据库管理器实例的快捷方式"""
     return DatabaseManager.get_instance()
+
+# 简化别名，供 services 层导入使用
+StorageManager = DatabaseManager
 
 
 def persist_llm_usage(

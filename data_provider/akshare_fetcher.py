@@ -110,6 +110,30 @@ def _is_etf_code(stock_code: str) -> bool:
     return code.startswith(etf_prefixes) and len(code) == 6
 
 
+def _is_index_code(stock_code: str) -> bool:
+    """
+    判断代码是否为 A 股大盘指数代码
+    
+    指数代码规则：
+    - 上交所指数: 000xxx (如 000001 上证指数, 000300 沪深300)
+    - 深交所指数: 399xxx (如 399001 深证成指, 399006 创业板指)
+    - 可能带有 sh/sz 前缀 (如 sh000001, sz399001) 或纯 6 位数字 (如 000001)
+    
+    Args:
+        stock_code: 指数代码
+        
+    Returns:
+        True 表示是指数代码，False 表示是普通股票代码
+    """
+    code = stock_code.strip().split('.')[0]
+    # 去除 sh/sz 前缀（如果有的话）
+    if len(code) >= 2 and code[:2].lower() in ('sh', 'sz'):
+        code = code[2:]
+    # 指数代码规则：6位数字，以 000, 001, 002, 399 开头
+    index_prefixes = ('000', '001', '002', '399')
+    return code.startswith(index_prefixes) and len(code) == 6 and code.isdigit()
+
+
 def _is_hk_code(stock_code: str) -> bool:
     """
     判断代码是否为港股
@@ -243,8 +267,8 @@ def _to_sina_tx_symbol(stock_code: str) -> str:
     
     if is_bse_code(base):
         return f"bj{base}"
-    # Shanghai: 60xxxx, 5xxxx (ETF), 90xxxx (B-shares)
-    if base.startswith(("6", "5", "90")):
+    # Shanghai: 60xxxx, 5xxxx (ETF), 90xxxx (B-shares), 000xxx (index)
+    if base.startswith(("6", "5", "90", "000", "001")):
         return f"sh{base}"
     return f"sz{base}"
 
@@ -414,6 +438,8 @@ class AkshareFetcher(BaseFetcher):
             return self._fetch_hk_data(stock_code, start_date, end_date)
         elif _is_etf_code(stock_code):
             return self._fetch_etf_data(stock_code, start_date, end_date)
+        elif _is_index_code(stock_code):
+            return self._fetch_index_data(stock_code, start_date, end_date)
         else:
             return self._fetch_stock_data(stock_code, start_date, end_date)
     
@@ -801,6 +827,136 @@ class AkshareFetcher(BaseFetcher):
                 raise RateLimitError(f"Akshare 可能被限流: {e}") from e
             
             raise DataFetchError(f"Akshare 获取港股数据失败: {e}") from e
+    
+    def _fetch_index_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        获取 A 股指数历史数据
+        
+        数据来源：
+        1. 东方财富接口 (ak.stock_zh_index_daily_em) - 获取全部历史后按日期过滤
+        2. 新浪财经接口 (ak.stock_zh_index_daily) - 支持 start_date/end_date
+        
+        Args:
+            stock_code: 指数代码，如 '000001' (上证指数), '399001' (深证成指)
+            start_date: 开始日期，格式 'YYYY-MM-DD'
+            end_date: 结束日期，格式 'YYYY-MM-DD'
+            
+        Returns:
+            指数历史数据 DataFrame
+        """
+        # 尝试列表：东方财富 -> 新浪财经
+        methods = [
+            (self._fetch_index_data_em, "东方财富(指数)"),
+            (self._fetch_index_data_sina, "新浪财经(指数)"),
+        ]
+
+        last_error = None
+
+        for fetch_method, source_name in methods:
+            try:
+                logger.info(f"[数据源] 尝试使用 {source_name} 获取 {stock_code}...")
+                df = fetch_method(stock_code, start_date, end_date)
+
+                if df is not None and not df.empty:
+                    logger.info(f"[数据源] {source_name} 获取成功")
+                    return df
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[数据源] {source_name} 获取失败: {e}")
+
+        # 所有都失败
+        raise DataFetchError(f"Akshare 所有指数渠道获取失败: {last_error}")
+
+    def _fetch_index_data_em(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        获取 A 股指数历史数据 (东方财富)
+        数据来源：ak.stock_zh_index_daily_em()
+        """
+        import akshare as ak
+
+        # 防封禁策略 1: 随机 User-Agent
+        self._set_random_user_agent()
+
+        # 防封禁策略 2: 强制休眠
+        self._enforce_rate_limit()
+
+        logger.info(f"[API调用] ak.stock_zh_index_daily_em(symbol={stock_code})")
+
+        try:
+            import time as _time
+            api_start = _time.time()
+
+            df = ak.stock_zh_index_daily_em(symbol=stock_code)
+
+            api_elapsed = _time.time() - api_start
+
+            if df is not None and not df.empty:
+                logger.info(f"[API返回] ak.stock_zh_index_daily_em 成功: {len(df)} 行, 耗时 {api_elapsed:.2f}s")
+                return df
+            else:
+                logger.warning(f"[API返回] ak.stock_zh_index_daily_em 返回空数据")
+                return pd.DataFrame()
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            raise e
+
+    def _fetch_index_data_sina(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        获取 A 股指数历史数据 (新浪财经)
+        数据来源：ak.stock_zh_index_daily()
+        注意：此接口不支持 start_date/end_date 参数，需获取全部后过滤
+        """
+        import akshare as ak
+
+        # 转换代码格式：sh000001, sz399001
+        symbol = _to_sina_tx_symbol(stock_code)
+
+        self._enforce_rate_limit()
+
+        try:
+            # Sina API 不支持日期参数，获取全部数据
+            df = ak.stock_zh_index_daily(symbol=symbol)
+
+            if df is not None and not df.empty:
+                # 确保日期列是 datetime 类型
+                date_col = 'date' if 'date' in df.columns else '日期'
+                if date_col == 'date':
+                    df = df.rename(columns={'date': '日期'})
+
+                # 按日期过滤
+                df['日期'] = pd.to_datetime(df['日期'])
+                df = df[(df['日期'] >= start_date) & (df['日期'] <= end_date)]
+
+                if df.empty:
+                    return pd.DataFrame()
+
+                # 映射其他列
+                rename_map = {
+                    'open': '开盘', 'high': '最高', 'low': '最低',
+                    'close': '收盘', 'volume': '成交量'
+                }
+                df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+
+                # 计算涨跌幅
+                if '收盘' in df.columns:
+                    df['涨跌幅'] = df['收盘'].pct_change() * 100
+                    df['涨跌幅'] = df['涨跌幅'].fillna(0)
+
+                # 估算成交额
+                if '成交量' in df.columns and '收盘' in df.columns:
+                    df['成交额'] = df['成交量'] * df['收盘']
+                else:
+                    df['成交额'] = 0
+
+                return df
+            return pd.DataFrame()
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['banned', 'blocked', '频率', 'rate', '限制']):
+                raise RateLimitError(f"Akshare(Sina指数) 可能被限流: {e}") from e
+            raise e
     
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         """

@@ -10,3 +10,4 @@ export * from './SettingsPanelErrorBoundary';
 export * from './SettingsSectionCard';
 export * from './SettingsCategoryNav';
 export * from './AuthSettingsCard';
+export { SchedulerTasksPanel } from './SchedulerTasksPanel';

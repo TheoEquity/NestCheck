@@ -726,6 +726,29 @@ def _reload_runtime_config() -> Config:
     return get_config()
 
 
+def run_daily_analysis():
+    """每日定时任务入口：大盘同步 -> 自选同步 -> 分析与研报"""
+    try:
+        runtime_config = _reload_runtime_config()
+        args = parse_arguments()
+        
+        # Step 1: Sync Indices & Sentiment to DB (Task 1 Extension)
+        try:
+            from src.services.market_sync_service import sync_market_data
+            logger.info("[Task 1] 正在同步大盘指数与情绪指标...")
+            sync_market_data(days=30)
+            logger.info("[Task 1] 大盘与情绪指标同步完成。")
+        except Exception as e:
+            logger.warning(f"[Task 1] 大盘同步非致命失败，继续执行: {e}")
+
+        # Step 2: Run Stock Analysis
+        stock_codes = _resolve_scheduled_stock_codes(None)
+        run_full_analysis(runtime_config, args, stock_codes)
+    except Exception as e:
+        logger.exception(f"每日定时任务执行失败: {e}")
+        raise
+
+
 def _build_schedule_time_provider(default_schedule_time: str):
     """Read the latest schedule time directly from the active config file.
 
@@ -958,6 +981,7 @@ def main() -> int:
             run_with_schedule(
                 task=scheduled_task,
                 schedule_time=config.schedule_time,
+                schedule_cron=getattr(config, 'schedule_cron', ''),
                 run_immediately=should_run_immediately,
                 background_tasks=background_tasks,
                 schedule_time_provider=schedule_time_provider,

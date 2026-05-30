@@ -1,11 +1,22 @@
 import type React from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { stocksApi } from '../api/stocks';
-import { marketApi, type MarketRiskResponse } from '../api/market';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  marketApi,
+  type CorrelationMatrixResponse,
+  type MarketRiskResponse,
+  type MarketTrendResponse,
+  type MonthlySeasonalityResponse,
+  type RiskRadarResponse,
+  type EquityRatioResponse,
+} from '../api/market';
 import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader } from '../components/common';
-import { MiniSparkline } from '../components/MiniSparkline';
-import type { StockQuote } from '../types/stocks';
+import { WeeklyTrendChart } from '../components/WeeklyTrendChart';
+import { RiskRadar } from '../components/RiskRadar';
+import { SeasonalityChart } from '../components/SeasonalityChart';
+import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
+import { PositionLiquidGauge } from '../components/PositionLiquidGauge';
+import { TrafficLightLabel } from '../components/TrafficLightLabel';
+import { Gauge } from '../components/Gauge';
 import {
   formatMoney,
   formatPct,
@@ -13,24 +24,6 @@ import {
   getPositionRiskLevel,
   usePortfolioOverview,
 } from './assetsShared';
-
-type MarketCard = {
-  key: string;
-  label: string;
-  code: string;
-};
-
-const MARKET_CARDS: MarketCard[] = [
-  { key: 'sh', label: '上证指数', code: 'sh000001' },
-  { key: 'sz', label: '深圳成指', code: 'sz399001' },
-  { key: 'cyb', label: '创业板指', code: 'sz399006' },
-  { key: 'dji', label: '道琼斯', code: '^DJI' },
-  { key: 'ixic', label: '纳斯达克', code: '^IXIC' },
-  { key: 'gspc', label: '标普500', code: '^GSPC' },
-  { key: 'dxy', label: '美元指数', code: 'DX-Y.NYB' },
-  { key: 'usdcny', label: '美元/人民币汇率', code: 'USDCNY=X' },
-  { key: 'tnx', label: '10年期美债', code: '^TNX' },
-];
 
 const getStaticHealthTone = (score: number): 'success' | 'warning' | 'danger' => {
   if (score >= 80) return 'success';
@@ -45,59 +38,136 @@ const getStaticHealthLabel = (score: number): string => {
   return '预警';
 };
 
+const TREND_GROUPS = [
+  { key: 'cn', label: 'A 股重要指数', order: ['sh', 'sz', 'cyb'] },
+  { key: 'core-cn', label: '中国核心宽基', order: ['a500', 'hs300', 'zz500'] },
+  { key: 'us', label: '美股重要指数', order: ['dji', 'ixic', 'gspc'] },
+  { key: 'macro', label: '宏观流动性', order: ['dxy', 'usdcny', 'tnx'] },
+];
+
+const GAUGE_SEGMENTS = {
+  sentiment: [
+    { label: '安全', min: 0, max: 20, color: '#22c55e' },
+    { label: '警惕', min: 20, max: 30, color: '#f59e0b' },
+    { label: '恐慌', min: 30, max: 50, color: '#ef4444' },
+  ],
+  fx: [
+    { label: '偏弱', min: 6.5, max: 7.0, color: '#22c55e' },
+    { label: '偏强', min: 7.0, max: 7.3, color: '#f59e0b' },
+    { label: '强势', min: 7.3, max: 7.8, color: '#ef4444' },
+  ],
+  spread: [
+    { label: '正常', min: -2, max: 1, color: '#22c55e' },
+    { label: '偏高', min: 1, max: 3, color: '#f59e0b' },
+    { label: '倒挂', min: 3, max: 4, color: '#ef4444' },
+  ],
+};
+
+const FALLBACK_ENVIRONMENT = {
+  label: '数据加载中',
+  color: 'gray',
+  trend: 'unknown',
+  volatility: 'unknown',
+  supportPct: null,
+  supportStatus: 'unknown',
+};
+
+type MarketDashboardResults = [
+  PromiseSettledResult<MarketRiskResponse>,
+  PromiseSettledResult<MarketTrendResponse>,
+  PromiseSettledResult<MonthlySeasonalityResponse>,
+  PromiseSettledResult<RiskRadarResponse>,
+  PromiseSettledResult<CorrelationMatrixResponse>,
+];
+
+const fetchMarketDashboardData = async (): Promise<MarketDashboardResults> => {
+  const results = await Promise.allSettled([
+    marketApi.getRisk(),
+    marketApi.getTrend(),
+    marketApi.getSeasonality(),
+    marketApi.getRadar(),
+    marketApi.getCorrelation(),
+  ]);
+  return results as MarketDashboardResults;
+};
+
+const getRadarLabel = (label?: string): string => {
+  if (label === 'green') return '低风险';
+  if (label === 'yellow') return '中风险';
+  if (label === 'red') return '高风险';
+  return '...';
+};
+
+const getRadarLabelClass = (label?: string): string => {
+  if (label === 'green') return 'bg-green-100 text-green-700';
+  if (label === 'yellow') return 'bg-yellow-100 text-yellow-700';
+  if (label === 'red') return 'bg-red-100 text-red-700';
+  return 'bg-gray-100 text-gray-500';
+};
+
+const GaugeSkeletonGrid: React.FC = () => (
+  <div className="grid grid-cols-2 gap-3 p-1">
+    {Array.from({ length: 4 }).map((_, index) => (
+      <div key={index} className="h-28 animate-pulse rounded-lg bg-border/20" />
+    ))}
+  </div>
+);
+
 const AssetDashboardPage: React.FC = () => {
   useEffect(() => {
     document.title = '资产主界面 - NestCheck';
   }, []);
 
-  const { positions, error, syncData, isRefreshing } = usePortfolioOverview();
-  const [quoteMap, setQuoteMap] = useState<Record<string, StockQuote | null>>({});
-  const [intradayDataMap, setIntradayDataMap] = useState<Record<string, any[]>>({});
+  const { positions, error, syncData } = usePortfolioOverview();
   const [marketRisk, setMarketRisk] = useState<MarketRiskResponse | null>(null);
-  const [isRefreshingMarketData, setIsRefreshingMarketData] = useState(false);
-  const [hasLoadedMarketRisk, setHasLoadedMarketRisk] = useState(false);
-  const marketScrollRef = useRef<HTMLDivElement | null>(null);
+  const [marketTrend, setMarketTrend] = useState<MarketTrendResponse | null>(null);
+  const [seasonality, setSeasonality] = useState<MonthlySeasonalityResponse | null>(null);
+  const [riskRadar, setRiskRadar] = useState<RiskRadarResponse | null>(null);
+  const [correlation, setCorrelation] = useState<CorrelationMatrixResponse | null>(null);
+  const [equityRatio, setEquityRatio] = useState<EquityRatioResponse | null>(null);
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const [hasLoadedRiskAndTrend, setHasLoadedRiskAndTrend] = useState(false);
+  const [trendGroupIdx, setTrendGroupIdx] = useState(0);
+
+  const applyMarketResults = useCallback((results: MarketDashboardResults) => {
+    const [riskResult, trendResult, seasonResult, radarResult, corrResult] = results;
+
+    if (riskResult.status === 'fulfilled') setMarketRisk(riskResult.value);
+    if (trendResult.status === 'fulfilled') setMarketTrend(trendResult.value);
+    if (seasonResult.status === 'fulfilled') setSeasonality(seasonResult.value);
+    if (radarResult.status === 'fulfilled') setRiskRadar(radarResult.value);
+    if (corrResult.status === 'fulfilled') setCorrelation(corrResult.value);
+    setHasLoadedRiskAndTrend(true);
+  }, []);
+
+  const refreshAllData = useCallback(() => {
+    setIsRefreshingAll(true);
+    void Promise.allSettled([
+      syncData(),
+      marketApi.refreshDashboard(),
+    ]).then(fetchMarketDashboardData)
+      .then(applyMarketResults)
+      .finally(() => setIsRefreshingAll(false));
+  }, [applyMarketResults, syncData]);
 
   useEffect(() => {
     let active = true;
-    const loadMarketData = async () => {
-      setIsRefreshingMarketData(true);
-      try {
-        const [quoteResults, intradayResults] = await Promise.all([
-          Promise.all(
-            MARKET_CARDS.map(async (item) => {
-              try {
-                const response = await stocksApi.getQuote(item.code);
-                return [item.key, response] as const;
-              } catch {
-                return [item.key, null] as const;
-              }
-            }),
-          ),
-          Promise.all(
-            MARKET_CARDS.map(async (item) => {
-              try {
-                const response = await stocksApi.getIntraday(item.code, 1);
-                return [item.key, response.data || []] as const;
-              } catch {
-                return [item.key, []] as const;
-              }
-            }),
-          ),
-        ]);
-        if (!active) return;
-        setQuoteMap(Object.fromEntries(quoteResults));
-        setIntradayDataMap(Object.fromEntries(intradayResults));
-      } finally {
-        if (!active) return;
-        setIsRefreshingMarketData(false);
-      }
+    const loadData = async () => {
+      const results = await fetchMarketDashboardData();
+      if (!active) return;
+      applyMarketResults(results);
     };
+    void loadData();
+    return () => { active = false; };
+  }, [applyMarketResults]);
 
-    void loadMarketData();
-    return () => {
-      active = false;
-    };
+  // Load equity ratio once on mount
+  useEffect(() => {
+    let active = true;
+    void marketApi.getEquityRatio().then((r) => {
+      if (active) setEquityRatio(r);
+    });
+    return () => { active = false; };
   }, []);
 
   const assetSummary = useMemo(() => {
@@ -113,54 +183,66 @@ const AssetDashboardPage: React.FC = () => {
     () => positions.reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0),
     [positions],
   );
-  const totalCost = useMemo(
-    () => positions.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
-    [positions],
-  );
-  const totalUnrealizedPnl = useMemo(
-    () => positions.reduce((sum, item) => sum + Number(item.unrealizedPnlBase || 0), 0),
-    [positions],
-  );
-  const topPositionPct = useMemo(() => {
-    if (totalMarketValue <= 0 || topHoldings.length === 0) return 0;
-    return (Number(topHoldings[0]?.marketValueBase || 0) / totalMarketValue) * 100;
-  }, [topHoldings, totalMarketValue]);
   const highRiskPositionCount = useMemo(
-    () => positions.filter((item) => getPositionRiskLevel(item) === '高').length,
+    () => positions.filter((p) => getPositionRiskLevel(p) === '高').length,
     [positions],
   );
-  const healthScore = useMemo(() => {
-    let score = 90;
-    if (topPositionPct > 35) score -= 24;
-    else if (topPositionPct > 25) score -= 12;
-    if (highRiskPositionCount >= 3) score -= 18;
-    else if (highRiskPositionCount >= 1) score -= 8;
-    return Math.max(18, Math.min(96, score));
-  }, [highRiskPositionCount, topPositionPct]);
-  const marketAlertRows = useMemo(() => {
-    const topThreeValue = topHoldings.slice(0, 3).reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0);
-    const topThreePct = totalMarketValue > 0 ? (topThreeValue / totalMarketValue) * 100 : 0;
-    const profitPct = totalCost > 0 ? (totalUnrealizedPnl / totalCost) * 100 : 0;
-    return [
-      { label: 'Top1 仓位', value: formatPct(topPositionPct), tone: topPositionPct > 35 ? 'danger' : topPositionPct > 25 ? 'warning' : 'success' },
-      { label: '前 3 仓位', value: formatPct(topThreePct), tone: topThreePct > 65 ? 'danger' : topThreePct > 50 ? 'warning' : 'success' },
-      { label: '高风险标的', value: String(highRiskPositionCount), tone: highRiskPositionCount >= 3 ? 'danger' : highRiskPositionCount >= 1 ? 'warning' : 'success' },
-      { label: '静态收益率', value: formatPct(profitPct), tone: profitPct < -10 ? 'danger' : profitPct < 0 ? 'warning' : 'success' },
-    ] as const;
-  }, [highRiskPositionCount, topHoldings, topPositionPct, totalCost, totalMarketValue, totalUnrealizedPnl]);
 
-  const scrollMarketCards = (direction: 'left' | 'right') => {
-    const container = marketScrollRef.current;
-    if (!container) return;
-    const step = Math.max(container.clientWidth * 0.92, 320);
-    container.scrollBy({
-      left: direction === 'left' ? -step : step,
-      behavior: 'smooth',
-    });
-  };
+  const topPositionPct = useMemo(() => {
+    if (totalMarketValue === 0 || positions.length === 0) return 0;
+    return Number(positions[0].marketValueBase || 0) / totalMarketValue * 100;
+  }, [positions, totalMarketValue]);
+
+  const avgUnrealizedPnlPct = useMemo(() => {
+    if (positions.length === 0) return 0;
+    const total = positions.reduce((sum, p) => sum + Number(p.unrealizedPnlPct || 0), 0);
+    return total / positions.length;
+  }, [positions]);
+
+  const marketAlertRows = useMemo(() => [
+    { label: '最大单票占比', value: `${Math.round(topPositionPct)}%`, tone: topPositionPct >= 40 ? 'danger' : topPositionPct >= 25 ? 'warning' : 'success' as const },
+    { label: '高风险标的', value: String(highRiskPositionCount), tone: highRiskPositionCount >= 3 ? 'danger' : highRiskPositionCount >= 1 ? 'warning' : 'success' as const },
+    { label: '平均盈亏比', value: formatPct(avgUnrealizedPnlPct), tone: avgUnrealizedPnlPct < -10 ? 'danger' : avgUnrealizedPnlPct < 0 ? 'warning' : 'success' as const },
+  ], [highRiskPositionCount, topPositionPct, avgUnrealizedPnlPct]);
+
+  const healthScore = useMemo(() => {
+    let score = 60;
+    score += Math.min(15, Math.max(-15, avgUnrealizedPnlPct));
+    score -= Math.min(15, Math.max(0, topPositionPct - 10));
+    score -= highRiskPositionCount * 5;
+    return Math.min(100, Math.max(0, score));
+  }, [avgUnrealizedPnlPct, topPositionPct, highRiskPositionCount]);
+
+  // Map trend data by key for quick lookup
+  const trendMap = useMemo(() => {
+    if (!marketTrend?.data) return new Map();
+    const map = new Map<string, NonNullable<MarketTrendResponse['data']>[string]>();
+    for (const [key, value] of Object.entries(marketTrend.data)) {
+      if (value) map.set(key, value);
+    }
+    return map;
+  }, [marketTrend]);
+
+  const currentTrendItems = useMemo(() => {
+    const group = TREND_GROUPS[trendGroupIdx];
+    return group.order
+      .map((key) => {
+        const item = trendMap.get(key);
+        if (!item) return { key, label: key.toUpperCase(), weeklyData: [], environment: FALLBACK_ENVIRONMENT };
+        return { key, ...item };
+      });
+  }, [trendMap, trendGroupIdx]);
+
+  const goPrev = useCallback(() => {
+    setTrendGroupIdx((prev) => (prev - 1 + TREND_GROUPS.length) % TREND_GROUPS.length);
+  }, []);
+
+  const goNext = useCallback(() => {
+    setTrendGroupIdx((prev) => (prev + 1) % TREND_GROUPS.length);
+  }, []);
 
   return (
-    <AppPage className="max-w-[1600px] space-y-3">
+    <AppPage className="max-w-[1920px] space-y-3">
       <PageHeader
         eyebrow="NestCheck"
         title="稳巢"
@@ -168,289 +250,223 @@ const AssetDashboardPage: React.FC = () => {
         className="!rounded-xl !px-4 !py-3"
         actions={
           <Button
-            onClick={() => void syncData()}
-            disabled={isRefreshing}
+            onClick={() => void refreshAllData()}
+            disabled={isRefreshingAll}
             variant="primary"
             size="sm"
             className="!px-4 !py-1.5"
           >
-            {isRefreshing ? '重估中...' : '重估'}
+            {isRefreshingAll ? '刷新中...' : '实时数据刷新'}
           </Button>
         }
       />
 
       {error ? <ApiErrorAlert error={error} /> : null}
 
-      <section className="grid gap-2 xl:grid-cols-12">
-        <Card className="xl:col-span-8 !rounded-xl" padding="sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">市场实时风向</h2>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setIsRefreshingMarketData(true);
-                  void Promise.all(
-                    MARKET_CARDS.map(async (item) => {
-                      try {
-                        const response = await stocksApi.getQuote(item.code);
-                        return [item.key, response] as const;
-                      } catch {
-                        return [item.key, null] as const;
-                      }
-                    }),
-                  ).then((entries) => {
-                    setQuoteMap(Object.fromEntries(entries));
-                  }).finally(() => {
-                    setIsRefreshingMarketData(false);
-                  });
-                }}
-                disabled={isRefreshingMarketData}
-                className="!px-3 !py-1"
-              >
-                {isRefreshingMarketData ? '刷新中...' : '刷新数据'}
-              </Button>
-              <div className="flex items-center gap-1">
+      {/* 上方：左侧趋势卡片 + 右侧市场情绪仪表盘 */}
+      <section className="grid gap-3 xl:grid-cols-12 items-stretch">
+        {/* 左侧：市场趋势 (3指标/组，箭头切换) */}
+        <Card className="xl:col-span-8 !rounded-xl !p-4">
+          <div className="flex items-center justify-between px-1 mb-3">
+            <h2 className="text-base font-semibold text-foreground">市场趋势</h2>
+            <span className="text-xs text-secondary-text">周线级别 · MA10/20/50 均线系统</span>
+          </div>
+
+          {!hasLoadedRiskAndTrend ? (
+            <div className="h-40 animate-pulse rounded-xl bg-border/20" />
+          ) : (
+            <>
+              {/* 分组切换工具栏 */}
+              <div className="flex items-center justify-center gap-3 mb-4">
                 <button
                   type="button"
-                  aria-label="向左查看市场卡片"
-                  onClick={() => scrollMarketCards('left')}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-background/60 text-secondary-text transition-colors hover:text-foreground"
+                  onClick={goPrev}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-background/60 text-secondary-text hover:text-foreground hover:border-border transition-colors"
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <svg className="h-4 w-4" fill="none" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
                 </button>
-                <button
-                  type="button"
-                  aria-label="向右查看市场卡片"
-                  onClick={() => scrollMarketCards('right')}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-background/60 text-secondary-text transition-colors hover:text-foreground"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-          <div
-            ref={marketScrollRef}
-            className="flex gap-2 overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {MARKET_CARDS.map((item) => {
-              const quote = quoteMap[item.key];
-              const intradayData = intradayDataMap[item.key] || [];
-              const tone = quote?.changePercent != null && quote.changePercent >= 0 ? 'success' : 'danger';
-              const lineColor = quote?.changePercent != null && quote.changePercent >= 0 ? '#22c55e' : '#ef4443';
-              const changePctText = quote?.changePercent == null
-                ? '--'
-                : `${quote.changePercent >= 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%`;
-              const priceText = quote?.currentPrice != null
-                ? quote.currentPrice.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
-                : '--';
-              return (
-                <div
-                  key={item.key}
-                  className="w-[85%] shrink-0 rounded-lg border border-border/60 bg-background/60 p-2.5 sm:w-[48%] xl:w-[calc((100%-1rem)/3)]"
-                >
-                  <div className="mb-2 flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="text-xs text-secondary-text">{item.label}</div>
-                      <div className="mt-0.5 text-2xl font-semibold text-foreground">{priceText}</div>
-                    </div>
-                    <div className="mt-1 text-right">
-                      <Badge variant={tone}>
-                        {changePctText}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="mb-2 h-[40px]">
-                    <MiniSparkline data={intradayData} color={lineColor} height={40} />
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-secondary-text">
-                    <span>O: {quote?.open != null ? quote.open.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</span>
-                    <span>•</span>
-                    <span>C: {quote?.prevClose != null ? quote.prevClose.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '--'}</span>
-                    <span>•</span>
-                    <span>{quote?.updateTime ? quote.updateTime.slice(11, 16) : '--'}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card className="xl:col-span-4 !rounded-xl" padding="sm">
-          <div className="mb-2 flex items-center justify-between border-b border-border/50 pb-2">
-            <h2 className="text-base font-semibold text-foreground">市场风险</h2>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setIsRefreshingMarketData(true);
-                void marketApi.getRisk().then((response) => {
-                  setMarketRisk(response);
-                  setHasLoadedMarketRisk(true);
-                }).catch(() => {
-                }).finally(() => {
-                  setIsRefreshingMarketData(false);
-                });
-              }}
-              disabled={isRefreshingMarketData}
-              className="!px-2 !py-0.5 text-xs"
-            >
-              {isRefreshingMarketData ? '刷新中...' : '刷新'}
-            </Button>
-          </div>
-          {!hasLoadedMarketRisk ? (
-            <div className="space-y-2 text-xs text-secondary-text">
-              <div className="flex items-center justify-between">
-                <span>股市估值</span>
-                <span className="text-foreground">点击刷新获取</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>债市信号</span>
-                <span className="text-foreground">点击刷新获取</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>美元强弱</span>
-                <span className="text-foreground">点击刷新获取</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between rounded bg-surface/50 px-2 py-1.5">
-                <span>综合体温</span>
-                <span className="text-foreground">等待数据</span>
-              </div>
-              <div>请先点击"刷新"按钮加载市场风险数据</div>
-            </div>
-          ) : !marketRisk ? (
-            <div className="space-y-2">
-              <div className="h-6 animate-pulse rounded bg-border/20" />
-              <div className="h-6 animate-pulse rounded bg-border/20" />
-              <div className="h-6 animate-pulse rounded bg-border/20" />
-              <div className="h-8 animate-pulse rounded bg-border/20" />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-secondary-text">股市估值</div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={marketRisk.stockValuation.badge as any}>{marketRisk.stockValuation.status}</Badge>
-                  <span className="text-xs text-secondary-text">{marketRisk.stockValuation.description}</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-secondary-text">债市信号</div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={marketRisk.bondSignal.badge as any}>{marketRisk.bondSignal.status}</Badge>
-                  <span className="text-xs text-secondary-text">{marketRisk.bondSignal.description}</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-secondary-text">美元强弱</div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={marketRisk.dollarStrength.badge as any}>{marketRisk.dollarStrength.status}</Badge>
-                  <span className="text-xs text-secondary-text">{marketRisk.dollarStrength.description}</span>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center justify-between rounded bg-surface/50 px-2 py-1.5">
-                <span className="text-xs text-secondary-text">综合体温</span>
-                <Badge variant={marketRisk.badge as any}>{marketRisk.temperature}</Badge>
-              </div>
-              <div className="text-xs text-secondary-text">{marketRisk.advice}</div>
-            </div>
-          )}
-        </Card>
-      </section>
-
-      <section className="grid gap-2 xl:grid-cols-12">
-        <Card className="xl:col-span-7 !rounded-xl" padding="sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">核心持仓摘要</h2>
-            <span className="text-xs text-secondary-text">按市值排序</span>
-          </div>
-          {topHoldings.length === 0 ? (
-            <EmptyState title="暂无核心持仓" description="完成资产初始化后，这里会展示组合中的主要权重资产。" className="border-none bg-transparent px-2 py-8 shadow-none" />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="border-b border-border/60 text-xs text-secondary-text">
-                  <tr>
-                    <th className="py-1.5 text-left">账户</th>
-                    <th className="py-1.5 text-left">代码</th>
-                    <th className="py-1.5 text-left">市场</th>
-                    <th className="py-1.5 text-left">风险</th>
-                    <th className="py-1.5 text-right">市值</th>
-                    <th className="py-1.5 text-right">收益率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topHoldings.map((row) => (
-                    <tr key={`${row.accountId}-${row.symbol}-${row.market}`} className="border-b border-border/30">
-                      <td className="py-1.5">{row.accountName}</td>
-                      <td className="py-1.5 font-mono text-foreground">{row.symbol}</td>
-                      <td className="py-1.5 text-secondary-text">{getMarketLabel(row.market)}</td>
-                      <td className="py-1.5">
-                        <Badge variant={getPositionRiskLevel(row) === '高' ? 'danger' : getPositionRiskLevel(row) === '中' ? 'warning' : 'success'}>
-                          {getPositionRiskLevel(row)}
-                        </Badge>
-                      </td>
-                      <td className="py-1.5 text-right">{formatMoney(row.marketValueBase, 'CNY')}</td>
-                      <td className="py-1.5 text-right">{formatPct(row.unrealizedPnlPct)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-
-        <Card className="xl:col-span-5 !rounded-xl" padding="sm">
-          <div className="mb-3 border-b border-border/50 pb-2">
-            <h2 className="text-base font-semibold text-foreground">组合风险</h2>
-          </div>
-          {assetSummary.length === 0 ? (
-            <EmptyState title="暂无资产" description="先在资产初始化页创建账户并录入初始资产。" className="border-none bg-transparent px-2 py-4 shadow-none" />
-          ) : (
-            <div className="space-y-2">
-              <div className="text-xs text-secondary-text">市场分布</div>
-              {assetSummary.map((item) => (
-                <div key={item.market} className="grid grid-cols-[64px_1fr_96px] items-center gap-2 py-1 text-[12px]">
-                  <span className="text-secondary-text">{getMarketLabel(item.market)}</span>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-border/40">
-                    <div
-                      className="h-full rounded-full bg-cyan"
-                      style={{ width: `${Math.min(100, totalMarketValue ? (item.marketValue / totalMarketValue) * 100 : 0)}%` }}
+                <span className="text-sm font-medium text-foreground min-w-[120px] text-center">
+                  {TREND_GROUPS[trendGroupIdx].label}
+                  <span className="ml-1 text-xs text-secondary-text">({trendGroupIdx + 1}/{TREND_GROUPS.length})</span>
+                </span>
+                <div className="flex gap-1">
+                  {TREND_GROUPS.map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setTrendGroupIdx(i)}
+                      className={`h-2 rounded-full transition-all ${i === trendGroupIdx ? 'w-5 bg-cyan' : 'w-2 bg-border/50 hover:bg-border'}`}
                     />
-                  </div>
-                  <span className="text-right font-medium text-foreground">{formatMoney(item.marketValue, 'CNY')}</span>
+                  ))}
                 </div>
-              ))}
+                <button
+                  type="button"
+                  onClick={goNext}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-background/60 text-secondary-text hover:text-foreground hover:border-border transition-colors"
+                >
+                  <svg className="h-4 w-4" fill="none" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+
+              {/* 当前组 3 个指标 */}
+              <div className="grid min-h-[238px] grid-cols-3 gap-6">
+                {currentTrendItems.map((item) => {
+                  const dailyClose = item.dailyClose;
+                  const dailyPct = item.dailyPctChg;
+
+                  return (
+                    <div key={item.key} className="flex h-[238px] flex-col gap-1">
+                      <div className="h-4 text-center text-xs font-medium text-foreground">{item.label}</div>
+
+                      {/* 现价 + 涨跌幅 */}
+                      <div className="relative h-8 flex items-center justify-center">
+                        <div className="text-xl font-bold text-foreground tabular-nums">
+                          {(dailyClose ?? item.close)?.toFixed(2)}
+                        </div>
+                        <div className={`absolute right-0 text-sm font-semibold tabular-nums ${dailyPct != null && dailyPct >= 0 ? 'text-[#ef4444]' : 'text-[#22c55e]'}`}>
+                          {(dailyPct ?? 0) >= 0 ? '+' : ''}{(dailyPct ?? 0).toFixed(2)}%
+                        </div>
+                      </div>
+
+                      {/* 趋势图 */}
+                      <div className="h-28 w-full bg-background/40 rounded border border-border/30 p-1">
+                        {item.weeklyData && item.weeklyData.length > 0 ? (
+                          <WeeklyTrendChart data={item.weeklyData} height={100} maValues={{ ma10: item.ma10 ?? null, ma20: item.ma20 ?? null, ma50: item.ma50 ?? null }} />
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-[10px] text-gray-400">加载中...</div>
+                        )}
+                      </div>
+
+                      <TrafficLightLabel env={item.environment} className="min-h-[76px]" />
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </Card>
+
+        {/* 右侧：市场情绪仪表盘 (2x2 Gauge) */}
+        <Card className="xl:col-span-4 !rounded-xl !p-3">
+          <div className="mb-2 border-b border-border/50 pb-2">
+            <h2 className="text-base font-semibold text-foreground">市场情绪</h2>
+          </div>
+          {!hasLoadedRiskAndTrend ? (
+            <GaugeSkeletonGrid />
+          ) : !marketRisk ? (
+            <GaugeSkeletonGrid />
+          ) : (
+            <div className="grid grid-cols-2 gap-3 p-1">
+              <Gauge
+                title="A 股情绪"
+                unit=""
+                value={marketRisk.chineseVix.value ?? 0}
+                minValue={0}
+                maxValue={50}
+                segments={GAUGE_SEGMENTS.sentiment}
+                description={marketRisk.chineseVix.description}
+              />
+              <Gauge
+                title="美股情绪"
+                unit=""
+                value={marketRisk.usVix.value ?? 0}
+                minValue={0}
+                maxValue={50}
+                segments={GAUGE_SEGMENTS.sentiment}
+                description={marketRisk.usVix.description}
+              />
+              <Gauge
+                title="美元强弱"
+                unit=""
+                value={marketRisk.dollarStrength.value ?? 7.0}
+                minValue={6.5}
+                maxValue={7.8}
+                segments={GAUGE_SEGMENTS.fx}
+                description={marketRisk.dollarStrength.description}
+              />
+              <Gauge
+                title="中美利差"
+                unit="%"
+                value={marketRisk.bondSpread.spread ?? 0}
+                minValue={-2}
+                maxValue={4}
+                segments={GAUGE_SEGMENTS.spread}
+                description={marketRisk.bondSpread.description}
+              />
             </div>
           )}
+        </Card>
 
-          <div className="mt-4 space-y-2 border-t border-border/50 pt-3">
-            <div className="text-xs text-secondary-text">风险指标</div>
-            {marketAlertRows.map((row) => (
-              <div key={row.label} className="flex items-center justify-between rounded-lg bg-background/55 px-2.5 py-1.5 text-sm">
-                <span className="text-secondary-text">{row.label}</span>
-                <Badge variant={row.tone === 'danger' ? 'danger' : row.tone === 'warning' ? 'warning' : 'success'}>{row.value}</Badge>
+        {/* 中间行：风险雷达 + 相关性热力图 + 仓位水球图 */}
+        <Card className="col-span-full !rounded-xl !p-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-stretch" style={{ minHeight: 240 }}>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between px-3">
+                <h3 className="text-xs font-semibold text-foreground">风险体检</h3>
+                {riskRadar?.error ? (
+                  <span className="text-[10px] text-red-500">异常</span>
+                ) : (
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] ${getRadarLabelClass(riskRadar?.label)}`}>
+                    {getRadarLabel(riskRadar?.label)}
+                  </span>
+                )}
               </div>
-            ))}
+              {!hasLoadedRiskAndTrend || !riskRadar ? (
+                <div className="h-48 rounded-lg bg-border/20 animate-pulse" />
+              ) : riskRadar.error ? (
+                <div className="h-48 rounded-lg bg-border/10 flex items-center justify-center text-[10px] text-gray-400">数据加载失败</div>
+              ) : (
+                <RiskRadar
+                  volatility={riskRadar.volatility}
+                  drawdown={riskRadar.drawdown}
+                  correlation={riskRadar.correlation}
+                  spread={riskRadar.spread}
+                  fx={riskRadar.fx}
+                  valuation={riskRadar.valuation}
+                  details={riskRadar.details}
+                />
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between px-3">
+                <h3 className="text-xs font-semibold text-foreground">相关性热力图</h3>
+                <span className="text-[10px] text-secondary-text">52周滚动</span>
+              </div>
+              {!hasLoadedRiskAndTrend || !correlation ? (
+                <div className="h-48 rounded-lg bg-border/20 animate-pulse" />
+              ) : correlation.error || correlation.labels.length === 0 ? (
+                <div className="h-48 rounded-lg bg-border/10 flex items-center justify-center text-[10px] text-gray-400">数据不足</div>
+              ) : (
+                <CorrelationHeatmap data={correlation} />
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between px-3">
+                <h3 className="text-xs font-semibold text-foreground">权益仓位水球</h3>
+                <span className="text-[10px] text-secondary-text">动态配置建议</span>
+              </div>
+              {!hasLoadedRiskAndTrend || !riskRadar ? (
+                <div className="h-48 rounded-lg bg-border/20 animate-pulse" />
+              ) : (
+                <PositionLiquidGauge data={riskRadar} currentRatio={equityRatio?.equityRatio} />
+              )}
+            </div>
           </div>
+        </Card>
 
-          <div className="mt-4 border-t border-border/50 pt-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-foreground">健康度</span>
-              <Badge variant={getStaticHealthTone(healthScore) === 'danger' ? 'danger' : getStaticHealthTone(healthScore) === 'warning' ? 'warning' : 'success'}>
-                {getStaticHealthLabel(healthScore)}
-              </Badge>
-            </div>
-            <div className="mt-2 space-y-1.5 text-xs text-secondary-text">
-              <div>Top1 仓位 {formatPct(topPositionPct)}</div>
-              <div>高风险 {highRiskPositionCount} 项</div>
-              <div>未实现收益 {formatMoney(totalUnrealizedPnl, 'CNY')}</div>
-            </div>
+        {/* 底部全宽：全年择时热力图 */}
+        <Card className="col-span-full !rounded-xl !p-3">
+          <div className="mb-1 border-b border-border/50 pb-2">
+            <h2 className="text-base font-semibold text-foreground">全年择时</h2>
+            <span className="text-xs text-secondary-text">{seasonality ? `${seasonality.index} · 近${seasonality.yearsStat}年统计` : '加载中...'}</span>
           </div>
+          {!hasLoadedRiskAndTrend || !seasonality ? (
+            <div className="h-52 rounded-lg bg-border/20 animate-pulse" />
+          ) : seasonality.avgReturns.every((v) => v === 0) ? (
+            <EmptyState title="季节性数据暂不可用" description="数据加载中或统计结果不足。" className="border-none bg-transparent px-2 py-8 shadow-none" />
+          ) : (
+            <SeasonalityChart data={seasonality} />
+          )}
         </Card>
       </section>
     </AppPage>

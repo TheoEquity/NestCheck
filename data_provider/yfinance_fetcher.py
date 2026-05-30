@@ -227,6 +227,10 @@ class YfinanceFetcher(BaseFetcher):
         # 重置索引，将日期从索引变为列
         df = df.reset_index()
 
+        # yfinance 返回的 date 列名可能为 'Date' 或 'index'（当 multi_level_index=True 时）
+        if 'index' in df.columns and 'Date' not in df.columns:
+            df = df.rename(columns={'index': 'Date'})
+
         # 列名映射（yfinance 使用首字母大写）
         column_mapping = {
             'Date': 'date',

@@ -6,10 +6,10 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from src.storage import get_db, MarketQuote
-from src.services.market_risk_service import calculate_market_risk
+from src.services.market_cache_service import get_market_cache_payload, refresh_all_market_caches, MARKET_CACHE_BUILDERS
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,91 @@ def get_market_indices() -> list:
 )
 def get_market_risk() -> dict:
     try:
-        return calculate_market_risk()
+        return get_market_cache_payload("risk")
     except Exception as exc:
         raise _internal_error("Get market risk failed", exc)
+
+
+@router.get(
+    "/snapshot",
+    response_model=dict,
+    summary="Get real-time market index snapshot",
+)
+def get_market_snapshot(force_refresh: bool = Query(False, alias="force_refresh")) -> dict:
+    try:
+        from src.services.market_snapshot_service import get_market_snapshot
+        return get_market_snapshot(force_refresh=force_refresh)
+    except Exception as exc:
+        raise _internal_error("Get market snapshot failed", exc)
+
+
+@router.get(
+    "/trend",
+    response_model=dict,
+    summary="Get market weekly trends with environment labels",
+)
+def get_market_trend() -> dict:
+    try:
+        return get_market_cache_payload("trend")
+    except Exception as exc:
+        raise _internal_error("Get market trend failed", exc)
+
+
+@router.get(
+    "/seasonality",
+    response_model=dict,
+    summary="Get monthly seasonality statistics for CSI 300",
+)
+def get_market_seasonality() -> dict:
+    try:
+        return get_market_cache_payload("seasonality")
+    except Exception as exc:
+        raise _internal_error("Get monthly seasonality failed", exc)
+
+
+@router.get(
+    "/radar",
+    response_model=dict,
+    summary="Get 6-dimension risk radar scores",
+)
+def get_risk_radar() -> dict:
+    try:
+        return get_market_cache_payload("radar")
+    except Exception as exc:
+        raise _internal_error("Get risk radar failed", exc)
+
+
+@router.get(
+    "/correlation",
+    response_model=dict,
+    summary="Get 60-day rolling asset correlation matrix",
+)
+def get_correlation_matrix() -> dict:
+    try:
+        return get_market_cache_payload("correlation")
+    except Exception as exc:
+        raise _internal_error("Get correlation matrix failed", exc)
+
+
+@router.post(
+    "/refresh",
+    response_model=dict,
+    summary="Refresh cached market dashboard payloads",
+)
+def refresh_market_dashboard() -> dict:
+    try:
+        return refresh_all_market_caches()
+    except Exception as exc:
+        raise _internal_error("Refresh market dashboard failed", exc)
+
+
+@router.get(
+    "/equity-ratio",
+    response_model=dict,
+    summary="Get current portfolio equity ratio vs total assets (CNY)",
+)
+def get_equity_ratio() -> dict:
+    try:
+        return get_market_cache_payload("equity_ratio")
+    except Exception as exc:
+        raise _internal_error("Get equity ratio failed", exc)

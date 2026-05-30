@@ -8,6 +8,7 @@ const categoryTitleMap: Record<SystemConfigCategory, string> = {
   system: '系统设置',
   agent: 'Agent 设置',
   backtest: '回测配置',
+  scheduler: '定时管理',
   uncategorized: '其他',
 };
 
@@ -19,6 +20,7 @@ const categoryDescriptionMap: Partial<Record<SystemConfigCategory, string>> = {
   system: '管理调度、日志、端口等系统级参数。',
   agent: '管理 Agent 模式、策略与多 Agent 编排配置。',
   backtest: '管理回测开关、评估窗口和引擎参数。',
+  scheduler: '管理定时任务的执行时间、频率和执行状态。',
   uncategorized: '其他未归类的配置项。',
 };
 

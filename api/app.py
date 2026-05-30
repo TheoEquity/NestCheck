@@ -21,7 +21,7 @@ import os
 import re
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 from typing import List, Optional
@@ -133,22 +133,39 @@ async def app_lifespan(app: FastAPI):
     """Initialize and release shared services for the app lifecycle."""
     app.state.system_config_service = SystemConfigService()
 
+    # Seed scheduled task definitions into DB
+    try:
+        from src.services.task_definition_service import ensure_seed_tasks
+        ensure_seed_tasks()
+    except Exception:
+        logger.exception("Failed to seed scheduled task definitions")
+
     # Start background price refresh task
     refresh_task = asyncio.create_task(_periodic_price_refresh_loop())
     app.state._price_refresh_task = refresh_task
+
+    market_refresh_task = asyncio.create_task(_daily_market_cache_refresh_loop())
+    app.state._market_refresh_task = market_refresh_task
 
     try:
         yield
     finally:
         refresh_task.cancel()
+        market_refresh_task.cancel()
         try:
             await refresh_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await market_refresh_task
         except asyncio.CancelledError:
             pass
         if hasattr(app.state, "system_config_service"):
             delattr(app.state, "system_config_service")
         if hasattr(app.state, "_price_refresh_task"):
             delattr(app.state, "_price_refresh_task")
+        if hasattr(app.state, "_market_refresh_task"):
+            delattr(app.state, "_market_refresh_task")
 
 
 async def _periodic_price_refresh_loop():
@@ -191,6 +208,40 @@ def _run_price_refresh():
         idx.get("refreshed", 0), idx.get("failed", 0),
         fx.get("refreshed", 0), fx.get("failed", 0),
     )
+
+
+async def _daily_market_cache_refresh_loop():
+    """Refresh market dashboard cache periodically (every 5 minutes) to keep
+    real-time fields up-to-date. Old cached data is always served until replaced."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    refresh_interval_seconds = 300  # 5 minutes
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        await asyncio.sleep(30)  # wait for server to start normally
+        while True:
+            now = datetime.now()
+            # Only refresh during trading hours (same window as price refresh)
+            if now.weekday() < 5 and 9 <= now.hour < 15:
+                try:
+                    logger.info("Market cache refresh started")
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(executor, _run_market_cache_refresh)
+                    logger.info("Market cache refresh completed")
+                except Exception as exc:
+                    logger.error("Market cache refresh error: %s", exc, exc_info=True)
+
+            await asyncio.sleep(refresh_interval_seconds)
+
+
+def _run_market_cache_refresh():
+    """Synchronous wrapper for market cache refresh."""
+    from src.services.market_cache_service import refresh_all_market_caches
+
+    result = refresh_all_market_caches()
+    items = result.get("items", {})
+    ok_count = sum(1 for item in items.values() if item.get("status") == "success")
+    logger.info("Market cache refresh: success=%d/%d", ok_count, len(items))
 
 
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:

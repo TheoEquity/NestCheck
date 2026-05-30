@@ -16,6 +16,7 @@ import {
   SettingsLoading,
   SettingsPanelErrorBoundary,
   SettingsSectionCard,
+  SchedulerTasksPanel,
 } from '../components/settings';
 import { WEB_BUILD_INFO } from '../utils/constants';
 import { getCategoryDescriptionZh } from '../utils/systemConfigI18n';
@@ -531,6 +532,16 @@ const SettingsPage: React.FC = () => {
     />
   );
 
+  const rawCategories = categories;
+  const schedulerCategory = {
+    category: 'scheduler' as const,
+    title: '定时管理',
+    description: '管理定时任务的执行时间、频率和执行状态。',
+    displayOrder: 100,
+    fields: [],
+  };
+  const allCategories = [...rawCategories, schedulerCategory];
+
   return (
     <div className="settings-page min-h-full px-4 pb-6 pt-4 md:px-6">
       <div className="mb-5 rounded-[1.5rem] border settings-border bg-card/94 px-5 py-5 shadow-soft-card-strong backdrop-blur-sm">
@@ -589,8 +600,8 @@ const SettingsPage: React.FC = () => {
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_1fr]">
           <aside className="lg:sticky lg:top-4 lg:self-start">
             <SettingsCategoryNav
-              categories={categories}
-              itemsByCategory={itemsByCategory}
+              categories={allCategories}
+              itemsByCategory={{ ...itemsByCategory, scheduler: [] }}
               activeCategory={activeCategory}
               onSelect={setActiveCategory}
             />
@@ -800,6 +811,9 @@ const SettingsPage: React.FC = () => {
                   disabled={isSaving || isLoading}
                 />
               </SettingsPanelErrorBoundary>
+            ) : null}
+            {activeCategory === 'scheduler' ? (
+              <SchedulerTasksPanel />
             ) : null}
             {shouldGuardActiveConfigPanel && activeItems.length ? (
               <SettingsPanelErrorBoundary

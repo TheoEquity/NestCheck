@@ -872,6 +872,7 @@ class Config:
     # === 定时任务配置 ===
     schedule_enabled: bool = False            # 是否启用定时任务
     schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
+    schedule_cron: str = ""                   # CRON 表达式（优先级高于 schedule_time）
     schedule_run_immediately: bool = True     # 启动时是否立即执行一次
     run_immediately: bool = True              # 启动时是否立即执行一次（非定时模式）
     market_review_enabled: bool = True        # 是否启用大盘复盘
@@ -1048,15 +1049,21 @@ class Config:
         从 .env 文件加载配置
         
         加载优先级：
-        1. 大多数配置保持系统环境变量优先
-        2. WebUI 可写的运行期关键键优先复用持久化 `.env`，但保留启动时显式进程环境变量的 override
-        3. 代码中的默认值
+        1. JSON 配置持久化（config/settings.json）
+        2. 显式设置的 process 环境变量
+        3. .env 文件
+        4. 代码中的默认值
         """
         cls._capture_bootstrap_runtime_env_overrides()
         preexisting_report_language = os.environ.get("REPORT_LANGUAGE")
 
-        # 确保环境变量已加载
+        # 确保 .env 已加载
         setup_env()
+
+        # 加载 JSON 配置到环境变量（如果 .env 中未设置）
+        from src.config_storage import config_storage
+        config_storage.initialize()
+        config_storage.load_to_env()
 
         # === 智能代理配置 (关键修复) ===
         # 如果配置了代理，自动设置 NO_PROXY 以排除国内数据源，避免行情获取失败
@@ -1393,6 +1400,11 @@ class Config:
             default='18:00',
             prefer_env_file=True,
         )
+        schedule_cron_value = cls._resolve_env_value(
+            'SCHEDULE_CRON',
+            default='',
+            prefer_env_file=True,
+        )
 
         report_language_raw = cls._resolve_report_language_env_value(
             preexisting_report_language
@@ -1664,6 +1676,7 @@ class Config:
                 prefer_env_file=True,
             ).lower() == 'true',
             schedule_time=(schedule_time_value or '18:00').strip() or '18:00',
+            schedule_cron=(schedule_cron_value or '').strip(),
             schedule_run_immediately=schedule_run_immediately,
             run_immediately=legacy_run_immediately,
             market_review_enabled=os.getenv('MARKET_REVIEW_ENABLED', 'true').lower() == 'true',

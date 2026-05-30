@@ -15,6 +15,7 @@
 """
 
 import logging
+import os
 import random
 import time
 from threading import BoundedSemaphore, RLock, Thread
@@ -1069,17 +1070,15 @@ class DataFetcherManager:
         初始化默认数据源列表
 
         优先级动态调整逻辑：
+        - 优先从 JSON 配置文件 (config/data_sources.json) 读取优先级
+        - 其次从环境变量 (XXX_PRIORITY) 读取
+        - 最后使用代码默认值
         - 如果配置了 TUSHARE_TOKEN：实例化 TushareFetcher，并按其内部逻辑提升优先级
         - 如果配置了 Longbridge 凭据：实例化 LongbridgeFetcher 作为美股/港股兜底
         - 未配置的可选数据源不实例化，避免在批量拉取时反复探测无效源
-        - 默认优先级：
-          0. EfinanceFetcher (Priority 0) - 最高优先级
-          1. AkshareFetcher (Priority 1)
-          2. PytdxFetcher (Priority 2) - 通达信
-          3. BaostockFetcher (Priority 3)
-          4. YfinanceFetcher (Priority 4)
         """
         from src.config import get_config
+        from src.config_storage import config_storage
         from .efinance_fetcher import EfinanceFetcher
         from .akshare_fetcher import AkshareFetcher
         from .tushare_fetcher import TushareFetcher
@@ -1088,17 +1087,48 @@ class DataFetcherManager:
         from .yfinance_fetcher import YfinanceFetcher
         from .longbridge_fetcher import LongbridgeFetcher
         config = get_config()
-        # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
+
+        # 从 JSON 配置读取数据源优先级
+        data_sources_config = config_storage.get_data_sources()
+        priority_map = {
+            ds["type"]: ds.get("priority", 99)
+            for ds in data_sources_config
+            if ds.get("enabled", True)
+        }
+
+        def resolve_priority(source_type: str, env_key: str, default: int) -> int:
+            """Resolve fetcher priority: JSON config -> env var -> default."""
+            if source_type in priority_map:
+                return priority_map[source_type]
+            try:
+                return int(os.getenv(env_key, str(default)))
+            except ValueError:
+                return default
+
+        # 创建所有数据源实例（优先级动态解析）
+        efinance_priority = resolve_priority("efinance", "EFINANCE_PRIORITY", 0)
+        akshare_priority = resolve_priority("akshare", "AKSHARE_PRIORITY", 1)
+        pytdx_priority = resolve_priority("pytdx", "PYTDX_PRIORITY", 2)
+        baostock_priority = resolve_priority("baostock", "BAOSTOCK_PRIORITY", 3)
+        yfinance_priority = resolve_priority("yfinance", "YFINANCE_PRIORITY", 4)
+
         efinance = EfinanceFetcher()
+        efinance.priority = efinance_priority
         akshare = AkshareFetcher()
-        pytdx = PytdxFetcher()      # 通达信数据源（可配 PYTDX_HOST/PYTDX_PORT）
+        akshare.priority = akshare_priority
+        pytdx = PytdxFetcher()
+        pytdx.priority = pytdx_priority
         baostock = BaostockFetcher()
+        baostock.priority = baostock_priority
         yfinance = YfinanceFetcher()
+        yfinance.priority = yfinance_priority
         optional_fetchers: List[BaseFetcher] = []
 
         tushare_token = (getattr(config, "tushare_token", None) or "").strip()
         if tushare_token:
-            optional_fetchers.append(TushareFetcher())  # 会根据 Token 配置自动调整优先级
+            tushare = TushareFetcher()
+            tushare.priority = resolve_priority("tushare", "TUSHARE_PRIORITY", tushare.priority)
+            optional_fetchers.append(tushare)
         else:
             logger.debug("[数据源初始化] 跳过未配置的 TushareFetcher")
 
@@ -1108,21 +1138,27 @@ class DataFetcherManager:
             and (getattr(config, "longbridge_access_token", None) or "").strip()
         )
         if has_longbridge_creds:
-            optional_fetchers.append(LongbridgeFetcher())  # 长桥（美股/港股兜底，懒加载）
+            longbridge = LongbridgeFetcher()
+            longbridge.priority = resolve_priority("longbridge", "LONGBRIDGE_PRIORITY", longbridge.priority)
+            optional_fetchers.append(longbridge)
         else:
             logger.debug("[数据源初始化] 跳过未配置的 LongbridgeFetcher")
 
         finnhub_api_key = (getattr(config, "finnhub_api_key", None) or "").strip()
         if finnhub_api_key:
             from .finnhub_fetcher import FinnhubFetcher
-            optional_fetchers.append(FinnhubFetcher())
+            finnhub = FinnhubFetcher()
+            finnhub.priority = resolve_priority("finnhub", "FINNHUB_PRIORITY", finnhub.priority)
+            optional_fetchers.append(finnhub)
         else:
             logger.debug("[数据源初始化] 跳过未配置的 FinnhubFetcher")
 
         alphavantage_api_key = (getattr(config, "alphavantage_api_key", None) or "").strip()
         if alphavantage_api_key:
             from .alphavantage_fetcher import AlphaVantageFetcher
-            optional_fetchers.append(AlphaVantageFetcher())
+            alphavantage = AlphaVantageFetcher()
+            alphavantage.priority = resolve_priority("alphavantage", "ALPHAVANTAGE_PRIORITY", alphavantage.priority)
+            optional_fetchers.append(alphavantage)
         else:
             logger.debug("[数据源初始化] 跳过未配置的 AlphaVantageFetcher")
 
@@ -1138,7 +1174,7 @@ class DataFetcherManager:
                 *optional_fetchers,
             ]
 
-            # 按优先级排序（Tushare 如果配置了 Token 且初始化成功，优先级为 0）
+            # 按优先级排序
             self._fetchers.sort(key=lambda f: f.priority)
             self._refresh_fetcher_indexes_locked()
 

@@ -8,6 +8,7 @@ import logging
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1356,6 +1357,9 @@ class SystemConfigService:
                 updates=dict(updates),
             )
         )
+
+        # 方案C：检测 STOCK_LIST 新增股票，异步 Backfill 历史数据
+        self._trigger_new_stock_backfill(previous_map, dict(updates))
 
         return {
             "success": True,
@@ -3763,3 +3767,34 @@ class SystemConfigService:
                 }
             )
         return issues, resolved_protocol
+
+    def _trigger_new_stock_backfill(self, previous_map: Dict[str, str], updates: Dict[str, str]) -> None:
+        """Detect newly added stocks and trigger async history backfill (方案C)"""
+        if "STOCK_LIST" not in updates:
+            return
+        
+        old_stocks = set()
+        old_list = previous_map.get("STOCK_LIST", "")
+        if old_list:
+            old_stocks = set(c.strip().upper() for c in old_list.split(",") if c.strip())
+        
+        new_stocks = set(c.strip().upper() for c in updates["STOCK_LIST"].split(",") if c.strip())
+        added = new_stocks - old_stocks
+        
+        if not added:
+            return
+        
+        def _do_backfill():
+            logger.info(f"[Backfill] 检测到新增自选股: {added}，开始异步回填历史数据...")
+            from src.services.backfill_service import backfill_stock_history
+            for code in added:
+                try:
+                    backfill_stock_history(code, days=730)
+                    logger.info(f"[Backfill] {code} 历史数据回填完成")
+                except Exception as e:
+                    logger.warning(f"[Backfill] {code} 回填失败: {e}")
+            logger.info("[Backfill] 所有新增自选股回填完成")
+        
+        t = threading.Thread(target=_do_backfill, daemon=True)
+        t.start()
+        logger.info(f"[Backfill] 已启动后台线程为 {len(added)} 只新股票回填历史数据")

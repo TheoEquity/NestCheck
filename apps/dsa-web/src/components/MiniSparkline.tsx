@@ -86,7 +86,7 @@ export const MiniSparkline: React.FC<MiniSparklineProps> = ({
       chart.dispose();
       chartRef.current = null;
     };
-  }, [data, color, height]);
+  }, [data, color, height, prevClose]);
 
   if (!data || data.length === 0) {
     return null;

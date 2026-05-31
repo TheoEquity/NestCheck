@@ -119,19 +119,6 @@ const buildAssetNote = (row: AssetRow) => {
   return parts.join(' | ') || undefined;
 };
 
-// Reserved - not used after refactoring to load from portfolio_positions
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// const parseAssetNote = (note?: string | null) => {};
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// const normalizeAssetCategory = (value?: string | null): AssetCategory => {};
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// const normalizeAssetSubcategory = (value?: string | null): AssetSubcategory => {};
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// const normalizeAssetRiskClass = (value?: string | null): AssetRiskClass => {};
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// const createRowFromTrade = (item: PortfolioTradeListItem): AssetRow => { };
-// const PORTFOLIO_PAGE_SIZE = 100;
-
 const buildNextOwnerId = (accounts: PortfolioAccountItem[], currency: CurrencyCode) => {
   const maxIndex = accounts.reduce((currentMax, account) => {
     if (account.baseCurrency !== currency) return currentMax;

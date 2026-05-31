@@ -14,6 +14,7 @@ import './App.css';
 const HomePage = lazy(() => import('./pages/HomePage'));
 const AssetDashboardPage = lazy(() => import('./pages/AssetDashboardPage'));
 const AssetManagementPage = lazy(() => import('./pages/AssetManagementPage'));
+const AssetAllocationPage = lazy(() => import('./pages/AssetAllocationPage'));
 const AssetInitializationPage = lazy(() => import('./pages/AssetInitializationPage'));
 const AssetEventsPage = lazy(() => import('./pages/AssetEventsPage'));
 const BacktestPage = lazy(() => import('./pages/BacktestPage'));
@@ -80,6 +81,7 @@ const AppContent: React.FC = () => {
         <Route path="/" element={<AssetDashboardPage />} />
         <Route path="/analysis" element={<HomePage />} />
         <Route path="/assets/manage" element={<AssetManagementPage />} />
+        <Route path="/assets/allocation" element={<AssetAllocationPage />} />
         <Route path="/assets/init" element={<AssetInitializationPage />} />
         <Route path="/assets/events" element={<AssetEventsPage />} />
         <Route path="/chat" element={<ChatPage />} />

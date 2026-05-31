@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
@@ -36,6 +36,15 @@ from api.v1.schemas.portfolio import (
     PortfolioSnapshotResponse,
     PortfolioTradeListResponse,
     PortfolioTradeCreateRequest,
+    AssetRiskDefinitionItem,
+    AssetRiskDefinitionListResponse,
+    AssetRiskDefinitionUpdateRequest,
+    AssetAllocationSolveRequest,
+    AssetAllocationSolveResponse,
+    AssetAllocationPlanItem,
+    AssetAllocationPlanListResponse,
+    AssetAllocationPlanCreateRequest,
+    AssetAllocationPlanActivateResponse,
 )
 from src.services.portfolio_import_service import PortfolioImportService
 from src.services.portfolio_risk_service import PortfolioRiskService
@@ -684,3 +693,332 @@ def refresh_all_prices() -> dict:
         return result
     except Exception as exc:
         raise _internal_error("Refresh prices failed", exc)
+
+
+@router.get(
+    "/risk-definitions",
+    response_model=AssetRiskDefinitionListResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="Get asset risk class definitions (R1-R5)",
+)
+def get_risk_definitions() -> AssetRiskDefinitionListResponse:
+    """Get all active asset risk class definitions."""
+    from src.storage import get_db, AssetRiskDefinition
+
+    db = get_db()
+    try:
+        with db.get_session() as session:
+            definitions = session.query(AssetRiskDefinition).filter(
+                AssetRiskDefinition.is_active == True
+            ).order_by(AssetRiskDefinition.asset_risk_class).all()
+
+            items = [
+                AssetRiskDefinitionItem(
+                    asset_risk_class=d.asset_risk_class,
+                    name=d.name,
+                    expected_return=d.expected_return,
+                    volatility=d.volatility,
+                    max_drawdown=d.max_drawdown,
+                    equity_weight=d.equity_weight,
+                    description=d.description,
+                )
+                for d in definitions
+            ]
+
+            return AssetRiskDefinitionListResponse(definitions=items)
+    except Exception as exc:
+        raise _internal_error("Get risk definitions failed", exc)
+
+
+@router.post(
+    "/allocation/solve",
+    response_model=AssetAllocationSolveResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Solve optimal asset allocation with SLSQP",
+)
+def solve_asset_allocation(request: AssetAllocationSolveRequest) -> AssetAllocationSolveResponse:
+    """Solve asset allocation using active R1-R5 definitions and SLSQP.
+
+    Allocation values in response are percentages (0-100), while return/drawdown/volatility
+    are decimals (0.08 = 8%).
+    """
+    try:
+        import numpy as np
+        from scipy.optimize import minimize
+        from src.storage import get_db, AssetRiskDefinition
+
+        db = get_db()
+        required_classes = ["R1", "R2", "R3", "R4", "R5"]
+        with db.get_session() as session:
+            rows = session.query(AssetRiskDefinition).filter(
+                AssetRiskDefinition.is_active == True
+            ).all()
+
+        definitions = {row.asset_risk_class: row for row in rows}
+        if any(code not in definitions for code in required_classes):
+            raise ValueError("Risk class definitions must include R1-R5")
+
+        expected_returns = np.array([float(definitions[code].expected_return or 0.0) for code in required_classes])
+        drawdowns = np.array([float(definitions[code].max_drawdown or 0.0) for code in required_classes])
+        volatilities = np.array([float(definitions[code].volatility or 0.0) for code in required_classes])
+
+        raw_target_min = request.target_return_min if request.target_return_min is not None else 0.0
+        raw_target_max = request.target_return_max if request.target_return_max is not None else raw_target_min
+        target_min = min(raw_target_min, raw_target_max)
+        target_max = max(raw_target_min, raw_target_max)
+        target = target_max or target_min
+        max_drawdown_tolerance = request.max_drawdown_tolerance if request.max_drawdown_tolerance is not None else 1.0
+        raw_base_min = request.base_ratio_min if request.base_ratio_min is not None else 0.0
+        raw_base_max = request.base_ratio_max if request.base_ratio_max is not None else 1.0
+        base_min = min(raw_base_min, raw_base_max)
+        base_max = max(raw_base_min, raw_base_max)
+
+        alpha = 1000.0
+        beta = 1.0
+        gamma = 0.25
+        initial = np.array([0.10, 0.10, 0.20, 0.50, 0.10])
+
+        def objective(weights: np.ndarray) -> float:
+            portfolio_return = float(np.dot(weights, expected_returns))
+            portfolio_drawdown = float(np.dot(weights, drawdowns))
+            portfolio_volatility = float(np.dot(weights, volatilities))
+            if portfolio_return < target_min:
+                target_distance = target_min - portfolio_return
+            elif portfolio_return > target_max:
+                target_distance = portfolio_return - target_max
+            else:
+                target_distance = abs(portfolio_return - target)
+            return alpha * target_distance ** 2 + beta * portfolio_drawdown ** 2 + gamma * portfolio_volatility ** 2
+
+        constraints = [
+            {"type": "eq", "fun": lambda weights: np.sum(weights) - 1.0},
+            {"type": "ineq", "fun": lambda weights: weights[0] + weights[1] - base_min},
+            {"type": "ineq", "fun": lambda weights: base_max - (weights[0] + weights[1])},
+            {"type": "ineq", "fun": lambda weights: max_drawdown_tolerance - float(np.dot(weights, drawdowns))},
+        ]
+        bounds = [(0.0, 1.0) for _ in required_classes]
+        result = minimize(objective, initial, bounds=bounds, constraints=constraints, method="SLSQP")
+
+        if not result.success:
+            raise ValueError("Unable to solve optimal allocation")
+
+        weights = np.clip(result.x, 0.0, 1.0)
+        weights = weights / np.sum(weights)
+        return AssetAllocationSolveResponse(
+            expected_return=float(np.dot(weights, expected_returns)),
+            max_drawdown=float(np.dot(weights, drawdowns)),
+            volatility=float(np.dot(weights, volatilities)),
+            allocation={code: round(float(weight * 100), 2) for code, weight in zip(required_classes, weights)},
+            method="SLSQP",
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Solve asset allocation failed", exc)
+
+
+def _build_allocation_plan_item(plan) -> AssetAllocationPlanItem:
+    generated_at = plan.generated_at
+    if isinstance(generated_at, datetime):
+        generated_at_text = generated_at.isoformat()
+    else:
+        generated_at_text = str(generated_at)
+    return AssetAllocationPlanItem(
+        id=plan.id,
+        is_active=bool(plan.is_active),
+        generated_at=generated_at_text,
+        r1_ratio=float(plan.r1_ratio or 0.0),
+        r2_ratio=float(plan.r2_ratio or 0.0),
+        r3_ratio=float(plan.r3_ratio or 0.0),
+        r4_ratio=float(plan.r4_ratio or 0.0),
+        r5_ratio=float(plan.r5_ratio or 0.0),
+    )
+
+
+@router.get(
+    "/allocation/plans",
+    response_model=AssetAllocationPlanListResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="List saved asset allocation plans",
+)
+def list_asset_allocation_plans() -> AssetAllocationPlanListResponse:
+    """List saved asset allocation plans ordered by generation time."""
+    try:
+        from src.storage import get_db, AssetAllocationPlan
+
+        db = get_db()
+        with db.get_session() as session:
+            plans = session.query(AssetAllocationPlan).order_by(
+                AssetAllocationPlan.generated_at.desc(),
+                AssetAllocationPlan.id.desc(),
+            ).all()
+            return AssetAllocationPlanListResponse(plans=[_build_allocation_plan_item(plan) for plan in plans])
+    except Exception as exc:
+        raise _internal_error("List asset allocation plans failed", exc)
+
+
+@router.post(
+    "/allocation/plans",
+    response_model=AssetAllocationPlanItem,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Create asset allocation plan",
+)
+def create_asset_allocation_plan(request: AssetAllocationPlanCreateRequest) -> AssetAllocationPlanItem:
+    """Create a saved asset allocation plan from R1-R5 ratios."""
+    try:
+        from src.storage import get_db, AssetAllocationPlan
+
+        ratios = [request.r1_ratio, request.r2_ratio, request.r3_ratio, request.r4_ratio, request.r5_ratio]
+        total_ratio = sum(ratios)
+        if abs(total_ratio - 100.0) > 0.05:
+            raise ValueError("Allocation ratios must sum to 100%")
+
+        db = get_db()
+        with db.get_session() as session:
+            plan = AssetAllocationPlan(
+                is_active=False,
+                generated_at=datetime.now(),
+                r1_ratio=request.r1_ratio,
+                r2_ratio=request.r2_ratio,
+                r3_ratio=request.r3_ratio,
+                r4_ratio=request.r4_ratio,
+                r5_ratio=request.r5_ratio,
+            )
+            session.add(plan)
+            session.commit()
+            session.refresh(plan)
+            return _build_allocation_plan_item(plan)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Create asset allocation plan failed", exc)
+
+
+@router.put(
+    "/allocation/plans/{plan_id}/activate",
+    response_model=AssetAllocationPlanActivateResponse,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Activate asset allocation plan",
+)
+def activate_asset_allocation_plan(plan_id: int) -> AssetAllocationPlanActivateResponse:
+    """Toggle active state for a saved allocation plan."""
+    try:
+        from src.storage import get_db, AssetAllocationPlan
+
+        db = get_db()
+        with db.get_session() as session:
+            plan = session.query(AssetAllocationPlan).filter(AssetAllocationPlan.id == plan_id).first()
+            if plan is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error": "not_found", "message": f"Allocation plan not found: {plan_id}"},
+                )
+            if plan.is_active:
+                plan.is_active = False
+                plan.updated_at = datetime.now()
+                session.commit()
+                return AssetAllocationPlanActivateResponse(active_plan_id=None, is_active=False)
+
+            other_active = session.query(AssetAllocationPlan).filter(
+                AssetAllocationPlan.is_active == True,
+                AssetAllocationPlan.id != plan_id,
+            ).first()
+            if other_active is not None:
+                raise ValueError("已有其他生效配置计划，请先取消其生效状态")
+
+            plan.is_active = True
+            plan.updated_at = datetime.now()
+            session.commit()
+            return AssetAllocationPlanActivateResponse(active_plan_id=plan_id, is_active=True)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Activate asset allocation plan failed", exc)
+
+
+@router.delete(
+    "/allocation/plans/{plan_id}",
+    response_model=PortfolioDeleteResponse,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Delete asset allocation plan",
+)
+def delete_asset_allocation_plan(plan_id: int) -> PortfolioDeleteResponse:
+    """Delete an inactive asset allocation plan."""
+    try:
+        from src.storage import get_db, AssetAllocationPlan
+
+        db = get_db()
+        with db.get_session() as session:
+            plan = session.query(AssetAllocationPlan).filter(AssetAllocationPlan.id == plan_id).first()
+            if plan is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error": "not_found", "message": f"Allocation plan not found: {plan_id}"},
+                )
+            if plan.is_active:
+                raise ValueError("生效中的配置计划需先取消生效，再删除")
+            session.delete(plan)
+            session.commit()
+            return PortfolioDeleteResponse(deleted=1)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Delete asset allocation plan failed", exc)
+
+
+@router.put(
+    "/risk-definitions/{risk_class}",
+    response_model=AssetRiskDefinitionItem,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Update asset risk class definition",
+)
+def update_risk_definition(
+    risk_class: str,
+    request: AssetRiskDefinitionUpdateRequest,
+) -> AssetRiskDefinitionItem:
+    """Update a single asset risk class definition (R1-R5)."""
+    from src.storage import get_db, AssetRiskDefinition
+    from sqlalchemy import update
+
+    db = get_db()
+    try:
+        with db.get_session() as session:
+            existing = session.query(AssetRiskDefinition).filter(
+                AssetRiskDefinition.asset_risk_class == risk_class.upper()
+            ).first()
+
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Risk class {risk_class} not found")
+
+            update_data = request.model_dump(exclude_unset=True)
+
+            session.execute(
+                update(AssetRiskDefinition)
+                .where(AssetRiskDefinition.asset_risk_class == risk_class.upper())
+                .values(**update_data)
+            )
+            session.commit()
+
+            updated = session.query(AssetRiskDefinition).filter(
+                AssetRiskDefinition.asset_risk_class == risk_class.upper()
+            ).first()
+
+            return AssetRiskDefinitionItem(
+                asset_risk_class=updated.asset_risk_class,
+                name=updated.name,
+                expected_return=updated.expected_return,
+                volatility=updated.volatility,
+                max_drawdown=updated.max_drawdown,
+                equity_weight=updated.equity_weight,
+                description=updated.description,
+            )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Update risk definition failed", exc)

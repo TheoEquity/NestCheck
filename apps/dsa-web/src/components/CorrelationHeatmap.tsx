@@ -1,6 +1,10 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import * as echarts from 'echarts';
 
+type HeatmapFormatterParam = {
+  data: [number, number, number];
+};
+
 export interface CorrelationData {
   labels: string[];
   data: Array<[number, number, number]>;
@@ -11,7 +15,6 @@ export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const labels = data.labels;
-  const dim = labels.length;
   const shortLabels = labels.map((l) => l.replace(/[（(].*?[）)]/g, '').trim());
 
   const summary = useMemo(() => {
@@ -43,7 +46,7 @@ export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }
 
   const option = useMemo(() => ({
     tooltip: {
-      formatter: (p: any) => `${labels[p.data[0]]} / ${labels[p.data[1]]}<br/>相关系数: <strong>${p.data[2]}</strong>`,
+      formatter: (p: HeatmapFormatterParam) => `${labels[p.data[0]]} / ${labels[p.data[1]]}<br/>相关系数: <strong>${p.data[2]}</strong>`,
     },
     grid: { left: 30, right: 30, top: 5, bottom: 5 },
     xAxis: {
@@ -76,10 +79,10 @@ export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }
     series: [{
       type: 'heatmap',
       data: data.data,
-      label: { show: true, color: 'auto', fontSize: 10, fontWeight: 'bold', formatter: (p: any) => p.data[2] === 1 ? '' : p.data[2].toFixed(2) },
+      label: { show: true, color: 'auto', fontSize: 10, fontWeight: 'bold', formatter: (p: HeatmapFormatterParam) => p.data[2] === 1 ? '' : p.data[2].toFixed(2) },
       itemStyle: { borderColor: '#0d1117', borderWidth: 2, borderRadius: 6 },
     }],
-  }), [data, labels, shortLabels, dim]);
+  }), [data, labels, shortLabels]);
 
   useEffect(() => {
     if (!containerRef.current) return;

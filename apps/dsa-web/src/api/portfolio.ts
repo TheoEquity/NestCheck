@@ -26,6 +26,14 @@ import type {
   PortfolioSnapshotResponse,
   PortfolioTradeCreateRequest,
   PortfolioTradeListResponse,
+  AssetRiskDefinitionListResponse,
+  AssetRiskDefinitionItem,
+  AssetAllocationSolveRequest,
+  AssetAllocationSolveResponse,
+  AssetAllocationPlanListResponse,
+  AssetAllocationPlanCreateRequest,
+  AssetAllocationPlanItem,
+  AssetAllocationPlanActivateResponse,
 } from '../types/portfolio';
 
 type SnapshotQuery = {
@@ -372,5 +380,61 @@ export const portfolioApi = {
       })),
     });
     return toCamelCase<PortfolioInitializeResponse>(response.data);
+  },
+
+  async getRiskDefinitions(): Promise<AssetRiskDefinitionListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/risk-definitions');
+    return toCamelCase<AssetRiskDefinitionListResponse>(response.data);
+  },
+
+  async updateRiskDefinition(riskClass: string, payload: Record<string, unknown>): Promise<AssetRiskDefinitionItem> {
+    const response = await apiClient.put<Record<string, unknown>>(
+      `/api/v1/portfolio/risk-definitions/${riskClass}`,
+      payload,
+    );
+    return toCamelCase<AssetRiskDefinitionItem>(response.data);
+  },
+
+  async solveAllocation(payload: AssetAllocationSolveRequest): Promise<AssetAllocationSolveResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/allocation/solve', {
+      target_return_min: payload.targetReturnMin,
+      target_return_max: payload.targetReturnMax,
+      max_drawdown_tolerance: payload.maxDrawdownTolerance,
+      base_ratio_min: payload.baseRatioMin,
+      base_ratio_max: payload.baseRatioMax,
+    });
+    const result = toCamelCase<AssetAllocationSolveResponse>(response.data);
+    return {
+      ...result,
+      allocation: Object.fromEntries(
+        Object.entries(result.allocation || {}).map(([key, value]) => [key.toUpperCase(), value]),
+      ),
+    };
+  },
+
+  async listAllocationPlans(): Promise<AssetAllocationPlanListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/allocation/plans');
+    return toCamelCase<AssetAllocationPlanListResponse>(response.data);
+  },
+
+  async createAllocationPlan(payload: AssetAllocationPlanCreateRequest): Promise<AssetAllocationPlanItem> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/allocation/plans', {
+      r1_ratio: payload.r1Ratio,
+      r2_ratio: payload.r2Ratio,
+      r3_ratio: payload.r3Ratio,
+      r4_ratio: payload.r4Ratio,
+      r5_ratio: payload.r5Ratio,
+    });
+    return toCamelCase<AssetAllocationPlanItem>(response.data);
+  },
+
+  async activateAllocationPlan(planId: number): Promise<AssetAllocationPlanActivateResponse> {
+    const response = await apiClient.put<Record<string, unknown>>(`/api/v1/portfolio/allocation/plans/${planId}/activate`);
+    return toCamelCase<AssetAllocationPlanActivateResponse>(response.data);
+  },
+
+  async deleteAllocationPlan(planId: number): Promise<PortfolioDeleteResponse> {
+    const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/allocation/plans/${planId}`);
+    return toCamelCase<PortfolioDeleteResponse>(response.data);
   },
 };

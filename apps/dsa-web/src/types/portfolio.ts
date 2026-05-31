@@ -433,3 +433,61 @@ export interface PortfolioInitializeResponse {
   clearedCashCount: number;
   clearedCorporateCount: number;
 }
+
+export interface AssetRiskDefinitionItem {
+  assetRiskClass: string;
+  name: string;
+  expectedReturn?: number | null;
+  volatility?: number | null;
+  maxDrawdown?: number | null;
+  equityWeight: number;
+  description?: string | null;
+}
+
+export interface AssetRiskDefinitionListResponse {
+  definitions: AssetRiskDefinitionItem[];
+}
+
+export interface AssetAllocationSolveRequest {
+  targetReturnMin?: number;
+  targetReturnMax?: number;
+  maxDrawdownTolerance?: number;
+  baseRatioMin?: number;
+  baseRatioMax?: number;
+}
+
+export interface AssetAllocationSolveResponse {
+  expectedReturn: number;
+  maxDrawdown: number;
+  volatility: number;
+  allocation: Record<string, number>;
+  method: string;
+}
+
+export interface AssetAllocationPlanItem {
+  id: number;
+  isActive: boolean;
+  generatedAt: string;
+  r1Ratio: number;
+  r2Ratio: number;
+  r3Ratio: number;
+  r4Ratio: number;
+  r5Ratio: number;
+}
+
+export interface AssetAllocationPlanListResponse {
+  plans: AssetAllocationPlanItem[];
+}
+
+export interface AssetAllocationPlanCreateRequest {
+  r1Ratio: number;
+  r2Ratio: number;
+  r3Ratio: number;
+  r4Ratio: number;
+  r5Ratio: number;
+}
+
+export interface AssetAllocationPlanActivateResponse {
+  activePlanId?: number | null;
+  isActive: boolean;
+}

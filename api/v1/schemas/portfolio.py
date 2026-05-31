@@ -388,3 +388,79 @@ class PortfolioInitializeResponse(BaseModel):
     cleared_trade_count: int
     cleared_cash_count: int
     cleared_corporate_count: int
+
+
+class AssetRiskDefinitionItem(BaseModel):
+    """Asset risk class definition item (R1-R5)."""
+    asset_risk_class: str = Field(..., max_length=8, description="Risk class code (R1-R5)")
+    name: str = Field(..., max_length=64, description="Risk class name")
+    expected_return: Optional[float] = Field(None, ge=0, le=1, description="Expected annual return (0.0-1.0)")
+    volatility: Optional[float] = Field(None, ge=0, le=1, description="Annual volatility (0.0-1.0)")
+    max_drawdown: Optional[float] = Field(None, ge=0, le=1, description="Maximum drawdown (0.0-1.0)")
+    equity_weight: float = Field(..., ge=0, le=1, description="Equity weight for ratio calculation (0.0-1.0)")
+    description: Optional[str] = Field(None, max_length=255, description="Description")
+
+
+class AssetRiskDefinitionListResponse(BaseModel):
+    """Response for listing asset risk definitions."""
+    definitions: List[AssetRiskDefinitionItem] = Field(default_factory=list)
+
+
+class AssetRiskDefinitionUpdateRequest(BaseModel):
+    """Request for updating asset risk definition."""
+    name: Optional[str] = Field(None, max_length=64)
+    expected_return: Optional[float] = Field(None, ge=0, le=1)
+    volatility: Optional[float] = Field(None, ge=0, le=1)
+    max_drawdown: Optional[float] = Field(None, ge=0, le=1)
+    equity_weight: Optional[float] = Field(None, ge=0, le=1)
+    description: Optional[str] = Field(None, max_length=255)
+
+
+class AssetAllocationSolveRequest(BaseModel):
+    """Request for solving target asset allocation."""
+    target_return_min: Optional[float] = Field(None, ge=0, le=1)
+    target_return_max: Optional[float] = Field(None, ge=0, le=1)
+    max_drawdown_tolerance: Optional[float] = Field(None, ge=0, le=1)
+    base_ratio_min: Optional[float] = Field(None, ge=0, le=1)
+    base_ratio_max: Optional[float] = Field(None, ge=0, le=1)
+
+
+class AssetAllocationSolveResponse(BaseModel):
+    """Response for solved asset allocation."""
+    expected_return: float
+    max_drawdown: float
+    volatility: float
+    allocation: Dict[str, float]
+    method: str = "SLSQP"
+
+
+class AssetAllocationPlanItem(BaseModel):
+    """Saved asset allocation plan item."""
+    id: int
+    is_active: bool
+    generated_at: str
+    r1_ratio: float
+    r2_ratio: float
+    r3_ratio: float
+    r4_ratio: float
+    r5_ratio: float
+
+
+class AssetAllocationPlanListResponse(BaseModel):
+    """Response for listing asset allocation plans."""
+    plans: List[AssetAllocationPlanItem] = Field(default_factory=list)
+
+
+class AssetAllocationPlanCreateRequest(BaseModel):
+    """Request for creating an asset allocation plan."""
+    r1_ratio: float = Field(..., ge=0, le=100)
+    r2_ratio: float = Field(..., ge=0, le=100)
+    r3_ratio: float = Field(..., ge=0, le=100)
+    r4_ratio: float = Field(..., ge=0, le=100)
+    r5_ratio: float = Field(..., ge=0, le=100)
+
+
+class AssetAllocationPlanActivateResponse(BaseModel):
+    """Response for activating an asset allocation plan."""
+    active_plan_id: Optional[int] = None
+    is_active: bool

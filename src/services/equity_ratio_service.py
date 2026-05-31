@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Calculate current portfolio equity ratio vs total assets (in CNY).
 
-Equity weight by risk_class:
+Equity weight by risk_class (from asset_risk_definitions table):
   R1 * 0%  (cash, R1)
   R2 * 5%  (bonds, R2)
   R3 * 20% (mixed, R3)
@@ -17,17 +17,12 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-EQUITY_WEIGHT_MAP = {
-    "R1": 0.0,
-    "R2": 0.05,
-    "R3": 0.20,
-    "R4": 1.0,
-    "R5": 1.0,
-}
-
 
 def calculate_equity_ratio() -> Dict[str, Any]:
     """Read current asset positions from DB and compute equity ratio.
+
+    Reads equity weights from asset_risk_definitions table.
+    Falls back to hardcoded defaults if definitions not found.
 
     Returns:
         {
@@ -35,17 +30,45 @@ def calculate_equity_ratio() -> Dict[str, Any]:
             "total_cny": 2000000.0,
             "equity_cny": 1440000.0,
             "detail": {
-                "R1": {"total": 370000, "equity": 0, "weight": 0.0},
-                "R2": {"total": 500000, "equity": 25000, "weight": 0.05},
-                "R3": {"total": 800000, "equity": 160000, "weight": 0.20},
-                "R4": {"total": 100000, "equity": 100000, "weight": 1.0},
-                "R5": {"total": 230000, "equity": 230000, "weight": 1.0},
+                "R1": {"total": 370000, "equity": 0, "weight": 0.0, "name": "现金/货基"},
+                "R2": {"total": 500000, "equity": 25000, "weight": 0.05, "name": "纯债/短久期"},
+                "R3": {"total": 800000, "equity": 160000, "weight": 0.20, "name": "固收+"},
+                "R4": {"total": 100000, "equity": 100000, "weight": 1.0, "name": "宽基/价值"},
+                "R5": {"total": 230000, "equity": 230000, "weight": 1.0, "name": "行业/个股"},
             }
         }
     """
     from src.storage import get_db
 
     db = get_db()
+
+    equity_weight_map = {
+        "R1": 0.0,
+        "R2": 0.05,
+        "R3": 0.20,
+        "R4": 1.0,
+        "R5": 1.0,
+    }
+    risk_names = {
+        "R1": "现金/货基",
+        "R2": "纯债/短久期",
+        "R3": "固收+",
+        "R4": "宽基/价值",
+        "R5": "行业/个股",
+    }
+
+    try:
+        with db.get_session() as session:
+            from src.storage import AssetRiskDefinition
+            definitions = session.query(AssetRiskDefinition).filter(
+                AssetRiskDefinition.is_active == True
+            ).all()
+            for definition in definitions:
+                equity_weight_map[definition.asset_risk_class] = definition.equity_weight
+                risk_names[definition.asset_risk_class] = definition.name
+    except Exception as exc:
+        logger.warning("读取资产风险等级定义失败，使用默认权重：%s", exc)
+
     rows = []
     with db.get_session() as session:
         from src.storage import PortfolioPosition
@@ -97,13 +120,14 @@ def calculate_equity_ratio() -> Dict[str, Any]:
     for risk_class in ["R1", "R2", "R3", "R4", "R5"]:
         total = group_by_risk.get(risk_class, 0.0)
         total_cny += total
-        weight = EQUITY_WEIGHT_MAP.get(risk_class, 1.0)
+        weight = equity_weight_map.get(risk_class, 1.0)
         eq = total * weight
         equity_cny += eq
         detail[risk_class] = {
             "total": round(total, 2),
             "equity": round(eq, 2),
             "weight": weight,
+            "name": risk_names.get(risk_class, risk_class),
         }
 
     ratio = equity_cny / total_cny if total_cny > 0 else 0.0

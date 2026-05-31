@@ -6,6 +6,15 @@ interface SeasonalityChartProps {
   data: MonthlySeasonalityResponse;
 }
 
+type AxisTooltipParam = {
+  dataIndex: number;
+  name: string;
+};
+
+type BarLabelParam = {
+  value: number;
+};
+
 export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -16,7 +25,7 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
       tooltip: {
         trigger: 'axis' as const,
         axisPointer: { type: 'shadow' as const },
-        formatter: (params: any[]) => {
+        formatter: (params: AxisTooltipParam[]) => {
           if (!params || params.length === 0) return '';
           const idx = params[0].dataIndex;
           const ret = data.avgReturns[idx];
@@ -58,7 +67,7 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
           position: 'right' as const,
           color: '#aaa',
           fontSize: 10,
-          formatter: (p: any) => `${p.value >= 0 ? '+' : ''}${p.value}%`,
+          formatter: (p: BarLabelParam) => `${p.value >= 0 ? '+' : ''}${p.value}%`,
         },
       }],
     };

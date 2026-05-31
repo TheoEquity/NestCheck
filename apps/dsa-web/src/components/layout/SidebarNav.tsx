@@ -27,6 +27,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { key: 'home', label: '首页', to: '/', icon: Home, exact: true },
   { key: 'asset-manage', label: '资产管理', to: '/assets/manage', icon: Landmark },
+  { key: 'asset-allocation', label: '资产配置', to: '/assets/allocation', icon: BarChart3 },
   { key: 'asset-init', label: '资产初始化', to: '/assets/init', icon: BriefcaseBusiness },
   { key: 'asset-events', label: '资产事件', to: '/assets/events', icon: Database },
   { key: 'analysis', label: '分析台', to: '/analysis', icon: BarChart3 },

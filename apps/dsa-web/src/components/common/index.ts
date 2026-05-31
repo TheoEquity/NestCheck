@@ -11,6 +11,7 @@ export * from './Toolbar';
 export * from './ToastViewport';
 export * from './PageHeader';
 export { Input } from './Input';
+export { Textarea } from './Textarea';
 export * from './EyeToggleIcon';
 export * from './Loading';
 export * from './Drawer';

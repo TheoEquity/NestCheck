@@ -9,7 +9,7 @@ import {
   type RiskRadarResponse,
   type EquityRatioResponse,
 } from '../api/market';
-import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader } from '../components/common';
+import { ApiErrorAlert, AppPage, Button, Card, EmptyState, PageHeader } from '../components/common';
 import { WeeklyTrendChart } from '../components/WeeklyTrendChart';
 import { RiskRadar } from '../components/RiskRadar';
 import { SeasonalityChart } from '../components/SeasonalityChart';
@@ -18,25 +18,8 @@ import { PositionLiquidGauge } from '../components/PositionLiquidGauge';
 import { TrafficLightLabel } from '../components/TrafficLightLabel';
 import { Gauge } from '../components/Gauge';
 import {
-  formatMoney,
-  formatPct,
-  getMarketLabel,
-  getPositionRiskLevel,
   usePortfolioOverview,
 } from './assetsShared';
-
-const getStaticHealthTone = (score: number): 'success' | 'warning' | 'danger' => {
-  if (score >= 80) return 'success';
-  if (score >= 60) return 'warning';
-  return 'danger';
-};
-
-const getStaticHealthLabel = (score: number): string => {
-  const tone = getStaticHealthTone(score);
-  if (tone === 'success') return '健康';
-  if (tone === 'warning') return '关注';
-  return '预警';
-};
 
 const TREND_GROUPS = [
   { key: 'cn', label: 'A 股重要指数', order: ['sh', 'sz', 'cyb'] },
@@ -118,7 +101,7 @@ const AssetDashboardPage: React.FC = () => {
     document.title = '资产主界面 - NestCheck';
   }, []);
 
-  const { positions, error, syncData } = usePortfolioOverview();
+  const { error, syncData } = usePortfolioOverview();
   const [marketRisk, setMarketRisk] = useState<MarketRiskResponse | null>(null);
   const [marketTrend, setMarketTrend] = useState<MarketTrendResponse | null>(null);
   const [seasonality, setSeasonality] = useState<MonthlySeasonalityResponse | null>(null);
@@ -169,49 +152,6 @@ const AssetDashboardPage: React.FC = () => {
     });
     return () => { active = false; };
   }, []);
-
-  const assetSummary = useMemo(() => {
-    const byMarket = new Map<string, number>();
-    for (const position of positions) {
-      byMarket.set(position.market, (byMarket.get(position.market) || 0) + Number(position.marketValueBase || 0));
-    }
-    return Array.from(byMarket.entries()).map(([market, marketValue]) => ({ market, marketValue }));
-  }, [positions]);
-
-  const topHoldings = useMemo(() => positions.slice(0, 6), [positions]);
-  const totalMarketValue = useMemo(
-    () => positions.reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0),
-    [positions],
-  );
-  const highRiskPositionCount = useMemo(
-    () => positions.filter((p) => getPositionRiskLevel(p) === '高').length,
-    [positions],
-  );
-
-  const topPositionPct = useMemo(() => {
-    if (totalMarketValue === 0 || positions.length === 0) return 0;
-    return Number(positions[0].marketValueBase || 0) / totalMarketValue * 100;
-  }, [positions, totalMarketValue]);
-
-  const avgUnrealizedPnlPct = useMemo(() => {
-    if (positions.length === 0) return 0;
-    const total = positions.reduce((sum, p) => sum + Number(p.unrealizedPnlPct || 0), 0);
-    return total / positions.length;
-  }, [positions]);
-
-  const marketAlertRows = useMemo(() => [
-    { label: '最大单票占比', value: `${Math.round(topPositionPct)}%`, tone: topPositionPct >= 40 ? 'danger' : topPositionPct >= 25 ? 'warning' : 'success' as const },
-    { label: '高风险标的', value: String(highRiskPositionCount), tone: highRiskPositionCount >= 3 ? 'danger' : highRiskPositionCount >= 1 ? 'warning' : 'success' as const },
-    { label: '平均盈亏比', value: formatPct(avgUnrealizedPnlPct), tone: avgUnrealizedPnlPct < -10 ? 'danger' : avgUnrealizedPnlPct < 0 ? 'warning' : 'success' as const },
-  ], [highRiskPositionCount, topPositionPct, avgUnrealizedPnlPct]);
-
-  const healthScore = useMemo(() => {
-    let score = 60;
-    score += Math.min(15, Math.max(-15, avgUnrealizedPnlPct));
-    score -= Math.min(15, Math.max(0, topPositionPct - 10));
-    score -= highRiskPositionCount * 5;
-    return Math.min(100, Math.max(0, score));
-  }, [avgUnrealizedPnlPct, topPositionPct, highRiskPositionCount]);
 
   // Map trend data by key for quick lookup
   const trendMap = useMemo(() => {

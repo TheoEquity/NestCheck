@@ -9,6 +9,10 @@ interface WeeklyTrendChartProps {
   maValues?: { ma10: number | null; ma20: number | null; ma50: number | null };
 }
 
+type AxisTooltipParam = {
+  dataIndex: number;
+};
+
 export const WeeklyTrendChart: React.FC<WeeklyTrendChartProps> = ({
   data,
   color = '#26a69a',
@@ -57,7 +61,7 @@ export const WeeklyTrendChart: React.FC<WeeklyTrendChartProps> = ({
       },
       tooltip: {
         trigger: 'axis',
-        formatter: (params: any[]) => {
+        formatter: (params: AxisTooltipParam[]) => {
           if (!params || params.length === 0) return '';
           const idx = params[0].dataIndex;
           const d = data[idx];

@@ -20,6 +20,12 @@ const indicators = [
   { name: '估值分位', key: 'valuation', unit: '%' },
 ];
 
+type RadarTooltipParam = {
+  data?: {
+    value?: number[];
+  };
+};
+
 export const RiskRadar: React.FC<RiskRadarProps> = ({
   volatility, drawdown, correlation, spread, fx, valuation, details = {},
 }) => {
@@ -35,7 +41,7 @@ export const RiskRadar: React.FC<RiskRadarProps> = ({
       tooltip: {
         trigger: 'item' as const,
         appendTo: 'body' as const,
-        formatter: (params: any) => {
+        formatter: (params: RadarTooltipParam) => {
           if (!params?.data?.value) return '';
           return params.data.value.map((v: number, i: number) => {
             let rawInfo = '';

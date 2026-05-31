@@ -104,19 +104,28 @@ type AdjustModalProps = {
 };
 
 const AdjustModal: React.FC<AdjustModalProps> = ({ position, onClose, onConfirm, isSubmitting }) => {
-  const [quantity, setQuantity] = useState('');
-  const [avgCost, setAvgCost] = useState('');
-  const [lastPrice, setLastPrice] = useState('');
-
-  useEffect(() => {
-    if (position) {
-      setQuantity(String(position.quantity || ''));
-      setAvgCost(String(position.avgCost || ''));
-      setLastPrice(String(position.lastPrice || ''));
-    }
-  }, [position]);
-
   if (!position) return null;
+
+  return (
+    <AdjustModalContent
+      key={position.id}
+      position={position}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      isSubmitting={isSubmitting}
+    />
+  );
+};
+
+const AdjustModalContent: React.FC<{
+  position: PortfolioPositionRecordItem;
+  onClose: () => void;
+  onConfirm: (quantity: number, avgCost: number, lastPrice: number) => void;
+  isSubmitting: boolean;
+}> = ({ position, onClose, onConfirm, isSubmitting }) => {
+  const [quantity, setQuantity] = useState(() => String(position.quantity || ''));
+  const [avgCost, setAvgCost] = useState(() => String(position.avgCost || ''));
+  const [lastPrice, setLastPrice] = useState(() => String(position.lastPrice || ''));
 
   const displaySymbol = (() => {
     return `${position.symbol}.${position.market.toUpperCase()}`;

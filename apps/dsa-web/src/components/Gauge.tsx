@@ -23,7 +23,6 @@ type GaugeProps = {
 
 export function Gauge({
   value,
-  unit: _unit = "",
   minValue,
   maxValue,
   segments,

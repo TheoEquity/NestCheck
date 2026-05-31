@@ -99,17 +99,19 @@ const getLocalUnrealizedPnl = (position: PortfolioPositionRecordItem) => getLoca
 type AdjustModalProps = {
   position: PortfolioPositionRecordItem | null;
   onClose: () => void;
-  onConfirm: (quantity: number, lastPrice: number) => void;
+  onConfirm: (quantity: number, avgCost: number, lastPrice: number) => void;
   isSubmitting: boolean;
 };
 
 const AdjustModal: React.FC<AdjustModalProps> = ({ position, onClose, onConfirm, isSubmitting }) => {
   const [quantity, setQuantity] = useState('');
+  const [avgCost, setAvgCost] = useState('');
   const [lastPrice, setLastPrice] = useState('');
 
   useEffect(() => {
     if (position) {
       setQuantity(String(position.quantity || ''));
+      setAvgCost(String(position.avgCost || ''));
       setLastPrice(String(position.lastPrice || ''));
     }
   }, [position]);
@@ -124,22 +126,22 @@ const AdjustModal: React.FC<AdjustModalProps> = ({ position, onClose, onConfirm,
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
       <div
-        className="relative z-10 w-full max-w-md rounded-xl border border-border/40 bg-surface p-5 shadow-2xl"
+        className="relative z-10 w-full max-w-md rounded-xl border border-border/40 bg-white p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-base font-semibold text-foreground">
-          调整持仓: {displaySymbol}
+          调整持仓：{displaySymbol}
         </h3>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs text-secondary-text">证券代码</label>
-            <div className="rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-sm font-mono text-foreground">
+            <div className="rounded-lg border border-border/40 bg-gray-50 px-3 py-2 text-sm font-mono text-foreground">
               {displaySymbol}
             </div>
           </div>
           <div>
             <label className="mb-1 block text-xs text-secondary-text">币种</label>
-            <div className="rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-sm text-foreground">
+            <div className="rounded-lg border border-border/40 bg-gray-50 px-3 py-2 text-sm text-foreground">
               {position.currency}
             </div>
           </div>
@@ -148,34 +150,37 @@ const AdjustModal: React.FC<AdjustModalProps> = ({ position, onClose, onConfirm,
             <input
               type="number"
               step="any"
-              className="input-surface input-focus-glow h-10 w-full rounded-lg border bg-transparent px-3 text-sm"
+              className="input-surface input-focus-glow h-10 w-full rounded-lg border bg-white px-3 text-sm"
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               placeholder="持仓数量"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-secondary-text">现价</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                step="any"
-                className="input-surface input-focus-glow h-10 w-full rounded-lg border bg-transparent px-3 text-sm"
-                value={lastPrice}
-                onChange={(e) => setLastPrice(e.target.value)}
-                placeholder="最新价格"
-              />
-            </div>
+            <label className="mb-1 block text-xs text-secondary-text">成本价</label>
+            <input
+              type="number"
+              step="any"
+              className="input-surface input-focus-glow h-10 w-full rounded-lg border bg-white px-3 text-sm"
+              value={avgCost}
+              onChange={(e) => setAvgCost(e.target.value)}
+              placeholder="成本价格"
+            />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-secondary-text">成本价 (只读)</label>
-            <div className="rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-sm text-foreground">
-              {formatMoney(position.avgCost, position.currency)}
-            </div>
+            <label className="mb-1 block text-xs text-secondary-text">现价</label>
+            <input
+              type="number"
+              step="any"
+              className="input-surface input-focus-glow h-10 w-full rounded-lg border bg-white px-3 text-sm"
+              value={lastPrice}
+              onChange={(e) => setLastPrice(e.target.value)}
+              placeholder="最新价格"
+            />
           </div>
           <div>
             <label className="mb-1 block text-xs text-secondary-text">当前市值 (估算)</label>
-            <div className="rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-sm text-foreground">
+            <div className="rounded-lg border border-border/40 bg-gray-50 px-3 py-2 text-sm text-foreground">
               {formatMoney(Number(quantity || 0) * Number(lastPrice || 0), position.currency)}
             </div>
           </div>
@@ -194,9 +199,10 @@ const AdjustModal: React.FC<AdjustModalProps> = ({ position, onClose, onConfirm,
             className="btn-primary !rounded-lg !px-4 !py-2 !text-sm disabled:opacity-60"
             onClick={() => {
               const qty = parseFloat(quantity);
+              const cost = parseFloat(avgCost);
               const price = parseFloat(lastPrice);
-              if (isNaN(qty) || isNaN(price)) return;
-              onConfirm(qty, price);
+              if (isNaN(qty) || isNaN(cost) || isNaN(price)) return;
+              onConfirm(qty, cost, price);
             }}
             disabled={isSubmitting}
           >
@@ -466,11 +472,15 @@ const AssetManagementPage: React.FC = () => {
     return sortDirection === 'desc' ? '↓' : '↑';
   };
 
-  const handleAdjustConfirm = async (quantity: number, lastPrice: number) => {
+  const handleAdjustConfirm = async (quantity: number, avgCost: number, lastPrice: number) => {
     if (!adjustTarget) return;
     setIsAdjusting(true);
     try {
-      await portfolioApi.adjustPosition(adjustTarget.id, { quantity, last_price: lastPrice });
+      await portfolioApi.adjustPosition(adjustTarget.id, { 
+        quantity, 
+        avg_cost: avgCost,
+        last_price: lastPrice 
+      });
       await syncData();
       setAdjustTarget(null);
     } catch (err) {
@@ -523,15 +533,6 @@ const AssetManagementPage: React.FC = () => {
             </div>
             <div className="flex items-center gap-3">
               <HealthGauge score={healthScore} tone={healthTone} />
-              <Button
-                onClick={() => void syncData()}
-                disabled={isRefreshing}
-                variant="primary"
-                size="sm"
-                className="!px-3 !py-1.5"
-              >
-                {isRefreshing ? '重估中...' : '重估'}
-              </Button>
             </div>
           </div>
         </Card>

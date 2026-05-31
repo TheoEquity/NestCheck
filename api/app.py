@@ -140,8 +140,8 @@ async def app_lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to seed scheduled task definitions")
 
-    # Start background price refresh task
-    refresh_task = asyncio.create_task(_periodic_price_refresh_loop())
+    # Start background price refresh task (daily at 20:30)
+    refresh_task = asyncio.create_task(_daily_portfolio_price_refresh())
     app.state._price_refresh_task = refresh_task
 
     market_refresh_task = asyncio.create_task(_daily_market_cache_refresh_loop())
@@ -168,29 +168,30 @@ async def app_lifespan(app: FastAPI):
             delattr(app.state, "_market_refresh_task")
 
 
-async def _periodic_price_refresh_loop():
-    """Background loop that refreshes prices every 5 minutes during trading hours."""
+async def _daily_portfolio_price_refresh():
+    """Refresh portfolio positions prices once daily at 20:30 (after market close)."""
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
-    refresh_interval_seconds = 300  # 5 minutes
-
-    # Wait before first refresh so server can start normally
+    # Wait before first check so server can start normally
     await asyncio.sleep(30)
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         while True:
             try:
                 now = datetime.now()
-                if now.weekday() < 5 and 9 <= now.hour < 15:
-                    logger.info("Background price refresh started")
+                # Refresh at 20:30 daily
+                if now.hour == 20 and now.minute >= 30:
+                    logger.info("Daily portfolio price refresh started")
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(executor, _run_price_refresh)
-                    logger.info("Background price refresh completed")
+                    logger.info("Daily portfolio price refresh completed")
+                    # Sleep to avoid multiple refreshes in the same minute
+                    await asyncio.sleep(60)
             except Exception as exc:
-                logger.error("Price refresh loop error: %s", exc)
+                logger.error("Portfolio price refresh error: %s", exc)
 
-            await asyncio.sleep(refresh_interval_seconds)
+            await asyncio.sleep(30)  # Check every 30 seconds
 
 
 def _run_price_refresh():

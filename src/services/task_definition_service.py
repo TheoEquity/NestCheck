@@ -26,8 +26,8 @@ SEED_TASKS: List[Dict] = [
     },
     {
         "task_key": "market_cache_refresh",
-        "name": "市场缓存刷新",
-        "description": "刷新首页市场缓存（趋势、情绪、雷达、相关性等），全年择时由低频任务单独维护。",
+        "name": "市场数据刷新",
+        "description": "市场相关指标及标的资产数据更新及首页市场缓存刷新（趋势、情绪、雷达、相关性等），全年择时由低频任务单独维护。",
         "schedule_type": "daily",
         "schedule_time": "20:30",
         "interval_seconds": None,

@@ -6,7 +6,7 @@ import { getParsedApiError, type ParsedApiError } from '../../api/error';
 import { CheckCircle, XCircle, AlertTriangle, RefreshCw, PlayCircle, Database } from 'lucide-react';
 
 /* ───── 内置只读任务列表（后台已托管，前端不允许改动） ───── */
-const READONLY_TASK_KEYS = new Set(['scheduled_task', 'market_cache_refresh', 'seasonality_cache_refresh']);
+const READONLY_TASK_KEYS = new Set(['scheduled_task', 'seasonality_cache_refresh']);
 
 /* ───── 类型定义 ───── */
 

@@ -62,7 +62,7 @@ export const RiskRadar: React.FC<RiskRadarProps> = ({
         orient: 'vertical',
         right: 5,
         bottom: 10,
-        textStyle: { fontSize: 10, color: '#888' },
+        textStyle: { fontSize: 10, color: '#111111' },
         data: ['当前风险', '安全基线'],
       },
       radar: {
@@ -70,7 +70,7 @@ export const RiskRadar: React.FC<RiskRadarProps> = ({
         splitNumber: 4,
         radius: '70%',
         center: ['45%', '48%'],
-        axisName: { color: '#aab8c8', fontSize: 11, padding: [3, 5] },
+        axisName: { color: '#111111', fontSize: 11, padding: [3, 5] },
         splitArea: { areaStyle: { color: ['rgba(37,99,235,0.08)', 'rgba(37,99,235,0.18)'] } },
         axisLine: { lineStyle: { color: 'rgba(37,99,235,0.35)' } },
         splitLine: { lineStyle: { color: 'rgba(37,99,235,0.25)' } },
@@ -134,7 +134,7 @@ export const RiskRadar: React.FC<RiskRadarProps> = ({
       <div className={`mt-1 flex flex-wrap items-baseline gap-2 border-t border-border/30 px-1 pt-1.5 text-[11px] leading-snug ${tone}`}>
         <span className="font-medium">{summary}</span>
         {details?.volatility_raw != null && (
-          <span className="text-secondary-text">
+          <span className="text-foreground">
             RV {details.volatility_raw}% · 回撤 {details.drawdown_raw}%
           </span>
         )}

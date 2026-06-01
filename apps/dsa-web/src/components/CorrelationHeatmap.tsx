@@ -53,14 +53,14 @@ export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }
       type: 'category',
       data: shortLabels,
       position: 'top',
-      axisLabel: { color: '#ccc', fontSize: 11 },
+      axisLabel: { color: '#111111', fontSize: 11 },
       axisLine: { lineStyle: { color: 'rgba(128,128,128,0.2)' } },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'category',
       data: shortLabels,
-      axisLabel: { color: '#ccc', fontSize: 11 },
+      axisLabel: { color: '#111111', fontSize: 11 },
       axisLine: { lineStyle: { color: 'rgba(128,128,128,0.2)' } },
       axisTick: { show: false },
     },
@@ -71,7 +71,7 @@ export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }
       orient: 'vertical',
       right: 0,
       top: 'center',
-      textStyle: { color: '#aaa', fontSize: 9 },
+      textStyle: { color: '#111111', fontSize: 9 },
       inRange: {
         color: ['#22c55e', '#a3a3a3', '#ef4444'], // 绿 -> 灰 -> 红
       },
@@ -103,7 +103,7 @@ export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }
   return (
     <>
       <div ref={containerRef} style={{ width: '100%', height: 220 }} />
-      <div className="mt-1 border-t border-border/30 px-1 pt-1.5 text-[11px] leading-snug text-secondary-text">
+      <div className="mt-1 border-t border-border/30 px-1 pt-1.5 text-[11px] leading-snug text-foreground">
         {summary || '暂无足够数据进行分析'}
       </div>
     </>

@@ -49,10 +49,10 @@ def list_scheduler_tasks() -> List[Dict[str, Any]]:
 
             # 计算成功率
             success_rate = None
-            if stats["total_runs"] > 0:
-                runs = stats.get("runs", [])
-                success_count = sum(1 for r in runs if r.get("status") == "success")
-                success_rate = f"{success_count}/{stats['total_runs']} ({success_count / stats['total_runs'] * 100:.0f}%)"
+            total_runs = stats["total_runs"]
+            if total_runs > 0:
+                success_count = stats.get("success_count", 0)
+                success_rate = f"{success_count}/{total_runs} ({success_count / total_runs * 100:.0f}%)"
             elif history:
                 success_count = sum(1 for h in history if h.get("status") == "success")
                 success_rate = f"{success_count}/{len(history)} ({success_count / len(history) * 100:.0f}%)"

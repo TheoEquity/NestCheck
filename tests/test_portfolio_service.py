@@ -813,46 +813,6 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertEqual(len(position_rows), 0)
         self.assertEqual(len(lot_rows), 0)
 
-    def test_delete_trade_invalidates_cache_and_removes_source_event(self) -> None:
-        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
-        aid = account["id"]
-
-        self.service.record_cash_ledger(
-            account_id=aid,
-            event_date=date(2026, 1, 1),
-            direction="in",
-            amount=10000,
-            currency="CNY",
-        )
-        trade = self.service.record_trade(
-            account_id=aid,
-            symbol="600519",
-            trade_date=date(2026, 1, 2),
-            side="buy",
-            quantity=10,
-            price=100,
-            market="cn",
-            currency="CNY",
-        )
-        self._save_close("600519", date(2026, 1, 2), 100.0)
-        self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 1, 2), cost_method="fifo")
-
-        self.assertTrue(self.service.delete_trade_event(trade["id"]))
-
-        with self.db.get_session() as session:
-            trade_rows = session.execute(
-                select(PortfolioTrade).where(PortfolioTrade.account_id == aid)
-            ).scalars().all()
-            snapshot_rows = session.execute(
-                select(PortfolioDailySnapshot).where(PortfolioDailySnapshot.account_id == aid)
-            ).scalars().all()
-            lot_rows = session.execute(
-                select(PortfolioPositionLot).where(PortfolioPositionLot.account_id == aid)
-            ).scalars().all()
-        self.assertEqual(len(trade_rows), 0)
-        self.assertEqual(len(snapshot_rows), 0)
-        self.assertEqual(len(lot_rows), 0)
-
     def test_concurrent_sell_race_allows_only_one_write(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import * as echarts from "echarts";
-import type { EChartsOption } from "echarts";
 import { cn } from "../utils/cn";
+import { echarts, type EChartsCoreOption, type EChartsType } from "./echarts";
 
 type GaugeSegment = {
   label: string;
@@ -31,10 +30,10 @@ export function Gauge({
   className,
 }: GaugeProps) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const instanceRef = useRef<echarts.EChartsType | null>(null);
+  const instanceRef = useRef<EChartsType | null>(null);
   const valueRef = useRef(value);
 
-  const getChartOption = useCallback((): EChartsOption => {
+  const getChartOption = useCallback((): EChartsCoreOption => {
     const normalized = Math.min(maxValue, Math.max(minValue, value));
 
     return {

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import * as echarts from 'echarts';
+import { echarts, type ECharts } from './echarts';
 
 type HeatmapFormatterParam = {
   data: [number, number, number];
@@ -13,7 +13,7 @@ export interface CorrelationData {
 
 export const CorrelationHeatmap: React.FC<{ data: CorrelationData }> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
   const labels = data.labels;
   const shortLabels = labels.map((l) => l.replace(/[（(].*?[）)]/g, '').trim());
 

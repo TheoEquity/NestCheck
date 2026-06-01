@@ -487,7 +487,7 @@ class PortfolioCorporateAction(Base):
     asset_category = Column(String(32))
     asset_subcategory = Column(String(64))
     effective_date = Column(Date, nullable=False, index=True)
-    action_type = Column(String(24), nullable=False)  # cash_dividend
+    action_type = Column(String(24), nullable=False)  # Dividend event type: cash_dividend
     cash_dividend_per_share = Column(Float)
     realized_pnl = Column(Float, default=0.0)
     split_ratio = Column(Float)
@@ -518,6 +518,7 @@ class PortfolioPosition(Base):
     price_change_pct = Column(Float)
     market_value_base = Column(Float, nullable=False, default=0.0)
     unrealized_pnl_base = Column(Float, nullable=False, default=0.0)
+    realized_pnl_base = Column(Float, nullable=False, default=0.0)
     asset_category = Column(String(32))
     asset_subcategory = Column(String(64))
     asset_risk_class = Column(String(8))
@@ -1069,6 +1070,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "asset_subcategory": "VARCHAR(64)",
                 "asset_risk_class": "VARCHAR(8)",
                 "price_change_pct": "FLOAT",
+                "realized_pnl_base": "FLOAT DEFAULT 0",
             },
         }
 

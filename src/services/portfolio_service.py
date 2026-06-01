@@ -197,7 +197,7 @@ class PortfolioService:
         """Initialize an account's portfolio by directly writing positions.
 
         This bypasses the event replay system. It clears all existing event records
-        (trades, cash ledger, corporate actions) and cached positions, then writes
+        (trades, cash ledger, cash dividend events) and cached positions, then writes
         all initial holdings (securities + cash) directly into portfolio_positions.
         Cash is treated as an asset class and written to portfolio_positions alongside
         securities.
@@ -497,6 +497,15 @@ class PortfolioService:
                 trade_date=effective_date,
                 amount_delta=dividend_amount_value,
             )
+            self._apply_realized_pnl_to_position(
+                session=session,
+                account=account,
+                symbol=symbol_norm,
+                market=market_norm,
+                currency=currency_norm,
+                event_date=effective_date,
+                realized_pnl=dividend_amount_value,
+            )
             row = self.repo.add_corporate_action_in_session(
                 session=session,
                 account_id=account_id,
@@ -512,18 +521,6 @@ class PortfolioService:
                 note=(note or "").strip() or None,
             )
             return {"id": int(row.id)}
-
-    def delete_trade_event(self, trade_id: int) -> bool:
-        with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_trade_in_session(session=session, trade_id=trade_id)
-
-    def delete_cash_ledger_event(self, entry_id: int) -> bool:
-        with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_cash_ledger_in_session(session=session, entry_id=entry_id)
-
-    def delete_corporate_action_event(self, action_id: int) -> bool:
-        with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_corporate_action_in_session(session=session, action_id=action_id)
 
     def _apply_trade_to_master_positions(
         self,
@@ -577,6 +574,7 @@ class PortfolioService:
                     last_price=0.0,
                     market_value_base=0.0,
                     unrealized_pnl_base=0.0,
+                    realized_pnl_base=0.0,
                     asset_category=asset_category,
                     asset_subcategory=asset_subcategory,
                     asset_risk_class=asset_risk_class,
@@ -614,8 +612,15 @@ class PortfolioService:
         if next_quantity <= EPS:
             next_quantity = 0.0
         realized_pnl = (price - old_avg_cost) * quantity - fee - tax
+        realized_pnl_base, _, _ = self._convert_amount(
+            amount=realized_pnl,
+            from_currency=currency,
+            to_currency="CNY",
+            as_of_date=trade_date,
+        )
         position.quantity = next_quantity
         position.total_cost = next_quantity * old_avg_cost
+        position.realized_pnl_base = float(position.realized_pnl_base or 0.0) + realized_pnl_base
         position.name = name or position.name
         position.asset_category = asset_category or position.asset_category
         position.asset_subcategory = asset_subcategory or position.asset_subcategory
@@ -667,6 +672,7 @@ class PortfolioService:
                 last_price=1.0,
                 market_value_base=0.0,
                 unrealized_pnl_base=0.0,
+                realized_pnl_base=0.0,
                 asset_category="cash",
                 asset_subcategory=None,
                 asset_risk_class="R1",
@@ -683,6 +689,36 @@ class PortfolioService:
             account_id=int(account.id),
             from_date=trade_date,
         )
+
+    def _apply_realized_pnl_to_position(
+        self,
+        *,
+        session: Any,
+        account: Any,
+        symbol: str,
+        market: str,
+        currency: str,
+        event_date: date,
+        realized_pnl: float,
+    ) -> None:
+        position = self.repo.get_position_in_session(
+            session=session,
+            account_id=int(account.id),
+            symbol=symbol,
+            market=market,
+            currency=currency,
+            cost_method="fifo",
+        )
+        if position is None:
+            return
+        realized_pnl_base, _, _ = self._convert_amount(
+            amount=realized_pnl,
+            from_currency=currency,
+            to_currency="CNY",
+            as_of_date=event_date,
+        )
+        position.realized_pnl_base = float(position.realized_pnl_base or 0.0) + realized_pnl_base
+        position.updated_at = datetime.now()
 
     def list_trade_events(
         self,
@@ -1005,6 +1041,7 @@ class PortfolioService:
         cost_method: str = "fifo",
     ) -> Dict[str, Any]:
         method = self._normalize_cost_method(cost_method)
+        self._sync_realized_pnl_base_from_events(account_id=account_id, cost_method=method)
         rows = self.repo.list_positions(account_id=account_id, cost_method=method)
         items: List[Dict[str, Any]] = []
         as_of_date = date.today()
@@ -1050,6 +1087,7 @@ class PortfolioService:
                     "price_change_pct": round(float(position.price_change_pct), 8) if position.price_change_pct is not None else None,
                     "market_value_base": round(market_base, 8),
                     "unrealized_pnl_base": round(unrealized, 8),
+                    "realized_pnl_base": round(float(position.realized_pnl_base or 0.0), 8),
                     "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
                     "asset_category": position.asset_category,
                     "asset_subcategory": position.asset_subcategory,
@@ -1064,6 +1102,60 @@ class PortfolioService:
                 }
             )
         return {"items": items, "total": len(items)}
+
+    def _sync_realized_pnl_base_from_events(
+        self,
+        *,
+        account_id: Optional[int],
+        cost_method: str,
+    ) -> None:
+        if cost_method != "fifo":
+            return
+        from src.storage import PortfolioPosition
+
+        accounts = [self._require_active_account(account_id)] if account_id is not None else self.repo.list_accounts(include_inactive=False)
+        today = date.today()
+        with self.repo.portfolio_write_session() as session:
+            for account in accounts:
+                realized_by_key: Dict[Tuple[str, str, str], float] = defaultdict(float)
+                for trade in self.repo.list_trades_in_session(session=session, account_id=int(account.id), as_of=today):
+                    amount = float(trade.realized_pnl or 0.0)
+                    if abs(amount) <= EPS:
+                        continue
+                    converted, _, _ = self._convert_amount(
+                        amount=amount,
+                        from_currency=str(trade.currency or account.base_currency),
+                        to_currency="CNY",
+                        as_of_date=trade.trade_date,
+                    )
+                    realized_by_key[(trade.symbol, trade.market, trade.currency)] += converted
+                for action in self.repo.list_corporate_actions_in_session(session=session, account_id=int(account.id), as_of=today):
+                    amount = float(action.realized_pnl or action.cash_dividend_per_share or 0.0)
+                    if abs(amount) <= EPS:
+                        continue
+                    converted, _, _ = self._convert_amount(
+                        amount=amount,
+                        from_currency=str(action.currency or account.base_currency),
+                        to_currency="CNY",
+                        as_of_date=action.effective_date,
+                    )
+                    realized_by_key[(action.symbol, action.market, action.currency)] += converted
+
+                positions = session.execute(
+                    select(PortfolioPosition).where(
+                        and_(
+                            PortfolioPosition.account_id == int(account.id),
+                            PortfolioPosition.cost_method == cost_method,
+                        )
+                    )
+                ).scalars().all()
+                for position in positions:
+                    key = (position.symbol, position.market, position.currency)
+                    next_value = round(float(realized_by_key.get(key, 0.0)), 8)
+                    if abs(float(position.realized_pnl_base or 0.0) - next_value) <= EPS:
+                        continue
+                    position.realized_pnl_base = next_value
+                    position.updated_at = datetime.now()
 
     def realtime_revalue_positions(
         self,
@@ -1275,6 +1367,7 @@ class PortfolioService:
         total_cash = 0.0
         total_market_value = 0.0
         total_cost = 0.0
+        realized_pnl_base = 0.0
         fx_stale = False
 
         for pos in rows:
@@ -1286,6 +1379,7 @@ class PortfolioService:
             market_value = qty * last_price
             total_cost += qty * avg_cost
             total_market_value += market_value
+            realized_pnl_base += float(pos.realized_pnl_base or 0.0)
 
             if is_cash:
                 total_cash += market_value
@@ -1306,6 +1400,7 @@ class PortfolioService:
                 "last_price": last_price,
                 "market_value_base": market_value,
                 "unrealized_pnl_base": market_value - (qty * avg_cost),
+                "realized_pnl_base": float(pos.realized_pnl_base or 0.0),
                 "asset_category": pos.asset_category,
                 "asset_subcategory": pos.asset_subcategory,
                 "asset_risk_class": pos.asset_risk_class,
@@ -1355,7 +1450,7 @@ class PortfolioService:
             "total_cash": round(total_cash, 6),
             "total_market_value": round(total_market_value, 6),
             "total_equity": round(total_equity, 6),
-            "realized_pnl": 0.0,
+            "realized_pnl": round(realized_pnl_base, 6),
             "unrealized_pnl": round(total_market_value - total_cost, 6),
             "fee_total": 0.0,
             "tax_total": 0.0,
@@ -1373,7 +1468,7 @@ class PortfolioService:
             "total_cash": total_cash,
             "total_market_value": total_market_value,
             "total_equity": total_equity,
-            "realized_pnl": 0.0,
+            "realized_pnl": realized_pnl_base,
             "unrealized_pnl": total_market_value - total_cost,
             "fee_total": 0.0,
             "tax_total": 0.0,
@@ -1392,7 +1487,7 @@ class PortfolioService:
         for row in corporate_actions:
             events.append(("corp", row.effective_date, row.id, row))
 
-        # Same-day deterministic ordering: cash -> corporate action -> trade.
+        # Same-day deterministic ordering: cash -> cash dividend -> trade.
         event_priority = {"cash": 0, "corp": 1, "trade": 2}
         events.sort(key=lambda item: (item[1], event_priority[item[0]], item[2]))
 
@@ -1531,7 +1626,7 @@ class PortfolioService:
                         realized_pnl_base += dividend_base
                         fx_stale = fx_stale or stale_dividend
                 else:
-                    raise ValueError(f"Unsupported corporate action type: {event.action_type}")
+                    raise ValueError(f"Unsupported cash dividend event type: {event.action_type}")
 
         position_rows, lot_rows, market_value_base, total_cost_base, stale_pos = self._build_positions(
             account=account,

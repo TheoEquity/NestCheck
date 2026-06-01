@@ -281,30 +281,6 @@ def list_trades(
         raise _internal_error("List trade events failed", exc)
 
 
-@router.delete(
-    "/trades/{trade_id}",
-    response_model=PortfolioDeleteResponse,
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Delete trade event",
-)
-def delete_trade(trade_id: int) -> PortfolioDeleteResponse:
-    service = PortfolioService()
-    try:
-        ok = service.delete_trade_event(trade_id)
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "not_found", "message": f"Trade not found: {trade_id}"},
-            )
-        return PortfolioDeleteResponse(deleted=1)
-    except PortfolioBusyError as exc:
-        raise _conflict_error(error="portfolio_busy", message=str(exc))
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise _internal_error("Delete trade event failed", exc)
-
-
 @router.post(
     "/cash-ledger",
     response_model=PortfolioEventCreatedResponse,
@@ -365,35 +341,11 @@ def list_cash_ledger(
         raise _internal_error("List cash ledger events failed", exc)
 
 
-@router.delete(
-    "/cash-ledger/{entry_id}",
-    response_model=PortfolioDeleteResponse,
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Delete cash ledger event",
-)
-def delete_cash_ledger(entry_id: int) -> PortfolioDeleteResponse:
-    service = PortfolioService()
-    try:
-        ok = service.delete_cash_ledger_event(entry_id)
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "not_found", "message": f"Cash ledger entry not found: {entry_id}"},
-            )
-        return PortfolioDeleteResponse(deleted=1)
-    except PortfolioBusyError as exc:
-        raise _conflict_error(error="portfolio_busy", message=str(exc))
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise _internal_error("Delete cash ledger event failed", exc)
-
-
 @router.post(
     "/corporate-actions",
     response_model=PortfolioEventCreatedResponse,
     responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Record corporate action event",
+    summary="Record cash dividend event",
 )
 def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> PortfolioEventCreatedResponse:
     service = PortfolioService()
@@ -416,21 +368,21 @@ def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> P
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("Create corporate action event failed", exc)
+        raise _internal_error("Create cash dividend event failed", exc)
 
 
 @router.get(
     "/corporate-actions",
     response_model=PortfolioCorporateActionListResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="List corporate action events",
+    summary="List cash dividend events",
 )
 def list_corporate_actions(
     account_id: Optional[int] = Query(None, description="Optional account id"),
-    date_from: Optional[date] = Query(None, description="Corporate action effective date from"),
-    date_to: Optional[date] = Query(None, description="Corporate action effective date to"),
+    date_from: Optional[date] = Query(None, description="Cash dividend effective date from"),
+    date_to: Optional[date] = Query(None, description="Cash dividend effective date to"),
     symbol: Optional[str] = Query(None, description="Optional stock symbol filter"),
-    action_type: Optional[str] = Query(None, description="Optional action type filter"),
+    action_type: Optional[str] = Query(None, description="Optional dividend event type filter"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> PortfolioCorporateActionListResponse:
@@ -449,31 +401,7 @@ def list_corporate_actions(
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("List corporate action events failed", exc)
-
-
-@router.delete(
-    "/corporate-actions/{action_id}",
-    response_model=PortfolioDeleteResponse,
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Delete corporate action event",
-)
-def delete_corporate_action(action_id: int) -> PortfolioDeleteResponse:
-    service = PortfolioService()
-    try:
-        ok = service.delete_corporate_action_event(action_id)
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "not_found", "message": f"Corporate action not found: {action_id}"},
-            )
-        return PortfolioDeleteResponse(deleted=1)
-    except PortfolioBusyError as exc:
-        raise _conflict_error(error="portfolio_busy", message=str(exc))
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise _internal_error("Delete corporate action event failed", exc)
+        raise _internal_error("List cash dividend events failed", exc)
 
 
 @router.get(

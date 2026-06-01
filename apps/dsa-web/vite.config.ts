@@ -14,6 +14,8 @@ const vendorChunkByPackage: Record<string, string> = {
   scheduler: 'vendor-react',
   'react-router': 'vendor-router',
   'react-router-dom': 'vendor-router',
+  echarts: 'vendor-echarts',
+  zrender: 'vendor-zrender',
   motion: 'vendor-motion',
   'framer-motion': 'vendor-motion',
   'motion-dom': 'vendor-motion',

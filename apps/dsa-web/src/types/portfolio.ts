@@ -49,6 +49,7 @@ export interface PortfolioPositionItem {
   priceChangePct?: number | null;
   marketValueBase: number;
   unrealizedPnlBase: number;
+  realizedPnlBase: number;
   unrealizedPnlPct?: number | null;
   assetCategory?: string | null;
   assetSubcategory?: string | null;

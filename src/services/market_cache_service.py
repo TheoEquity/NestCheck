@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from src.storage import MarketCache, get_db
@@ -166,6 +166,72 @@ def _empty_builder_payload(cache_key: str) -> Dict[str, Any]:
     return {"_cache": {"key": cache_key, "status": "empty"}}
 
 
+def _current_week_friday() -> str:
+    today = _now().date()
+    friday = today + timedelta(days=(4 - today.weekday()) % 7)
+    return friday.isoformat()
+
+
+def _recalculate_tail_ma(weekly_data: list, window: int) -> Optional[float]:
+    closes = []
+    for row in weekly_data[-window:]:
+        try:
+            closes.append(float(row.get("close")))
+        except (TypeError, ValueError):
+            continue
+    if not closes:
+        return None
+    return round(sum(closes) / len(closes), 2)
+
+
+def _sync_current_week_quote(entry: Dict[str, Any], price_val: float) -> None:
+    weekly_data = entry.get("weekly_data")
+    if not isinstance(weekly_data, list):
+        return
+
+    week_date = _current_week_friday()
+    current_row = None
+    if weekly_data and isinstance(weekly_data[-1], dict) and weekly_data[-1].get("date") == week_date:
+        current_row = weekly_data[-1]
+    elif weekly_data:
+        prev_row = weekly_data[-1]
+        if isinstance(prev_row, dict):
+            current_row = {
+                "date": week_date,
+                "open": price_val,
+                "high": price_val,
+                "low": price_val,
+                "close": price_val,
+                "volume": 0,
+                "ma10": None,
+                "ma20": None,
+                "ma50": None,
+            }
+            weekly_data.append(current_row)
+            if len(weekly_data) > 60:
+                del weekly_data[:-60]
+
+    if current_row is None:
+        return
+
+    current_row["close"] = round(price_val, 2)
+    try:
+        current_row["high"] = round(max(float(current_row.get("high") or price_val), price_val), 2)
+    except (TypeError, ValueError):
+        current_row["high"] = round(price_val, 2)
+    try:
+        current_row["low"] = round(min(float(current_row.get("low") or price_val), price_val), 2)
+    except (TypeError, ValueError):
+        current_row["low"] = round(price_val, 2)
+    current_row.setdefault("open", round(price_val, 2))
+    current_row["ma10"] = _recalculate_tail_ma(weekly_data, 10)
+    current_row["ma20"] = _recalculate_tail_ma(weekly_data, 20)
+    current_row["ma50"] = _recalculate_tail_ma(weekly_data, 50)
+    entry["ma10"] = current_row["ma10"]
+    entry["ma20"] = current_row["ma20"]
+    entry["ma50"] = current_row["ma50"]
+
+
 def refresh_all_market_caches() -> Dict[str, Any]:
     """Refresh frequently changing market dashboard payloads. Failures are caught individually —
     previous valid cache remains intact for each failed entry."""
@@ -218,6 +284,7 @@ def refresh_trend_realtime_quotes() -> Dict[str, Any]:
             entry["close"] = price_val
             entry["daily_close"] = round(price_val, 2)
             entry["daily_pct_chg"] = round(change_pct_val, 2) if change_pct_val is not None else None
+            _sync_current_week_quote(entry, price_val)
             refreshed += 1
         except Exception as exc:
             failed += 1

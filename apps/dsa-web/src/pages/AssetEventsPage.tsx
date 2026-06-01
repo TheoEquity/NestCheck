@@ -17,6 +17,29 @@ type CurrencyCode = 'CNY' | 'HKD' | 'USD';
 type AssetCategory = 'fund' | 'stock' | 'bond';
 type AssetSubcategory = '' | 'pure_bond_fund' | 'fixed_income_plus' | 'index_fund' | 'equity_fund';
 type AssetRiskClass = 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
+type LedgerEventType = 'all' | 'trade' | 'cash' | 'cash_dividend';
+
+type LedgerFilters = {
+  accountId: number | '';
+  eventType: LedgerEventType;
+  symbol: string;
+  dateFrom: string;
+  dateTo: string;
+};
+
+type LedgerRow = {
+  key: string;
+  date: string;
+  typeLabel: string;
+  accountId: number;
+  accountName: string;
+  symbol: string;
+  name: string;
+  direction: string;
+  amount: string;
+  price: string;
+  note: string;
+};
 
 const INPUT_CLASS = 'input-surface input-focus-glow h-8 w-full rounded-lg border bg-transparent px-2.5 text-xs transition-all focus:outline-none';
 const SELECT_CLASS = `${INPUT_CLASS} appearance-none pr-8`;
@@ -36,6 +59,13 @@ const FUND_SUBCATEGORY_OPTIONS: Array<{ value: AssetSubcategory; label: string }
 ];
 
 const RISK_CLASS_OPTIONS: AssetRiskClass[] = ['R1', 'R2', 'R3', 'R4', 'R5'];
+
+const LEDGER_EVENT_TYPE_OPTIONS: Array<{ value: LedgerEventType; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'trade', label: '交易' },
+  { value: 'cash', label: '资金' },
+  { value: 'cash_dividend', label: '现金分红' },
+];
 
 const normalizeCurrencyCode = (value?: string | null): CurrencyCode => {
   if (value === 'HKD' || value === 'USD') return value;
@@ -57,6 +87,7 @@ const AssetEventsPage: React.FC = () => {
   const [recentTrades, setRecentTrades] = useState<PortfolioTradeListItem[]>([]);
   const [recentCashLedgers, setRecentCashLedgers] = useState<PortfolioCashLedgerListItem[]>([]);
   const [recentCorporateActions, setRecentCorporateActions] = useState<PortfolioCorporateActionListItem[]>([]);
+  const [ledgerFilters, setLedgerFilters] = useState<LedgerFilters>({ accountId: '', eventType: 'all', symbol: '', dateFrom: '', dateTo: '' });
   const [tradeForm, setTradeForm] = useState({
     assetCategory: 'stock' as AssetCategory,
     assetSubcategory: '' as AssetSubcategory,
@@ -124,6 +155,22 @@ const AssetEventsPage: React.FC = () => {
     [accounts, selectedAccountId],
   );
 
+  const accountNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    accounts.forEach((account) => map.set(account.id, account.name));
+    return map;
+  }, [accounts]);
+
+  const positionNameByAccountSymbol = useMemo(() => {
+    const map = new Map<string, string>();
+    positions.forEach((position) => {
+      if (position.name) {
+        map.set(`${position.accountId}:${position.symbol}`, position.name);
+      }
+    });
+    return map;
+  }, [positions]);
+
   const tradeAmount = useMemo(() => {
     const quantity = Number(tradeForm.quantity || 0);
     const price = Number(tradeForm.price || 0);
@@ -156,6 +203,105 @@ const AssetEventsPage: React.FC = () => {
 
   const updateCorpForm = (patch: Partial<typeof corpForm>) => {
     setCorpForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  const updateLedgerFilters = (patch: Partial<LedgerFilters>) => {
+    setLedgerFilters((prev) => ({ ...prev, ...patch }));
+  };
+
+  const buildLedgerQuery = (eventType: LedgerEventType) => {
+    const query: { accountId?: number; symbol?: string; dateFrom?: string; dateTo?: string; actionType?: 'cash_dividend'; page: number; pageSize: number } = {
+      page: 1,
+      pageSize: 50,
+    };
+    if (ledgerFilters.accountId !== '') {
+      query.accountId = ledgerFilters.accountId;
+    }
+    const symbol = ledgerFilters.symbol.trim();
+    if (symbol && eventType !== 'cash') {
+      query.symbol = symbol;
+    }
+    if (ledgerFilters.dateFrom) {
+      query.dateFrom = ledgerFilters.dateFrom;
+    }
+    if (ledgerFilters.dateTo) {
+      query.dateTo = ledgerFilters.dateTo;
+    }
+    if (eventType === 'cash_dividend') {
+      query.actionType = 'cash_dividend';
+    }
+    return query;
+  };
+
+  const ledgerRows = useMemo<LedgerRow[]>(() => {
+    const rows: LedgerRow[] = [];
+    recentTrades.forEach((item) => {
+      rows.push({
+        key: `trade-${item.id}`,
+        date: item.tradeDate,
+        typeLabel: '交易',
+        accountId: item.accountId,
+        accountName: accountNameById.get(item.accountId) || '--',
+        symbol: item.symbol,
+        name: item.name || positionNameByAccountSymbol.get(`${item.accountId}:${item.symbol}`) || '--',
+        direction: item.side === 'buy' ? '买入' : '卖出',
+        amount: formatNumber(item.quantity),
+        price: formatNumber(item.price),
+        note: item.note || `本单盈利 ${formatNumber(item.realizedPnl || 0)}`,
+      });
+    });
+    recentCashLedgers.forEach((item) => {
+      rows.push({
+        key: `cash-${item.id}`,
+        date: item.eventDate,
+        typeLabel: '资金',
+        accountId: item.accountId,
+        accountName: accountNameById.get(item.accountId) || '--',
+        symbol: 'CASH',
+        name: '现金',
+        direction: item.direction === 'in' ? '流入' : '流出',
+        amount: `${item.currency} ${formatNumber(item.amount)}`,
+        price: '--',
+        note: item.note || '现金流水',
+      });
+    });
+    recentCorporateActions.forEach((item) => {
+      const dividendAmount = item.realizedPnl || item.dividendAmount || 0;
+      rows.push({
+        key: `cash-dividend-${item.id}`,
+        date: item.effectiveDate,
+        typeLabel: '现金分红',
+        accountId: item.accountId,
+        accountName: accountNameById.get(item.accountId) || '--',
+        symbol: item.symbol,
+        name: positionNameByAccountSymbol.get(`${item.accountId}:${item.symbol}`) || '--',
+        direction: '现金分红',
+        amount: `${item.currency} ${formatNumber(dividendAmount)}`,
+        price: '--',
+        note: item.note || `现金分红，本单盈利${formatNumber(dividendAmount)}元，不影响成本`,
+      });
+    });
+    return rows.sort((a, b) => b.date.localeCompare(a.date));
+  }, [accountNameById, positionNameByAccountSymbol, recentCashLedgers, recentCorporateActions, recentTrades]);
+
+  const refreshLedger = async () => {
+    const requests: Array<Promise<void>> = [];
+    if (ledgerFilters.eventType === 'all' || ledgerFilters.eventType === 'trade') {
+      requests.push(portfolioApi.listTrades(buildLedgerQuery('trade')).then((data) => setRecentTrades(data.items)));
+    } else {
+      setRecentTrades([]);
+    }
+    if (ledgerFilters.eventType === 'all' || ledgerFilters.eventType === 'cash') {
+      requests.push(portfolioApi.listCashLedger(buildLedgerQuery('cash')).then((data) => setRecentCashLedgers(data.items)));
+    } else {
+      setRecentCashLedgers([]);
+    }
+    if (ledgerFilters.eventType === 'all' || ledgerFilters.eventType === 'cash_dividend') {
+      requests.push(portfolioApi.listCorporateActions(buildLedgerQuery('cash_dividend')).then((data) => setRecentCorporateActions(data.items)));
+    } else {
+      setRecentCorporateActions([]);
+    }
+    await Promise.all(requests);
   };
 
   const refreshRecentTrades = async () => {
@@ -279,7 +425,7 @@ const AssetEventsPage: React.FC = () => {
 
   return (
     <AppPage className="max-w-[1600px] space-y-3">
-      <PageHeader eyebrow="Portfolio Ledger" title="资产事件" description="把交易、资金流水和公司行为集中管理，初始化页只负责账户和初始资产。" className="!rounded-xl !px-4 !py-3" />
+      <PageHeader eyebrow="Portfolio Ledger" title="资产事件" description="把交易、资金流水和现金分红集中管理，初始化页只负责账户和初始资产。" className="!rounded-xl !px-4 !py-3" />
       {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
       {successMessage ? <InlineAlert variant="success" title="已保存" message={successMessage} /> : null}
       <section className="grid gap-2 xl:grid-cols-3">
@@ -409,8 +555,8 @@ const AssetEventsPage: React.FC = () => {
         <Card className="!rounded-xl" padding="sm">
           <form className="flex h-full flex-col gap-2" onSubmit={handleCorporateSubmit}>
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-secondary">Corporate Action</p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">公司行为</h2>
+              <p className="text-xs uppercase tracking-[0.22em] text-secondary">Cash Dividend</p>
+              <h2 className="mt-1 text-base font-semibold text-foreground">现金分红</h2>
               <p className="mt-1 text-sm text-secondary">记录标的物现金分红事件。</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -457,22 +603,50 @@ const AssetEventsPage: React.FC = () => {
       </section>
 
       <Card className="!rounded-xl" padding="sm">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.22em] text-secondary">Event Ledger</p>
             <h2 className="mt-1 text-base font-semibold text-foreground">交易台账</h2>
-            <p className="mt-1 text-sm text-secondary">先展示最近交易、资金流水和现金分红，后续补充分页和删除记录能力。</p>
+            <p className="mt-1 text-sm text-secondary">展示交易、资金流水和现金分红；事件记录用于审计，账面调整通过新增反向事件处理。</p>
           </div>
-          <span className="rounded-full border border-border/40 px-2.5 py-1 text-xs text-secondary">待设计</span>
+          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+            <label className="text-xs text-secondary">账户名称
+              <select className={`${SELECT_CLASS} mt-1`} value={ledgerFilters.accountId} onChange={(e) => updateLedgerFilters({ accountId: e.target.value ? Number(e.target.value) : '' })}>
+                <option value="">全部账户</option>
+                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-secondary">事件类型
+              <select className={`${SELECT_CLASS} mt-1`} value={ledgerFilters.eventType} onChange={(e) => updateLedgerFilters({ eventType: e.target.value as LedgerEventType })}>
+                {LEDGER_EVENT_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-secondary">标的代码
+              <input className={`${INPUT_CLASS} mt-1`} value={ledgerFilters.symbol} onChange={(e) => updateLedgerFilters({ symbol: e.target.value })} placeholder="如 510500" />
+            </label>
+            <label className="text-xs text-secondary">起始日期
+              <input className={`${INPUT_CLASS} mt-1`} type="date" value={ledgerFilters.dateFrom} onChange={(e) => updateLedgerFilters({ dateFrom: e.target.value })} />
+            </label>
+            <label className="text-xs text-secondary">终止日期
+              <input className={`${INPUT_CLASS} mt-1`} type="date" value={ledgerFilters.dateTo} onChange={(e) => updateLedgerFilters({ dateTo: e.target.value })} />
+            </label>
+            <div className="flex items-end gap-2">
+              <Button size="sm" type="button" onClick={() => void refreshLedger()} disabled={loading}>筛选</Button>
+              <Button size="sm" variant="ghost" type="button" onClick={() => setLedgerFilters({ accountId: '', eventType: 'all', symbol: '', dateFrom: '', dateTo: '' })}>重置</Button>
+            </div>
+          </div>
         </div>
         <div className="mt-3 overflow-x-auto rounded-lg border border-border/40">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="bg-surface/60 text-xs text-secondary">
               <tr>
                 <th className="px-3 py-2 text-left">日期</th>
                 <th className="px-3 py-2 text-left">事件类型</th>
-                <th className="px-3 py-2 text-left">账户</th>
-                <th className="px-3 py-2 text-left">标的/方向</th>
+                <th className="px-3 py-2 text-left">账户ID</th>
+                <th className="px-3 py-2 text-left">账户名称</th>
+                <th className="px-3 py-2 text-left">标的代码</th>
+                <th className="px-3 py-2 text-left">标的名称</th>
+                <th className="px-3 py-2 text-left">方向</th>
                 <th className="px-3 py-2 text-right">数量/金额</th>
                 <th className="px-3 py-2 text-right">价格/比率</th>
                 <th className="px-3 py-2 text-left">备注</th>
@@ -480,46 +654,25 @@ const AssetEventsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {recentTrades.length === 0 && recentCashLedgers.length === 0 && recentCorporateActions.length === 0 ? (
+              {ledgerRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-sm text-secondary">
+                  <td colSpan={11} className="px-3 py-8 text-center text-sm text-secondary">
                     暂无事件记录。
                   </td>
                 </tr>
               ) : null}
-              {recentTrades.map((item) => (
-                <tr key={`trade-${item.id}`} className="border-t border-border/50 odd:bg-background/70 even:bg-surface/20">
-                  <td className="px-3 py-2 text-left">{item.tradeDate}</td>
-                  <td className="px-3 py-2 text-left">交易</td>
+              {ledgerRows.map((item) => (
+                <tr key={item.key} className="border-t border-border/50 odd:bg-background/70 even:bg-surface/20">
+                  <td className="px-3 py-2 text-left">{item.date}</td>
+                  <td className="px-3 py-2 text-left">{item.typeLabel}</td>
                   <td className="px-3 py-2 text-left">#{item.accountId}</td>
-                  <td className="px-3 py-2 text-left">{item.symbol} {item.name || ''} / {item.side === 'buy' ? '买入' : '卖出'}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(item.quantity)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(item.price)}</td>
-                  <td className="px-3 py-2 text-left">{item.note || `本单盈利 ${formatNumber(item.realizedPnl || 0)}`}</td>
-                  <td className="px-3 py-2 text-right text-secondary">--</td>
-                </tr>
-              ))}
-              {recentCashLedgers.map((item) => (
-                <tr key={`cash-${item.id}`} className="border-t border-border/50 odd:bg-background/70 even:bg-surface/20">
-                  <td className="px-3 py-2 text-left">{item.eventDate}</td>
-                  <td className="px-3 py-2 text-left">资金</td>
-                  <td className="px-3 py-2 text-left">#{item.accountId}</td>
-                  <td className="px-3 py-2 text-left">现金 / {item.direction === 'in' ? '流入' : '流出'}</td>
-                  <td className="px-3 py-2 text-right">{item.currency} {formatNumber(item.amount)}</td>
-                  <td className="px-3 py-2 text-right">--</td>
-                  <td className="px-3 py-2 text-left">{item.note || '现金流水'}</td>
-                  <td className="px-3 py-2 text-right text-secondary">--</td>
-                </tr>
-              ))}
-              {recentCorporateActions.map((item) => (
-                <tr key={`corporate-${item.id}`} className="border-t border-border/50 odd:bg-background/70 even:bg-surface/20">
-                  <td className="px-3 py-2 text-left">{item.effectiveDate}</td>
-                  <td className="px-3 py-2 text-left">公司行为</td>
-                  <td className="px-3 py-2 text-left">#{item.accountId}</td>
-                  <td className="px-3 py-2 text-left">{item.symbol} / 现金分红</td>
-                  <td className="px-3 py-2 text-right">{item.currency} {formatNumber(item.realizedPnl || item.dividendAmount || 0)}</td>
-                  <td className="px-3 py-2 text-right">--</td>
-                  <td className="px-3 py-2 text-left">{item.note || '现金分红'}</td>
+                  <td className="px-3 py-2 text-left">{item.accountName}</td>
+                  <td className="px-3 py-2 text-left">{item.symbol}</td>
+                  <td className="px-3 py-2 text-left">{item.name}</td>
+                  <td className="px-3 py-2 text-left">{item.direction}</td>
+                  <td className="px-3 py-2 text-right">{item.amount}</td>
+                  <td className="px-3 py-2 text-right">{item.price}</td>
+                  <td className="px-3 py-2 text-left">{item.note}</td>
                   <td className="px-3 py-2 text-right text-secondary">--</td>
                 </tr>
               ))}

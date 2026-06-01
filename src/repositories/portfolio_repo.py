@@ -125,6 +125,8 @@ class PortfolioRepository:
                 row.avg_cost = float(fields["avg_cost"])
             if "last_price" in fields and fields["last_price"] is not None:
                 row.last_price = float(fields["last_price"])
+            if "realized_pnl_base" in fields and fields["realized_pnl_base"] is not None:
+                row.realized_pnl_base = float(fields["realized_pnl_base"])
             qty = float(row.quantity or 0)
             avg = float(row.avg_cost or 0)
             row.total_cost = qty * avg
@@ -381,18 +383,6 @@ class PortfolioRepository:
             session.expunge(row)
             return row
 
-    def delete_trade(self, trade_id: int) -> bool:
-        with self.portfolio_write_session() as session:
-            return self.delete_trade_in_session(session=session, trade_id=trade_id)
-
-    def delete_cash_ledger(self, entry_id: int) -> bool:
-        with self.portfolio_write_session() as session:
-            return self.delete_cash_ledger_in_session(session=session, entry_id=entry_id)
-
-    def delete_corporate_action(self, action_id: int) -> bool:
-        with self.portfolio_write_session() as session:
-            return self.delete_corporate_action_in_session(session=session, action_id=action_id)
-
     def has_trade_uid(self, account_id: int, trade_uid: Optional[str]) -> bool:
         """Return True when trade_uid already exists in the account."""
         uid = (trade_uid or "").strip()
@@ -570,51 +560,6 @@ class PortfolioRepository:
         session.refresh(row)
         return row
 
-    def delete_trade_in_session(self, *, session: Any, trade_id: int) -> bool:
-        row = session.execute(
-            select(PortfolioTrade).where(PortfolioTrade.id == trade_id).limit(1)
-        ).scalar_one_or_none()
-        if row is None:
-            return False
-        self._invalidate_account_cache_in_session(
-            session=session,
-            account_id=int(row.account_id),
-            from_date=row.trade_date,
-        )
-        session.delete(row)
-        session.flush()
-        return True
-
-    def delete_cash_ledger_in_session(self, *, session: Any, entry_id: int) -> bool:
-        row = session.execute(
-            select(PortfolioCashLedger).where(PortfolioCashLedger.id == entry_id).limit(1)
-        ).scalar_one_or_none()
-        if row is None:
-            return False
-        self._invalidate_account_cache_in_session(
-            session=session,
-            account_id=int(row.account_id),
-            from_date=row.event_date,
-        )
-        session.delete(row)
-        session.flush()
-        return True
-
-    def delete_corporate_action_in_session(self, *, session: Any, action_id: int) -> bool:
-        row = session.execute(
-            select(PortfolioCorporateAction).where(PortfolioCorporateAction.id == action_id).limit(1)
-        ).scalar_one_or_none()
-        if row is None:
-            return False
-        self._invalidate_account_cache_in_session(
-            session=session,
-            account_id=int(row.account_id),
-            from_date=row.effective_date,
-        )
-        session.delete(row)
-        session.flush()
-        return True
-
     # ------------------------------------------------------------------
     # Event reads
     # ------------------------------------------------------------------
@@ -688,7 +633,7 @@ class PortfolioRepository:
         return list(rows)
 
     def get_first_activity_date(self, *, account_id: int, as_of: date) -> Optional[date]:
-        """Return earliest event date (trade/cash/corporate action) for one account."""
+        """Return earliest event date (trade/cash/dividend) for one account."""
         with self.db.get_session() as session:
             first_trade = session.execute(
                 select(func.min(PortfolioTrade.trade_date)).where(
@@ -1034,6 +979,7 @@ class PortfolioRepository:
                         last_price=float(item["last_price"]),
                         market_value_base=float(item["market_value_base"]),
                         unrealized_pnl_base=float(item["unrealized_pnl_base"]),
+                        realized_pnl_base=float(item.get("realized_pnl_base") or 0.0),
                         asset_category=item.get("asset_category"),
                         asset_subcategory=item.get("asset_subcategory"),
                         asset_risk_class=item.get("asset_risk_class"),
@@ -1221,6 +1167,7 @@ class PortfolioRepository:
                         last_price=float(item["last_price"]),
                         market_value_base=float(item["market_value_base"]),
                         unrealized_pnl_base=float(item["unrealized_pnl_base"]),
+                        realized_pnl_base=float(item.get("realized_pnl_base") or 0.0),
                         asset_category=item.get("asset_category"),
                         asset_subcategory=item.get("asset_subcategory"),
                         asset_risk_class=item.get("asset_risk_class"),

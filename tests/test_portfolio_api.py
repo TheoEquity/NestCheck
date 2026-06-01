@@ -412,26 +412,11 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(snapshot_before.json()["accounts"][0]["positions"][0]["quantity"], 10.0)
 
         delete_trade = self.client.delete(f"/api/v1/portfolio/trades/{trade_resp.json()['id']}")
-        self.assertEqual(delete_trade.status_code, 200)
-        self.assertEqual(delete_trade.json()["deleted"], 1)
-
-        snapshot_after_trade = self.client.get(
-            "/api/v1/portfolio/snapshot",
-            params={"account_id": account_id, "as_of": "2026-01-03"},
-        )
-        self.assertEqual(snapshot_after_trade.status_code, 200)
-        self.assertEqual(snapshot_after_trade.json()["accounts"][0]["positions"], [])
-
         delete_cash = self.client.delete(f"/api/v1/portfolio/cash-ledger/{cash_resp.json()['id']}")
-        self.assertEqual(delete_cash.status_code, 200)
-        self.assertEqual(delete_cash.json()["deleted"], 1)
-
         delete_corp = self.client.delete(f"/api/v1/portfolio/corporate-actions/{corp_resp.json()['id']}")
-        self.assertEqual(delete_corp.status_code, 200)
-        self.assertEqual(delete_corp.json()["deleted"], 1)
-
-        missing_trade = self.client.delete("/api/v1/portfolio/trades/999999")
-        self.assertEqual(missing_trade.status_code, 404)
+        self.assertEqual(delete_trade.status_code, 405)
+        self.assertEqual(delete_cash.status_code, 405)
+        self.assertEqual(delete_corp.status_code, 405)
 
     def test_create_trade_busy_returns_409(self) -> None:
         with patch(
@@ -458,17 +443,6 @@ class PortfolioApiTestCase(unittest.TestCase):
         detail = resp.json()
         self.assertEqual(detail.get("error"), "portfolio_busy")
 
-    def test_delete_trade_busy_returns_409(self) -> None:
-        with patch(
-            "api.v1.endpoints.portfolio.PortfolioService.delete_trade_event",
-            side_effect=PortfolioBusyError("Portfolio ledger is busy; please retry shortly."),
-        ):
-            resp = self.client.delete("/api/v1/portfolio/trades/1")
-
-        self.assertEqual(resp.status_code, 409)
-        detail = resp.json()
-        self.assertEqual(detail.get("error"), "portfolio_busy")
-
     def test_create_cash_ledger_busy_returns_409(self) -> None:
         with patch(
             "api.v1.endpoints.portfolio.PortfolioService.record_cash_ledger",
@@ -484,17 +458,6 @@ class PortfolioApiTestCase(unittest.TestCase):
                     "currency": "CNY",
                 },
             )
-
-        self.assertEqual(resp.status_code, 409)
-        detail = resp.json()
-        self.assertEqual(detail.get("error"), "portfolio_busy")
-
-    def test_delete_cash_ledger_busy_returns_409(self) -> None:
-        with patch(
-            "api.v1.endpoints.portfolio.PortfolioService.delete_cash_ledger_event",
-            side_effect=PortfolioBusyError("Portfolio ledger is busy; please retry shortly."),
-        ):
-            resp = self.client.delete("/api/v1/portfolio/cash-ledger/1")
 
         self.assertEqual(resp.status_code, 409)
         detail = resp.json()
@@ -517,17 +480,6 @@ class PortfolioApiTestCase(unittest.TestCase):
                     "dividend_amount": 100.0,
                 },
             )
-
-        self.assertEqual(resp.status_code, 409)
-        detail = resp.json()
-        self.assertEqual(detail.get("error"), "portfolio_busy")
-
-    def test_delete_corporate_action_busy_returns_409(self) -> None:
-        with patch(
-            "api.v1.endpoints.portfolio.PortfolioService.delete_corporate_action_event",
-            side_effect=PortfolioBusyError("Portfolio ledger is busy; please retry shortly."),
-        ):
-            resp = self.client.delete("/api/v1/portfolio/corporate-actions/1")
 
         self.assertEqual(resp.status_code, 409)
         detail = resp.json()

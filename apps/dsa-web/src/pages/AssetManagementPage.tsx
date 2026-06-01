@@ -369,6 +369,11 @@ const AssetManagementPage: React.FC = () => {
     [positions],
   );
 
+  const totalRealizedPnl = useMemo(
+    () => positions.reduce((sum, item) => sum + Number(item.realizedPnlBase || 0), 0),
+    [positions],
+  );
+
   const totalCost = useMemo(
     () => positions.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
     [positions],
@@ -520,7 +525,7 @@ const AssetManagementPage: React.FC = () => {
       />
       {error ? <ApiErrorAlert error={error} /> : null}
 
-      <section className="grid gap-2 xl:grid-cols-[1.2fr_0.9fr_1.2fr]">
+      <section className="grid gap-2 xl:grid-cols-[1.1fr_0.9fr_0.9fr_1.2fr]">
         <StatCard
           label="总资产"
           value={formatMoney(totalMarketValue, 'CNY')}
@@ -528,7 +533,13 @@ const AssetManagementPage: React.FC = () => {
           className="!rounded-xl !p-3"
         />
         <StatCard
-          label="总收益"
+          label="已实现收益"
+          value={formatMoney(totalRealizedPnl, 'CNY')}
+          hint="事件收益折算人民币"
+          className="!rounded-xl !p-3"
+        />
+        <StatCard
+          label="持仓盈亏"
           value={formatMoney(totalUnrealizedPnl, 'CNY')}
           hint={formatSignedPct(totalCost > 0 ? (totalUnrealizedPnl / totalCost) * 100 : 0)}
           className="!rounded-xl !p-3"

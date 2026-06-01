@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import * as echarts from 'echarts';
 import type { MonthlySeasonalityResponse } from '../api/market';
+import { echarts, type ECharts } from './echarts';
 
 interface SeasonalityChartProps {
   data: MonthlySeasonalityResponse;
@@ -17,7 +17,7 @@ type BarLabelParam = {
 
 export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
 
   const option = useMemo(() => {
     const colors = data.avgReturns.map((v) => v >= 0 ? '#ef4444' : '#22c55e');

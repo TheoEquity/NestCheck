@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import * as echarts from 'echarts';
 import type { WeeklyDataPoint } from '../api/market';
+import { echarts, type ECharts } from './echarts';
 
 interface WeeklyTrendChartProps {
   data: WeeklyDataPoint[];
@@ -20,7 +20,7 @@ export const WeeklyTrendChart: React.FC<WeeklyTrendChartProps> = ({
   maValues,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || !data || data.length === 0) return;

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import * as echarts from 'echarts';
+import { echarts, type ECharts } from './echarts';
 
 interface RiskRadarProps {
   volatility: number;
@@ -30,7 +30,7 @@ export const RiskRadar: React.FC<RiskRadarProps> = ({
   volatility, drawdown, correlation, spread, fx, valuation, details = {},
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
 
   const option = useMemo(() => {
     const values = [volatility, drawdown, correlation, spread, fx, valuation];

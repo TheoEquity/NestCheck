@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import * as echarts from 'echarts';
+import { echarts, type ECharts } from './echarts';
 
 interface MiniSparklineProps {
   data: Array<{ date: string; close: number }>;
@@ -15,7 +15,7 @@ export const MiniSparkline: React.FC<MiniSparklineProps> = ({
   prevClose,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || !data || data.length === 0) return;

@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, AliasChoices
+from pydantic import BaseModel, Field, model_validator
 
 
 class PortfolioAccountCreateRequest(BaseModel):
@@ -82,12 +82,17 @@ class PortfolioCorporateActionCreateRequest(BaseModel):
     action_type: Literal["cash_dividend"] = "cash_dividend"
     market: Optional[Literal["cn", "hk", "us"]] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
-    dividend_amount: float = Field(
-        ...,
-        gt=0,
-        validation_alias=AliasChoices("dividend_amount", "cash_dividend_per_share"),
-    )
+    dividend_amount: Optional[float] = Field(None, gt=0)
+    cash_dividend_per_share: Optional[float] = Field(None, gt=0, exclude=True)
     note: Optional[str] = Field(None, max_length=255)
+
+    @model_validator(mode="after")
+    def normalize_dividend_amount(self) -> "PortfolioCorporateActionCreateRequest":
+        if self.dividend_amount is None:
+            self.dividend_amount = self.cash_dividend_per_share
+        if self.dividend_amount is None or self.dividend_amount <= 0:
+            raise ValueError("dividend_amount must be > 0 for cash_dividend")
+        return self
 
 
 class PortfolioEventCreatedResponse(BaseModel):
@@ -183,6 +188,7 @@ class PortfolioPositionItem(BaseModel):
     price_change_pct: Optional[float] = None
     market_value_base: float
     unrealized_pnl_base: float
+    realized_pnl_base: float = 0.0
     unrealized_pnl_pct: Optional[float] = None
     asset_category: Optional[str] = None
     asset_subcategory: Optional[str] = None

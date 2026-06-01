@@ -19,6 +19,13 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ECharts | null>(null);
 
+  const getColor = (ret: number, wr: number) => {
+    if (ret > 0 && wr > 50) return '#ef4444';
+    if (ret > 0 && wr <= 50) return '#eab308';
+    if (ret < 0 && wr <= 50) return '#22c55e';
+    return '#eab308';
+  };
+
   const option = useMemo(() => ({
     tooltip: {
       trigger: 'axis',
@@ -28,7 +35,7 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
         const idx = params[0].dataIndex;
         const ret = data.avgReturns[idx];
         const wr = data.winRates[idx];
-        const color = ret >= 0 ? '#ef4444' : '#22c55e';
+        const color = getColor(ret, wr);
         return `${params[0].name}<br/>
 平均涨跌幅: <strong style="color:${color}">${ret >= 0 ? '+' : ''}${ret}%</strong><br/>
 上涨概率: ${wr}%`;
@@ -52,13 +59,16 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
       name: '平均涨跌幅',
       type: 'bar',
       barWidth: 20,
-      data: data.avgReturns.map((v) => ({
-        value: v,
-        itemStyle: {
-          color: v >= 0 ? '#ef4444' : '#22c55e',
-          borderRadius: v >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3],
-        },
-      })),
+      data: data.avgReturns.map((v, i) => {
+        const wr = data.winRates[i];
+        return {
+          value: v,
+          itemStyle: {
+            color: getColor(v, wr),
+            borderRadius: v >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3],
+          },
+        };
+      }),
       label: {
         show: true,
         position: 'top',

@@ -331,7 +331,22 @@ const AssetDashboardPage: React.FC = () => {
           )}
         </Card>
 
-        {/* 中间行：风险雷达 + 相关性热力图 + 仓位水球图 */}
+        {/* 全年择时热力图 */}
+        <Card className="col-span-full !rounded-xl !p-3">
+          <div className="mb-1 border-b border-border/50 pb-2">
+            <h2 className="text-base font-semibold text-foreground">全年择时</h2>
+            <span className="text-xs text-secondary-text">{seasonality ? `${seasonality.index} · 近${seasonality.yearsStat}年统计` : '加载中...'}</span>
+          </div>
+          {!hasLoadedRiskAndTrend || !seasonality ? (
+            <div className="h-52 rounded-lg bg-border/20 animate-pulse" />
+          ) : seasonality.avgReturns.every((v) => v === 0) ? (
+            <EmptyState title="季节性数据暂不可用" description="数据加载中或统计结果不足。" className="border-none bg-transparent px-2 py-8 shadow-none" />
+          ) : (
+            <SeasonalityChart data={seasonality} />
+          )}
+        </Card>
+
+        {/* 风险雷达 + 相关性热力图 + 仓位水球图 */}
         <Card className="col-span-full !rounded-xl !p-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-stretch" style={{ minHeight: 240 }}>
             <div className="flex flex-col gap-1">
@@ -390,21 +405,6 @@ const AssetDashboardPage: React.FC = () => {
               )}
             </div>
           </div>
-        </Card>
-
-        {/* 底部全宽：全年择时热力图 */}
-        <Card className="col-span-full !rounded-xl !p-3">
-          <div className="mb-1 border-b border-border/50 pb-2">
-            <h2 className="text-base font-semibold text-foreground">全年择时</h2>
-            <span className="text-xs text-secondary-text">{seasonality ? `${seasonality.index} · 近${seasonality.yearsStat}年统计` : '加载中...'}</span>
-          </div>
-          {!hasLoadedRiskAndTrend || !seasonality ? (
-            <div className="h-52 rounded-lg bg-border/20 animate-pulse" />
-          ) : seasonality.avgReturns.every((v) => v === 0) ? (
-            <EmptyState title="季节性数据暂不可用" description="数据加载中或统计结果不足。" className="border-none bg-transparent px-2 py-8 shadow-none" />
-          ) : (
-            <SeasonalityChart data={seasonality} />
-          )}
         </Card>
       </section>
     </AppPage>

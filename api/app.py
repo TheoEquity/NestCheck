@@ -147,15 +147,11 @@ async def app_lifespan(app: FastAPI):
     market_refresh_task = asyncio.create_task(_daily_market_cache_refresh_loop())
     app.state._market_refresh_task = market_refresh_task
 
-    seasonality_refresh_task = asyncio.create_task(_daily_seasonality_cache_refresh())
-    app.state._seasonality_refresh_task = seasonality_refresh_task
-
     try:
         yield
     finally:
         refresh_task.cancel()
         market_refresh_task.cancel()
-        seasonality_refresh_task.cancel()
         try:
             await refresh_task
         except asyncio.CancelledError:
@@ -164,18 +160,12 @@ async def app_lifespan(app: FastAPI):
             await market_refresh_task
         except asyncio.CancelledError:
             pass
-        try:
-            await seasonality_refresh_task
-        except asyncio.CancelledError:
-            pass
         if hasattr(app.state, "system_config_service"):
             delattr(app.state, "system_config_service")
         if hasattr(app.state, "_price_refresh_task"):
             delattr(app.state, "_price_refresh_task")
         if hasattr(app.state, "_market_refresh_task"):
             delattr(app.state, "_market_refresh_task")
-        if hasattr(app.state, "_seasonality_refresh_task"):
-            delattr(app.state, "_seasonality_refresh_task")
 
 
 async def _daily_portfolio_price_refresh():
@@ -220,6 +210,102 @@ def _run_price_refresh():
         fx.get("refreshed", 0), fx.get("failed", 0),
     )
 
+    # R2/R3 holdings (funds/wealth products, can fetch NAV after 20:30 market close)
+    try:
+        from src.storage import get_db, PortfolioPosition, StockDaily
+        from src.services.portfolio_service import EPS
+
+        db = get_db()
+        with db.get_session() as s:
+            r2r3_positions = s.query(PortfolioPosition).filter(
+                PortfolioPosition.quantity > EPS,
+                PortfolioPosition.asset_risk_class.in_({"R2", "R3"}),
+            ).all()
+
+        r2r3_refreshed = 0
+        r2r3_failed = 0
+        for position in r2r3_positions:
+            symbol = svc._normalize_symbol_for_position(position.symbol)
+            quote = svc._resolve_latest_price_with_name(symbol, position.asset_category)
+            if quote is not None and quote.price > 0:
+                with db.get_session() as s2:
+                    s2.query(PortfolioPosition).filter_by(id=position.id).update({
+                        PortfolioPosition.last_price: quote.price,
+                        PortfolioPosition.price_change_pct: quote.change_pct,
+                        PortfolioPosition.name: quote.name or position.name,
+                        PortfolioPosition.updated_at: datetime.now(),
+                    })
+                    s2.commit()
+                r2r3_refreshed += 1
+            else:
+                r2r3_failed += 1
+
+        logger.info("R2/R3 price refresh: refreshed=%d, failed=%d", r2r3_refreshed, r2r3_failed)
+
+        # cn_vix / us_vix / bond_cn_10y / bond_us_10y (for risk & radar caches)
+        import akshare as ak
+        import yfinance as yf
+
+        today = date.today()
+
+        try:
+            df = ak.index_option_300etf_qvix()
+            if not df.empty:
+                with get_db().get_session() as s:
+                    s.query(StockDaily).filter_by(code="cn_vix", date=today).delete()
+                    s.add(StockDaily(code="cn_vix", date=today, close=float(df.iloc[-1]["qvix"]), data_source="akshare", updated_at=datetime.now()))
+                    s.commit()
+        except Exception as exc:
+            logger.warning("Failed to refresh cn_vix: %s", exc)
+
+        try:
+            vix = yf.Ticker("^VIX")
+            hist = vix.history(period="2d")
+            if not hist.empty:
+                with get_db().get_session() as s:
+                    s.query(StockDaily).filter_by(code="us_vix", date=today).delete()
+                    s.add(StockDaily(code="us_vix", date=today, close=float(hist["Close"].iloc[-1]), data_source="yfinance", updated_at=datetime.now()))
+                    s.commit()
+        except Exception as exc:
+            logger.warning("Failed to refresh us_vix: %s", exc)
+
+        try:
+            df = ak.bond_zh_us_rate()
+            if not df.empty:
+                for i in range(len(df) - 1, max(0, len(df) - 10), -1):
+                    row = df.iloc[i]
+                    us_val = row.get("美国国债收益率10年")
+                    cn_val = row.get("中国国债收益率10年")
+                    if str(us_val) != "nan" and us_val is not None and str(cn_val) != "nan" and cn_val is not None:
+                        with get_db().get_session() as s:
+                            s.query(StockDaily).filter_by(code="bond_us_10y", date=today).delete()
+                            s.query(StockDaily).filter_by(code="bond_cn_10y", date=today).delete()
+                            s.add(StockDaily(code="bond_cn_10y", date=today, close=float(cn_val), data_source="akshare", updated_at=datetime.now()))
+                            s.add(StockDaily(code="bond_us_10y", date=today, close=float(us_val), data_source="akshare", updated_at=datetime.now()))
+                            s.commit()
+                        break
+        except Exception as exc:
+            logger.warning("Failed to refresh bond indices: %s", exc)
+    except Exception as exc:
+        logger.warning("R2/R3 & risk indices refresh failed: %s", exc)
+
+    # Rebuild all 6 market_cache keys
+    try:
+        from src.services.market_cache_service import (
+            MARKET_CACHE_BUILDERS,
+            refresh_market_cache,
+            refresh_trend_realtime_quotes,
+        )
+
+        for cache_key in MARKET_CACHE_BUILDERS:
+            if cache_key == "trend":
+                refresh_trend_realtime_quotes()
+            else:
+                refresh_market_cache(cache_key)
+            logger.info("Market cache key rebuilt: %s", cache_key)
+    except Exception as exc:
+        logger.warning("Market cache rebuild failed: %s", exc)
+
 
 async def _daily_market_cache_refresh_loop():
     """Refresh market dashboard cache periodically (every 5 minutes) to keep
@@ -245,29 +331,6 @@ async def _daily_market_cache_refresh_loop():
             await asyncio.sleep(refresh_interval_seconds)
 
 
-async def _daily_seasonality_cache_refresh():
-    """Refresh low-frequency seasonality cache once daily after market close."""
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    await asyncio.sleep(30)
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        while True:
-            try:
-                now = datetime.now()
-                if now.hour == 20 and now.minute >= 30:
-                    logger.info("Seasonality cache refresh started")
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(executor, _run_seasonality_cache_refresh)
-                    logger.info("Seasonality cache refresh completed")
-                    await asyncio.sleep(60)
-            except Exception as exc:
-                logger.error("Seasonality cache refresh error: %s", exc, exc_info=True)
-
-            await asyncio.sleep(30)
-
-
 def _run_market_cache_refresh():
     """Synchronous wrapper for market cache refresh."""
     from src.services.market_cache_service import refresh_all_market_caches
@@ -276,13 +339,6 @@ def _run_market_cache_refresh():
     items = result.get("items", {})
     ok_count = sum(1 for item in items.values() if item.get("status") == "success")
     logger.info("Market cache refresh: success=%d/%d", ok_count, len(items))
-
-
-def _run_seasonality_cache_refresh():
-    """Synchronous wrapper for low-frequency seasonality cache refresh."""
-    from src.services.market_cache_service import refresh_market_cache
-
-    refresh_market_cache("seasonality")
 
 
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:

@@ -50,7 +50,7 @@ export interface TaskNextRun {
 }
 
 export interface TriggerTaskResponse {
-  status: 'success' | 'failed' | 'skipped' | 'timeout' | 'running';
+  status: 'success' | 'failed' | 'skipped' | 'timeout' | 'running' | 'accepted';
   message?: string;
   durationMs?: number;
   error?: string;

@@ -114,7 +114,7 @@ def get_task_history(task_name: str, limit: int = 50) -> List[Dict[str, Any]]:
         history = task_history.get_history(task_name, limit=limit)
         if not history:
             all_tasks = task_history.get_all_tasks()
-            valid_tasks = ["scheduled_task", "market_cache_refresh", "seasonality_cache_refresh", "agent_event_monitor"]
+            valid_tasks = ["scheduled_task", "market_cache_refresh", "agent_event_monitor"]
             if task_name not in all_tasks and task_name not in valid_tasks:
                 raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在或无历史记录")
         return history
@@ -208,11 +208,94 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
                 if task_name == "scheduled_task":
                     run_daily_analysis()
                 elif task_name == "market_cache_refresh":
-                    from src.services.market_cache_service import refresh_all_market_caches
-                    refresh_all_market_caches()
+                    from src.services.portfolio_service import PortfolioService
+                    from src.storage import get_db, PortfolioPosition, StockDaily
+                    from src.services.portfolio_service import EPS
+                    import akshare as ak
+                    import yfinance as yf
+
+                    svc = PortfolioService()
+                    result = svc.refresh_all_prices(refresh_fx=True)
+
+                    # R2/R3 holdings
+                    try:
+                        db = get_db()
+                        with db.get_session() as s:
+                            r2r3_positions = s.query(PortfolioPosition).filter(
+                                PortfolioPosition.quantity > EPS,
+                                PortfolioPosition.asset_risk_class.in_({"R2", "R3"}),
+                            ).all()
+                        for position in r2r3_positions:
+                            symbol = svc._normalize_symbol_for_position(position.symbol)
+                            quote = svc._resolve_latest_price_with_name(symbol, position.asset_category)
+                            if quote is not None and quote.price > 0:
+                                with db.get_session() as s2:
+                                    s2.query(PortfolioPosition).filter_by(id=position.id).update({
+                                        PortfolioPosition.last_price: quote.price,
+                                        PortfolioPosition.price_change_pct: quote.change_pct,
+                                        PortfolioPosition.name: quote.name or position.name,
+                                        PortfolioPosition.updated_at: datetime.now(),
+                                    })
+                                    s2.commit()
+                    except Exception as exc:
+                        logger.warning("R2/R3 price refresh failed: %s", exc)
+
+                    # cn_vix / us_vix / bond
+                    try:
+                        today = date.today()
+                        try:
+                            df = ak.index_option_300etf_qvix()
+                            if not df.empty:
+                                with get_db().get_session() as s:
+                                    s.query(StockDaily).filter_by(code="cn_vix", date=today).delete()
+                                    s.add(StockDaily(code="cn_vix", date=today, close=float(df.iloc[-1]["qvix"]), data_source="akshare", updated_at=datetime.now()))
+                                    s.commit()
+                        except Exception as exc:
+                            logger.warning("cn_vix failed: %s", exc)
+                        try:
+                            vix = yf.Ticker("^VIX")
+                            hist = vix.history(period="2d")
+                            if not hist.empty:
+                                with get_db().get_session() as s:
+                                    s.query(StockDaily).filter_by(code="us_vix", date=today).delete()
+                                    s.add(StockDaily(code="us_vix", date=today, close=float(hist["Close"].iloc[-1]), data_source="yfinance", updated_at=datetime.now()))
+                                    s.commit()
+                        except Exception as exc:
+                            logger.warning("us_vix failed: %s", exc)
+                        try:
+                            df = ak.bond_zh_us_rate()
+                            if not df.empty:
+                                for i in range(len(df) - 1, max(0, len(df) - 10), -1):
+                                    row = df.iloc[i]
+                                    us_val = row.get("美国国债收益率10年")
+                                    cn_val = row.get("中国国债收益率10年")
+                                    if str(us_val) != "nan" and us_val is not None and str(cn_val) != "nan" and cn_val is not None:
+                                        with get_db().get_session() as s:
+                                            s.query(StockDaily).filter_by(code="bond_us_10y", date=today).delete()
+                                            s.query(StockDaily).filter_by(code="bond_cn_10y", date=today).delete()
+                                            s.add(StockDaily(code="bond_cn_10y", date=today, close=float(cn_val), data_source="akshare", updated_at=datetime.now()))
+                                            s.add(StockDaily(code="bond_us_10y", date=today, close=float(us_val), data_source="akshare", updated_at=datetime.now()))
+                                            s.commit()
+                                        break
+                        except Exception as exc:
+                            logger.warning("Bond indices failed: %s", exc)
+                    except Exception as exc:
+                        logger.warning("Market risk indices refresh failed: %s", exc)
+
+                    from src.services.market_cache_service import (
+                        MARKET_CACHE_BUILDERS,
+                        refresh_market_cache,
+                        refresh_trend_realtime_quotes,
+                    )
+
+                    for cache_key in MARKET_CACHE_BUILDERS:
+                        if cache_key == "trend":
+                            refresh_trend_realtime_quotes()
+                        else:
+                            refresh_market_cache(cache_key)
                 elif task_name == "seasonality_cache_refresh":
-                    logger.warning("全年择时缓存刷新为后台低频任务，不支持手动触发")
-                    return {"status": "skipped", "message": "全年择时缓存刷新由后台低频任务维护"}
+                    logger.warning("全年择时缓存刷新已合并到价格刷新任务中，不再单独触发")
+                    return {"status": "skipped", "message": "全年择时缓存刷新已合并到价格刷新任务"}
                 elif task_name == "agent_event_monitor":
                     logger.warning("Agent 事件监控为后台常驻任务，不支持手动触发")
                     return {"status": "skipped", "message": "Agent 事件监控为后台常驻任务"}
@@ -226,6 +309,22 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
                 duration_ms = int((time.time() - start_time) * 1000)
                 task_history.record(task_name, "failed", duration_ms=duration_ms, error=str(e))
                 raise
+
+        # Long-running tasks: offload to background thread so the HTTP
+        # client doesn't timeout. Short/instant tasks run inline.
+        background_tasks = {"market_cache_refresh"}
+        if task_name in background_tasks:
+
+            def run_in_thread():
+                try:
+                    result_data = trigger_wrapper()
+                    logger.info("Background task '%s' done: %s", task_name, result_data.get("status"))
+                except Exception as e:
+                    logger.error("Background task '%s' failed: %s", task_name, e)
+
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+            return {"status": "accepted", "message": f"任务 '{task_name}' 已提交后台执行"}
 
         result = {"status": "running", "message": "任务执行中"}
 

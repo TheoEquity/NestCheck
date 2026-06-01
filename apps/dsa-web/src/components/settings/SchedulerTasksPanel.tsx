@@ -99,14 +99,22 @@ export const SchedulerTasksPanel: React.FC = () => {
       const result = await schedulerApi.triggerTask(taskKey);
       if (result.status === 'success') {
         setTriggerMessage(`任务执行成功，耗时 ${result.durationMs || 0}ms`);
+        setTimeout(() => void loadData(), 1500);
+      } else if (result.status === 'accepted') {
+        setTriggerMessage(result.message || '任务已提交后台执行，预计需要2-3分钟完成');
+        setTimeout(() => {
+          void loadData();
+          setTriggerMessage('后台任务执行中，请稍后刷新任务历史查看结果');
+        }, 30000);
       } else if (result.status === 'skipped') {
         setTriggerMessage(result.message || '任务已跳过');
+        setTimeout(() => void loadData(), 1500);
       } else if (result.status === 'timeout') {
         setTriggerMessage(result.message || '任务执行超时');
+        setTimeout(() => void loadData(), 1500);
       } else {
         setTriggerMessage(result.error || result.message || '任务执行失败');
       }
-      setTimeout(() => void loadData(), 1500);
     } catch {
       setTriggerMessage('触发失败，请查看控制台错误信息');
     } finally {

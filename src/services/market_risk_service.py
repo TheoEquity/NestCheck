@@ -28,7 +28,7 @@ CACHE_EXPIRY_HOURS = 12  # 缓存过期时间（小时）
 
 
 def _load_cache(name: str) -> Optional[Dict[str, Any]]:
-    """加载缓存数据"""
+    
     cache_file = CACHE_DIR / f"{name}.json"
     if not cache_file.exists():
         return None
@@ -37,7 +37,6 @@ def _load_cache(name: str) -> Optional[Dict[str, Any]]:
         with open(cache_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # 检查缓存是否过期
         cached_at = datetime.fromisoformat(data.get("_cached_at", "1970-01-01"))
         if datetime.now() - cached_at > timedelta(hours=CACHE_EXPIRY_HOURS):
             logger.info(f"缓存 {name} 已过期")
@@ -50,7 +49,7 @@ def _load_cache(name: str) -> Optional[Dict[str, Any]]:
 
 
 def _save_cache(name: str, data: Dict[str, Any]):
-    """保存缓存数据"""
+    
     cache_file = CACHE_DIR / f"{name}.json"
     data_with_timestamp = {
         **data,
@@ -65,15 +64,7 @@ def _save_cache(name: str, data: Dict[str, Any]):
 
 
 def _dollar_index() -> Dict[str, Any]:
-    """
-    美元指数：用美元对人民币汇率代表 - 优先读库
-    
-    数据源：数据库优先，降级 currency_boc_safe
-    """
-    # 先查缓存
-    cache = _load_cache("dollar")
-    if cache:
-        return cache
+    """美元指数：用美元对人民币汇率代表"""
     
     # 优先从数据库读取
     try:
@@ -156,14 +147,7 @@ def _dollar_index() -> Dict[str, Any]:
 
 
 def _bond_spread() -> Dict[str, Any]:
-    """
-    债市信号：中美 10 年期国债收益率利差 - 优先读库
-    
-    数据源：数据库 bond_cn_10y / bond_us_10y，降级 bond_zh_us_rate
-    """
-    cache = _load_cache("bond")
-    if cache:
-        return cache
+    """债市信号：中美 10 年期国债收益率利差"""
     
     us_10y = None
     cn_10y = None
@@ -232,14 +216,7 @@ def _bond_spread() -> Dict[str, Any]:
 
 
 def _chinese_vix() -> Dict[str, Any]:
-    """
-    A 股恐慌指数（中国波指）- 优先读库
-    
-    数据源：数据库 cn_vix，降级 index_option_300etf_qvix
-    """
-    cache = _load_cache("chinese_vix")
-    if cache:
-        return cache
+    """A 股恐慌指数（中国波指）- 直接读库或网络降级"""
     
     try:
         from src.storage import get_db
@@ -306,14 +283,7 @@ def _chinese_vix() -> Dict[str, Any]:
 
 
 def _us_vix() -> Dict[str, Any]:
-    """
-    美股恐慌指数（VIX）- 优先读库
-    
-    数据源：数据库 us_vix，降级 yfinance ^VIX
-    """
-    cache = _load_cache("us_vix")
-    if cache:
-        return cache
+    """美股恐慌指数（VIX）- 直接读库或网络降级"""
     
     try:
         from src.storage import get_db

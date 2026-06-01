@@ -19,59 +19,55 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ECharts | null>(null);
 
-  const option = useMemo(() => {
-    const colors = data.avgReturns.map((v) => v >= 0 ? '#ef4444' : '#22c55e');
-    return {
-      tooltip: {
-        trigger: 'axis' as const,
-        axisPointer: { type: 'shadow' as const },
-        formatter: (params: AxisTooltipParam[]) => {
-          if (!params || params.length === 0) return '';
-          const idx = params[0].dataIndex;
-          const ret = data.avgReturns[idx];
-          const wr = data.winRates[idx];
-          const color = ret >= 0 ? '#ef4444' : '#22c55e';
-          return `${params[0].name}<br/>
-            平均涨跌幅: <strong style="color:${color}">${ret >= 0 ? '+' : ''}${ret}%</strong><br/>
-            上涨概率: ${wr}%`;
+  const option = useMemo(() => ({
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: AxisTooltipParam[]) => {
+        if (!params || params.length === 0) return '';
+        const idx = params[0].dataIndex;
+        const ret = data.avgReturns[idx];
+        const wr = data.winRates[idx];
+        const color = ret >= 0 ? '#ef4444' : '#22c55e';
+        return `${params[0].name}<br/>
+平均涨跌幅: <strong style="color:${color}">${ret >= 0 ? '+' : ''}${ret}%</strong><br/>
+上涨概率: ${wr}%`;
+      },
+    },
+    grid: { left: 30, right: 30, top: 20, bottom: 40 },
+    xAxis: {
+      type: 'category',
+      data: data.months,
+      axisLabel: { color: '#aaa', fontSize: 11, rotate: 0 },
+      axisLine: { lineStyle: { color: 'rgba(128,128,128,0.3)' } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: '#888', formatter: '{value}%' },
+      splitLine: { lineStyle: { color: 'rgba(128,128,128,0.15)' } },
+      axisLine: { lineStyle: { color: 'rgba(128,128,128,0.3)' } },
+    },
+    series: [{
+      name: '平均涨跌幅',
+      type: 'bar',
+      barWidth: 20,
+      data: data.avgReturns.map((v) => ({
+        value: v,
+        itemStyle: {
+          color: v >= 0 ? '#ef4444' : '#22c55e',
+          borderRadius: v >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3],
         },
+      })),
+      label: {
+        show: true,
+        position: 'top',
+        color: '#aaa',
+        fontSize: 9,
+        formatter: (p: BarLabelParam) => `${p.value >= 0 ? '+' : ''}${p.value}%`,
       },
-      grid: { left: 40, right: 40, top: 10, bottom: 10, containLabel: true },
-      xAxis: {
-        type: 'value' as const,
-        axisLabel: { color: '#888', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(128,128,128,0.15)' } },
-        axisLine: { lineStyle: { color: 'rgba(128,128,128,0.3)' } },
-      },
-      yAxis: {
-        type: 'category' as const,
-        data: data.months,
-        inverse: true,
-        axisLabel: { color: '#aaa', fontSize: 12 },
-        axisLine: { show: false },
-        axisTick: { show: false },
-      },
-      series: [{
-        name: '平均涨跌幅',
-        type: 'bar' as const,
-        barWidth: 14,
-        data: data.avgReturns.map((v, i) => ({
-          value: v,
-          itemStyle: {
-            color: colors[i],
-            borderRadius: [0, 3, 3, 0],
-          },
-        })),
-        label: {
-          show: true,
-          position: 'right' as const,
-          color: '#aaa',
-          fontSize: 10,
-          formatter: (p: BarLabelParam) => `${p.value >= 0 ? '+' : ''}${p.value}%`,
-        },
-      }],
-    };
-  }, [data]);
+    }],
+  }), [data]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -90,5 +86,5 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
     };
   }, [option]);
 
-  return <div ref={containerRef} style={{ width: '100%', height: 240 }} />;
+  return <div ref={containerRef} style={{ width: '100%', height: 220 }} />;
 };

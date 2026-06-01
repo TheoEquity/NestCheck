@@ -9,7 +9,7 @@ import {
   type RiskRadarResponse,
   type EquityRatioResponse,
 } from '../api/market';
-import { ApiErrorAlert, AppPage, Button, Card, EmptyState, PageHeader } from '../components/common';
+import { AppPage, Button, Card, EmptyState, PageHeader } from '../components/common';
 import { WeeklyTrendChart } from '../components/WeeklyTrendChart';
 import { RiskRadar } from '../components/RiskRadar';
 import { SeasonalityChart } from '../components/SeasonalityChart';
@@ -17,9 +17,6 @@ import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
 import { PositionLiquidGauge } from '../components/PositionLiquidGauge';
 import { TrafficLightLabel } from '../components/TrafficLightLabel';
 import { Gauge } from '../components/Gauge';
-import {
-  usePortfolioOverview,
-} from './assetsShared';
 
 const TREND_GROUPS = [
   { key: 'cn', label: 'A 股重要指数', order: ['sh', 'sz', 'cyb'] },
@@ -101,7 +98,6 @@ const AssetDashboardPage: React.FC = () => {
     document.title = '资产主界面 - NestCheck';
   }, []);
 
-  const { error, syncData } = usePortfolioOverview();
   const [marketRisk, setMarketRisk] = useState<MarketRiskResponse | null>(null);
   const [marketTrend, setMarketTrend] = useState<MarketTrendResponse | null>(null);
   const [seasonality, setSeasonality] = useState<MonthlySeasonalityResponse | null>(null);
@@ -125,13 +121,13 @@ const AssetDashboardPage: React.FC = () => {
 
   const refreshAllData = useCallback(() => {
     setIsRefreshingAll(true);
-    void Promise.allSettled([
-      syncData(),
-      marketApi.refreshDashboard(),
-    ]).then(fetchMarketDashboardData)
-      .then(applyMarketResults)
+    void marketApi.refreshDashboard()
+      .then(async () => {
+        const trend = await marketApi.getTrend(Date.now());
+        setMarketTrend(trend);
+      })
       .finally(() => setIsRefreshingAll(false));
-  }, [applyMarketResults, syncData]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -200,8 +196,6 @@ const AssetDashboardPage: React.FC = () => {
           </Button>
         }
       />
-
-      {error ? <ApiErrorAlert error={error} /> : null}
 
       {/* 上方：左侧趋势卡片 + 右侧市场情绪仪表盘 */}
       <section className="grid gap-3 xl:grid-cols-12 items-stretch">
@@ -388,7 +382,11 @@ const AssetDashboardPage: React.FC = () => {
               {!hasLoadedRiskAndTrend || !riskRadar ? (
                 <div className="h-48 rounded-lg bg-border/20 animate-pulse" />
               ) : (
-                <PositionLiquidGauge data={riskRadar} currentRatio={equityRatio?.equityRatio} />
+                <PositionLiquidGauge
+                  data={riskRadar}
+                  currentRatio={equityRatio?.equityRatio}
+                  plannedRatio={equityRatio?.plannedEquityRatio}
+                />
               )}
             </div>
           </div>

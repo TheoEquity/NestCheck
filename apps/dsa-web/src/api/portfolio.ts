@@ -71,7 +71,7 @@ type CashListQuery = EventQuery & {
 
 type CorporateListQuery = EventQuery & {
   symbol?: string;
-  actionType?: 'cash_dividend' | 'split_adjustment';
+  actionType?: 'cash_dividend';
 };
 
 function buildSnapshotParams(query: SnapshotQuery): Record<string, string | number> {
@@ -206,14 +206,21 @@ export const portfolioApi = {
     return response.data;
   },
 
+  async realtimeRevaluePositions(query: SnapshotQuery = {}): Promise<PortfolioPositionListResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/positions/realtime-revalue', undefined, {
+      params: buildSnapshotParams(query),
+    });
+    return toCamelCase<PortfolioPositionListResponse>(response.data);
+  },
+
   async createTrade(payload: PortfolioTradeCreateRequest): Promise<PortfolioEventCreatedResponse> {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/trades', {
       account_id: payload.accountId,
       asset_category: payload.assetCategory,
       asset_subcategory: payload.assetSubcategory,
       asset_risk_class: payload.assetRiskClass,
-      risk_level: payload.riskLevel,
       symbol: payload.symbol,
+      name: payload.name,
       trade_date: payload.tradeDate,
       side: payload.side,
       quantity: payload.quantity,
@@ -237,7 +244,6 @@ export const portfolioApi = {
       asset_category: payload.assetCategory,
       asset_subcategory: payload.assetSubcategory,
       asset_risk_class: payload.assetRiskClass,
-      risk_level: payload.riskLevel,
       event_date: payload.eventDate,
       direction: payload.direction,
       amount: payload.amount,
@@ -256,12 +262,13 @@ export const portfolioApi = {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/corporate-actions', {
       account_id: payload.accountId,
       symbol: payload.symbol,
+      asset_category: payload.assetCategory,
+      asset_subcategory: payload.assetSubcategory,
       effective_date: payload.effectiveDate,
       action_type: payload.actionType,
       market: payload.market,
       currency: payload.currency,
-      cash_dividend_per_share: payload.cashDividendPerShare,
-      split_ratio: payload.splitRatio,
+      dividend_amount: payload.dividendAmount,
       note: payload.note,
     });
     return toCamelCase<PortfolioEventCreatedResponse>(response.data);

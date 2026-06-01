@@ -19,6 +19,7 @@ from src.services.equity_ratio_service import calculate_equity_ratio
 from src.services.market_risk_radar_service import get_risk_radar_data
 from src.services.market_risk_service import calculate_market_risk
 from src.services.market_trend_service import get_market_trend_data, get_monthly_seasonality
+from src.services.market_trend_service import MARKET_INDICES
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ MARKET_CACHE_BUILDERS = {
     "risk": calculate_market_risk,
     "equity_ratio": calculate_equity_ratio,
 }
+
+FREQUENT_MARKET_CACHE_KEYS = ["trend"]
 
 
 def _now() -> datetime:
@@ -156,18 +159,23 @@ def _empty_builder_payload(cache_key: str) -> Dict[str, Any]:
     if cache_key == "risk":
         return {"chinese_vix": {"value": 0}, "_cache": {"key": cache_key, "status": "empty"}}
     if cache_key == "equity_ratio":
-        return {"equity_ratio": 0, "total_cny": 0, "equity_cny": 0,
+        return {"equity_ratio": 0, "planned_equity_ratio": None,
+                "active_allocation_plan_id": None, "active_allocation_plan_generated_at": None,
+                "total_cny": 0, "equity_cny": 0,
                 "_cache": {"key": cache_key, "status": "empty"}}
     return {"_cache": {"key": cache_key, "status": "empty"}}
 
 
 def refresh_all_market_caches() -> Dict[str, Any]:
-    """Refresh all market dashboard payloads. Failures are caught individually —
+    """Refresh frequently changing market dashboard payloads. Failures are caught individually —
     previous valid cache remains intact for each failed entry."""
     results: Dict[str, Any] = {"refreshed_at": _now().isoformat(), "items": {}}
-    for cache_key in MARKET_CACHE_BUILDERS:
+    for cache_key in FREQUENT_MARKET_CACHE_KEYS:
         try:
-            refresh_market_cache(cache_key)
+            if cache_key == "trend":
+                refresh_trend_realtime_quotes()
+            else:
+                refresh_market_cache(cache_key)
             results["items"][cache_key] = {
                 "status": "success",
                 "refreshed_at": _now().isoformat(),
@@ -176,3 +184,46 @@ def refresh_all_market_caches() -> Dict[str, Any]:
             logger.error("Market cache refresh failed: %s, key=%s — old cache preserved", exc, cache_key)
             results["items"][cache_key] = {"status": "failed", "error": str(exc)}
     return results
+
+
+def refresh_trend_realtime_quotes() -> Dict[str, Any]:
+    """Refresh only the 12 dashboard quote fields in market_cache.trend."""
+    from data_provider.base import DataFetcherManager
+
+    payload = _read_cache("trend")
+    if payload is None:
+        refresh_market_cache("trend")
+        payload = _read_cache("trend")
+    if payload is None:
+        raise ValueError("No cached trend payload available")
+
+    data = payload.setdefault("data", {})
+    manager = DataFetcherManager()
+    refreshed = 0
+    failed = 0
+    failures = []
+
+    for item in MARKET_INDICES:
+        key = item["key"]
+        code = item["code"]
+        try:
+            quote = manager.get_realtime_quote(code, log_final_failure=False)
+            price = getattr(quote, "price", None) if quote is not None else None
+            price_val = float(price)
+            if price_val <= 0:
+                raise ValueError("empty realtime price")
+            change_pct = getattr(quote, "change_pct", None)
+            change_pct_val = float(change_pct) if change_pct is not None else None
+            entry = data.setdefault(key, {"label": item["label"], "code": code})
+            entry["close"] = price_val
+            entry["daily_close"] = round(price_val, 2)
+            entry["daily_pct_chg"] = round(change_pct_val, 2) if change_pct_val is not None else None
+            refreshed += 1
+        except Exception as exc:
+            failed += 1
+            failures.append(f"{code}: {exc}")
+
+    payload["snapshot_date"] = _now().strftime("%Y-%m-%d")
+    payload.pop("_cache", None)
+    _write_cache("trend", payload)
+    return {"refreshed": refreshed, "failed": failed, "failures": failures[:20]}

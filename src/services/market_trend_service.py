@@ -248,7 +248,7 @@ def _fetch_weekly_for_code(code: str) -> Optional[Tuple[pd.DataFrame, pd.DataFra
         
         if df is None or df.empty:
             return None
-        
+
         # 提取最新日线快照
         daily_latest = None
         if len(df) > 0:
@@ -345,7 +345,7 @@ def get_market_trend_data() -> Dict[str, Any]:
     }
     
 def get_monthly_seasonality(use_file_cache: bool = True) -> Dict[str, Any]:
-    """统计沪深300近10年的月度涨跌幅（季节性规律）
+    """统计沪深300近5年的月度涨跌幅（季节性规律）
     
     返回:
     {
@@ -359,9 +359,10 @@ def get_monthly_seasonality(use_file_cache: bool = True) -> Dict[str, Any]:
         return cache
     
     try:
-        # 优先从数据库读取
+        # 优先从数据库读取近 5 年交易日，按最新日期再精确回溯 5 年。
         from src.storage import get_db
-        df = get_db().get_daily_history_df("sh000300", days=3650)
+        lookback_days = 365 * 5
+        df = get_db().get_daily_history_df("sh000300", days=lookback_days + 30)
         
         if df.empty:
             # 降级：从网络获取
@@ -369,7 +370,7 @@ def get_monthly_seasonality(use_file_cache: bool = True) -> Dict[str, Any]:
             if manager is None:
                 raise RuntimeError("DataFetcherManager 未初始化")
             
-            df_raw, _ = manager.get_daily_data("000300", days=3650)
+            df_raw, _ = manager.get_daily_data("000300", days=lookback_days + 30)
             if df_raw is not None and not df_raw.empty:
                 try:
                     get_db().save_daily_data(df_raw, "sh000300", "network_fallback")
@@ -386,6 +387,9 @@ def get_monthly_seasonality(use_file_cache: bool = True) -> Dict[str, Any]:
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
+        latest_date = df["date"].max()
+        cutoff_date = latest_date - pd.DateOffset(years=5)
+        df = df[df["date"] >= cutoff_date]
         df = df.set_index("date")
         
         # 计算月度收益率
@@ -407,7 +411,7 @@ def get_monthly_seasonality(use_file_cache: bool = True) -> Dict[str, Any]:
             "months": months,
             "avg_returns": avg_returns,
             "win_rates": win_rates,
-            "years_stat": len(monthly_returns) // 12,
+            "years_stat": min(5, len(monthly_returns) // 12),
             "index": "沪深300",
         }
         

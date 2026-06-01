@@ -222,8 +222,8 @@ def create_trade(request: PortfolioTradeCreateRequest) -> PortfolioEventCreatedR
             asset_category=request.asset_category,
             asset_subcategory=request.asset_subcategory,
             asset_risk_class=request.asset_risk_class,
-            risk_level=request.risk_level,
             symbol=request.symbol,
+            name=request.name,
             trade_date=request.trade_date,
             side=request.side,
             quantity=request.quantity,
@@ -319,7 +319,6 @@ def create_cash_ledger(request: PortfolioCashLedgerCreateRequest) -> PortfolioEv
             asset_category=request.asset_category,
             asset_subcategory=request.asset_subcategory,
             asset_risk_class=request.asset_risk_class,
-            risk_level=request.risk_level,
             event_date=request.event_date,
             direction=request.direction,
             amount=request.amount,
@@ -402,12 +401,13 @@ def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> P
         data = service.record_corporate_action(
             account_id=request.account_id,
             symbol=request.symbol,
+            asset_category=request.asset_category,
+            asset_subcategory=request.asset_subcategory,
             effective_date=request.effective_date,
             action_type=request.action_type,
             market=request.market,
             currency=request.currency,
-            cash_dividend_per_share=request.cash_dividend_per_share,
-            split_ratio=request.split_ratio,
+            dividend_amount=request.dividend_amount,
             note=request.note,
         )
         return PortfolioEventCreatedResponse(**data)
@@ -494,6 +494,26 @@ def list_positions(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("List positions failed", exc)
+
+
+@router.post(
+    "/positions/realtime-revalue",
+    response_model=PortfolioPositionListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Realtime revalue R4/R5 positions without persisting cached prices",
+)
+def realtime_revalue_positions(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    cost_method: str = Query("fifo", description="Cost method: fifo or avg"),
+) -> PortfolioPositionListResponse:
+    service = PortfolioService()
+    try:
+        data = service.realtime_revalue_positions(account_id=account_id, cost_method=cost_method)
+        return PortfolioPositionListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Realtime revalue positions failed", exc)
 
 
 @router.post(

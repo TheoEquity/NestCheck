@@ -320,7 +320,7 @@ class PortfolioApiTestCase(unittest.TestCase):
                     "action_type": "cash_dividend",
                     "market": "cn",
                     "currency": "CNY",
-                    "cash_dividend_per_share": 0.5,
+                    "dividend_amount": 5.0,
                 },
             ).status_code,
             200,
@@ -396,7 +396,7 @@ class PortfolioApiTestCase(unittest.TestCase):
                 "action_type": "cash_dividend",
                 "market": "cn",
                 "currency": "CNY",
-                "cash_dividend_per_share": 1.0,
+                "dividend_amount": 10.0,
             },
         )
         self.assertEqual(cash_resp.status_code, 200)
@@ -511,10 +511,10 @@ class PortfolioApiTestCase(unittest.TestCase):
                     "account_id": 1,
                     "symbol": "600519",
                     "effective_date": "2026-01-02",
-                    "action_type": "split_adjustment",
+                    "action_type": "cash_dividend",
                     "market": "cn",
                     "currency": "CNY",
-                    "split_ratio": 2.0,
+                    "dividend_amount": 100.0,
                 },
             )
 

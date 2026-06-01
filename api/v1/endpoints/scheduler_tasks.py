@@ -114,7 +114,7 @@ def get_task_history(task_name: str, limit: int = 50) -> List[Dict[str, Any]]:
         history = task_history.get_history(task_name, limit=limit)
         if not history:
             all_tasks = task_history.get_all_tasks()
-            valid_tasks = ["scheduled_task", "market_cache_refresh", "agent_event_monitor"]
+            valid_tasks = ["scheduled_task", "market_cache_refresh", "seasonality_cache_refresh", "agent_event_monitor"]
             if task_name not in all_tasks and task_name not in valid_tasks:
                 raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在或无历史记录")
         return history
@@ -198,7 +198,7 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
         from main import run_daily_analysis
 
         all_tasks = task_history.get_all_tasks()
-        valid_tasks = ["scheduled_task", "market_cache_refresh", "agent_event_monitor"]
+        valid_tasks = ["scheduled_task", "market_cache_refresh", "seasonality_cache_refresh", "agent_event_monitor"]
         if task_name not in all_tasks and task_name not in valid_tasks:
             raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在")
 
@@ -208,8 +208,11 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
                 if task_name == "scheduled_task":
                     run_daily_analysis()
                 elif task_name == "market_cache_refresh":
-                    from src.services.market_cache_service import refresh_market_cache
-                    refresh_market_cache()
+                    from src.services.market_cache_service import refresh_all_market_caches
+                    refresh_all_market_caches()
+                elif task_name == "seasonality_cache_refresh":
+                    logger.warning("全年择时缓存刷新为后台低频任务，不支持手动触发")
+                    return {"status": "skipped", "message": "全年择时缓存刷新由后台低频任务维护"}
                 elif task_name == "agent_event_monitor":
                     logger.warning("Agent 事件监控为后台常驻任务，不支持手动触发")
                     return {"status": "skipped", "message": "Agent 事件监控为后台常驻任务"}

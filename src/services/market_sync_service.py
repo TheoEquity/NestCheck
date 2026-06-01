@@ -5,7 +5,6 @@
 """
 
 import akshare as ak
-import yfinance as yf
 import pandas as pd
 import logging
 from typing import List, Dict, Any
@@ -13,6 +12,7 @@ from src.storage import StorageManager
 from datetime import datetime, timedelta
 import time
 import random
+from data_provider.base import DataFetcherManager
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,7 @@ def _fetch_bond_data(days):
 def sync_market_data(days=30):
     """执行市场指标同步"""
     manager = StorageManager()
+    fetcher_manager = DataFetcherManager()
     stats = {"success": 0, "total": 16}
     
     logger.info(f"开始同步大盘/情绪数据，目标 {days} 天...")
@@ -178,17 +179,25 @@ def sync_market_data(days=30):
                 continue # Skip standard logic below as we handled it here
 
             elif source == 'yfinance':
-                yf_symbol = item.get('yfinance_symbol', code)
-                ticker = yf.Ticker(yf_symbol)
-                df = ticker.history(period=f"{days*2}d")
-                df_std = _normalize_yfinance(df, code, days)
-                if not df_std.empty:
-                    manager.save_daily_data(df_std, code, 'yfinance')
+                fetch_code = item.get('yfinance_symbol', code)
+                df_std, source_name = fetcher_manager.get_daily_data(fetch_code, days=days)
+                if df_std is not None and not df_std.empty:
+                    manager.save_daily_data(df_std, code, source_name or 'network_fallback')
                     stats["success"] += 1
 
             elif source == 'akshare':
-                # AkShare 指数 - 带重试
+                # A 股指数优先走统一数据源管理器，保留 AkShare 直连作为兜底。
                 raw_code = code.replace('sz', '').replace('sh', '')
+                try:
+                    df_std, source_name = fetcher_manager.get_daily_data(raw_code, days=days)
+                    if df_std is not None and not df_std.empty:
+                        manager.save_daily_data(df_std, code, source_name or 'network_fallback')
+                        stats["success"] += 1
+                        time.sleep(0.5)
+                        continue
+                except Exception as e:
+                    logger.warning(f"Unified fetcher failed for {name}({code}), fallback to direct AkShare: {e}")
+
                 df_raw = None
                 last_err = None
                 for attempt in range(AKSHARE_MAX_RETRIES):

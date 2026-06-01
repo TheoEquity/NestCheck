@@ -428,6 +428,7 @@ class PortfolioTrade(Base):
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     trade_uid = Column(String(128))
     symbol = Column(String(16), nullable=False, index=True)
+    name = Column(String(64))
     market = Column(String(8), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     trade_date = Column(Date, nullable=False, index=True)
@@ -436,10 +437,10 @@ class PortfolioTrade(Base):
     price = Column(Float, nullable=False)
     fee = Column(Float, default=0.0)
     tax = Column(Float, default=0.0)
+    realized_pnl = Column(Float, default=0.0)
     asset_category = Column(String(32))
     asset_subcategory = Column(String(64))
     asset_risk_class = Column(String(8))
-    risk_level = Column(String(8))
     note = Column(String(255))
     dedup_hash = Column(String(64), index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
@@ -465,7 +466,6 @@ class PortfolioCashLedger(Base):
     asset_category = Column(String(32))
     asset_subcategory = Column(String(64))
     asset_risk_class = Column(String(8))
-    risk_level = Column(String(8))
     note = Column(String(255))
     created_at = Column(DateTime, default=datetime.now, index=True)
 
@@ -475,7 +475,7 @@ class PortfolioCashLedger(Base):
 
 
 class PortfolioCorporateAction(Base):
-    """Corporate actions that impact cash or share quantity."""
+    """Dividend events recorded for audit and realized profit."""
 
     __tablename__ = 'portfolio_corporate_actions'
 
@@ -484,9 +484,12 @@ class PortfolioCorporateAction(Base):
     symbol = Column(String(16), nullable=False, index=True)
     market = Column(String(8), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
+    asset_category = Column(String(32))
+    asset_subcategory = Column(String(64))
     effective_date = Column(Date, nullable=False, index=True)
-    action_type = Column(String(24), nullable=False)  # cash_dividend/split_adjustment
+    action_type = Column(String(24), nullable=False)  # cash_dividend
     cash_dividend_per_share = Column(Float)
+    realized_pnl = Column(Float, default=0.0)
     split_ratio = Column(Float)
     note = Column(String(255))
     created_at = Column(DateTime, default=datetime.now, index=True)
@@ -512,6 +515,7 @@ class PortfolioPosition(Base):
     avg_cost = Column(Float, nullable=False, default=0.0)
     total_cost = Column(Float, nullable=False, default=0.0)
     last_price = Column(Float, nullable=False, default=0.0)
+    price_change_pct = Column(Float)
     market_value_base = Column(Float, nullable=False, default=0.0)
     unrealized_pnl_base = Column(Float, nullable=False, default=0.0)
     asset_category = Column(String(32))
@@ -1044,21 +1048,27 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     def _ensure_portfolio_asset_metadata_columns(self) -> None:
         required_columns = {
             "portfolio_trades": {
+                "name": "VARCHAR(64)",
                 "asset_category": "VARCHAR(32)",
                 "asset_subcategory": "VARCHAR(64)",
                 "asset_risk_class": "VARCHAR(8)",
-                "risk_level": "VARCHAR(8)",
+                "realized_pnl": "FLOAT DEFAULT 0",
             },
             "portfolio_cash_ledger": {
                 "asset_category": "VARCHAR(32)",
                 "asset_subcategory": "VARCHAR(64)",
                 "asset_risk_class": "VARCHAR(8)",
-                "risk_level": "VARCHAR(8)",
+            },
+            "portfolio_corporate_actions": {
+                "asset_category": "VARCHAR(32)",
+                "asset_subcategory": "VARCHAR(64)",
+                "realized_pnl": "FLOAT DEFAULT 0",
             },
             "portfolio_positions": {
                 "asset_category": "VARCHAR(32)",
                 "asset_subcategory": "VARCHAR(64)",
                 "asset_risk_class": "VARCHAR(8)",
+                "price_change_pct": "FLOAT",
             },
         }
 

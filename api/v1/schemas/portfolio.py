@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 
 class PortfolioAccountCreateRequest(BaseModel):
@@ -47,8 +47,8 @@ class PortfolioTradeCreateRequest(BaseModel):
     asset_category: Optional[str] = Field(None, max_length=32)
     asset_subcategory: Optional[str] = Field(None, max_length=64)
     asset_risk_class: Optional[str] = Field(None, max_length=8)
-    risk_level: Optional[str] = Field(None, max_length=8)
     symbol: str = Field(..., min_length=1, max_length=16)
+    name: Optional[str] = Field(None, max_length=64)
     trade_date: date
     side: Literal["buy", "sell"]
     quantity: float = Field(..., gt=0)
@@ -66,7 +66,6 @@ class PortfolioCashLedgerCreateRequest(BaseModel):
     asset_category: Optional[str] = Field(None, max_length=32)
     asset_subcategory: Optional[str] = Field(None, max_length=64)
     asset_risk_class: Optional[str] = Field(None, max_length=8)
-    risk_level: Optional[str] = Field(None, max_length=8)
     event_date: date
     direction: Literal["in", "out"]
     amount: float = Field(..., gt=0)
@@ -77,12 +76,17 @@ class PortfolioCashLedgerCreateRequest(BaseModel):
 class PortfolioCorporateActionCreateRequest(BaseModel):
     account_id: int
     symbol: str = Field(..., min_length=1, max_length=16)
+    asset_category: Optional[str] = Field(None, max_length=32)
+    asset_subcategory: Optional[str] = Field(None, max_length=64)
     effective_date: date
-    action_type: Literal["cash_dividend", "split_adjustment"]
+    action_type: Literal["cash_dividend"] = "cash_dividend"
     market: Optional[Literal["cn", "hk", "us"]] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
-    cash_dividend_per_share: Optional[float] = Field(None, ge=0)
-    split_ratio: Optional[float] = Field(None, gt=0)
+    dividend_amount: float = Field(
+        ...,
+        gt=0,
+        validation_alias=AliasChoices("dividend_amount", "cash_dividend_per_share"),
+    )
     note: Optional[str] = Field(None, max_length=255)
 
 
@@ -101,8 +105,8 @@ class PortfolioTradeListItem(BaseModel):
     asset_category: Optional[str] = None
     asset_subcategory: Optional[str] = None
     asset_risk_class: Optional[str] = None
-    risk_level: Optional[str] = None
     symbol: str
+    name: Optional[str] = None
     market: str
     currency: str
     trade_date: str
@@ -111,6 +115,7 @@ class PortfolioTradeListItem(BaseModel):
     price: float
     fee: float
     tax: float
+    realized_pnl: float = 0.0
     note: Optional[str] = None
     created_at: Optional[str] = None
 
@@ -128,7 +133,6 @@ class PortfolioCashLedgerListItem(BaseModel):
     asset_category: Optional[str] = None
     asset_subcategory: Optional[str] = None
     asset_risk_class: Optional[str] = None
-    risk_level: Optional[str] = None
     event_date: str
     direction: str
     amount: float
@@ -150,10 +154,12 @@ class PortfolioCorporateActionListItem(BaseModel):
     symbol: str
     market: str
     currency: str
+    asset_category: Optional[str] = None
+    asset_subcategory: Optional[str] = None
     effective_date: str
     action_type: str
-    cash_dividend_per_share: Optional[float] = None
-    split_ratio: Optional[float] = None
+    dividend_amount: Optional[float] = None
+    realized_pnl: float = 0.0
     note: Optional[str] = None
     created_at: Optional[str] = None
 
@@ -174,6 +180,7 @@ class PortfolioPositionItem(BaseModel):
     avg_cost: float
     total_cost: float
     last_price: float
+    price_change_pct: Optional[float] = None
     market_value_base: float
     unrealized_pnl_base: float
     unrealized_pnl_pct: Optional[float] = None

@@ -145,6 +145,30 @@ class PortfolioRepository:
             session.refresh(row)
             return row
 
+    def get_position_in_session(
+        self,
+        *,
+        session: Any,
+        account_id: int,
+        symbol: str,
+        market: str,
+        currency: str,
+        cost_method: str,
+    ) -> Optional[PortfolioPosition]:
+        return session.execute(
+            select(PortfolioPosition)
+            .where(
+                and_(
+                    PortfolioPosition.account_id == account_id,
+                    PortfolioPosition.symbol == symbol,
+                    PortfolioPosition.market == market,
+                    PortfolioPosition.currency == currency,
+                    PortfolioPosition.cost_method == cost_method,
+                )
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+
     def deactivate_account(self, account_id: int) -> bool:
         with self.db.get_session() as session:
             row = session.execute(
@@ -253,11 +277,11 @@ class PortfolioRepository:
         *,
         account_id: int,
         trade_uid: Optional[str],
-        asset_category: Optional[str],
-        asset_subcategory: Optional[str],
-        asset_risk_class: Optional[str],
-        risk_level: Optional[str],
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
+        asset_risk_class: Optional[str] = None,
         symbol: str,
+        name: Optional[str] = None,
         market: str,
         currency: str,
         trade_date: date,
@@ -266,6 +290,7 @@ class PortfolioRepository:
         price: float,
         fee: float,
         tax: float,
+        realized_pnl: float = 0.0,
         note: Optional[str] = None,
         dedup_hash: Optional[str] = None,
     ) -> PortfolioTrade:
@@ -277,8 +302,8 @@ class PortfolioRepository:
                 asset_category=asset_category,
                 asset_subcategory=asset_subcategory,
                 asset_risk_class=asset_risk_class,
-                risk_level=risk_level,
                 symbol=symbol,
+                name=name,
                 market=market,
                 currency=currency,
                 trade_date=trade_date,
@@ -287,6 +312,7 @@ class PortfolioRepository:
                 price=price,
                 fee=fee,
                 tax=tax,
+                realized_pnl=realized_pnl,
                 note=note,
                 dedup_hash=dedup_hash,
             )
@@ -297,10 +323,9 @@ class PortfolioRepository:
         self,
         *,
         account_id: int,
-        asset_category: Optional[str],
-        asset_subcategory: Optional[str],
-        asset_risk_class: Optional[str],
-        risk_level: Optional[str],
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
+        asset_risk_class: Optional[str] = None,
         event_date: date,
         direction: str,
         amount: float,
@@ -314,7 +339,6 @@ class PortfolioRepository:
                 asset_category=asset_category,
                 asset_subcategory=asset_subcategory,
                 asset_risk_class=asset_risk_class,
-                risk_level=risk_level,
                 event_date=event_date,
                 direction=direction,
                 amount=amount,
@@ -331,10 +355,12 @@ class PortfolioRepository:
         symbol: str,
         market: str,
         currency: str,
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
         effective_date: date,
         action_type: str,
         cash_dividend_per_share: Optional[float] = None,
-        split_ratio: Optional[float] = None,
+        realized_pnl: float = 0.0,
         note: Optional[str] = None,
     ) -> PortfolioCorporateAction:
         with self.portfolio_write_session() as session:
@@ -344,10 +370,12 @@ class PortfolioRepository:
                 symbol=symbol,
                 market=market,
                 currency=currency,
+                asset_category=asset_category,
+                asset_subcategory=asset_subcategory,
                 effective_date=effective_date,
                 action_type=action_type,
                 cash_dividend_per_share=cash_dividend_per_share,
-                split_ratio=split_ratio,
+                realized_pnl=realized_pnl,
                 note=note,
             )
             session.expunge(row)
@@ -413,11 +441,11 @@ class PortfolioRepository:
         session: Any,
         account_id: int,
         trade_uid: Optional[str],
-        asset_category: Optional[str],
-        asset_subcategory: Optional[str],
-        asset_risk_class: Optional[str],
-        risk_level: Optional[str],
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
+        asset_risk_class: Optional[str] = None,
         symbol: str,
+        name: Optional[str] = None,
         market: str,
         currency: str,
         trade_date: date,
@@ -426,6 +454,7 @@ class PortfolioRepository:
         price: float,
         fee: float,
         tax: float,
+        realized_pnl: float = 0.0,
         note: Optional[str] = None,
         dedup_hash: Optional[str] = None,
     ) -> PortfolioTrade:
@@ -435,8 +464,8 @@ class PortfolioRepository:
             asset_category=asset_category,
             asset_subcategory=asset_subcategory,
             asset_risk_class=asset_risk_class,
-            risk_level=risk_level,
             symbol=symbol,
+            name=name,
             market=market,
             currency=currency,
             trade_date=trade_date,
@@ -445,6 +474,7 @@ class PortfolioRepository:
             price=price,
             fee=fee,
             tax=tax,
+            realized_pnl=realized_pnl,
             note=note,
             dedup_hash=dedup_hash,
         )
@@ -471,10 +501,9 @@ class PortfolioRepository:
         *,
         session: Any,
         account_id: int,
-        asset_category: Optional[str],
-        asset_subcategory: Optional[str],
-        asset_risk_class: Optional[str],
-        risk_level: Optional[str],
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
+        asset_risk_class: Optional[str] = None,
         event_date: date,
         direction: str,
         amount: float,
@@ -486,7 +515,6 @@ class PortfolioRepository:
             asset_category=asset_category,
             asset_subcategory=asset_subcategory,
             asset_risk_class=asset_risk_class,
-            risk_level=risk_level,
             event_date=event_date,
             direction=direction,
             amount=amount,
@@ -511,10 +539,12 @@ class PortfolioRepository:
         symbol: str,
         market: str,
         currency: str,
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
         effective_date: date,
         action_type: str,
         cash_dividend_per_share: Optional[float] = None,
-        split_ratio: Optional[float] = None,
+        realized_pnl: float = 0.0,
         note: Optional[str] = None,
     ) -> PortfolioCorporateAction:
         row = PortfolioCorporateAction(
@@ -522,10 +552,12 @@ class PortfolioRepository:
             symbol=symbol,
             market=market,
             currency=currency,
+            asset_category=asset_category,
+            asset_subcategory=asset_subcategory,
             effective_date=effective_date,
             action_type=action_type,
             cash_dividend_per_share=cash_dividend_per_share,
-            split_ratio=split_ratio,
+            realized_pnl=realized_pnl,
             note=note,
         )
         session.add(row)

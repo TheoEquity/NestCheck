@@ -533,7 +533,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
                 currency="CNY",
             )
 
-    def test_corporate_actions_dividend_and_split(self) -> None:
+    def test_corporate_action_cash_dividend_adds_cash_and_realized_pnl(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
         self.service.record_cash_ledger(
@@ -562,16 +562,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             action_type="cash_dividend",
             market="cn",
             currency="CNY",
-            cash_dividend_per_share=1.0,
-        )
-        self.service.record_corporate_action(
-            account_id=aid,
-            symbol="600519",
-            effective_date=date(2026, 1, 4),
-            action_type="split_adjustment",
-            market="cn",
-            currency="CNY",
-            split_ratio=2.0,
+            dividend_amount=100.0,
         )
         self._save_close("600519", date(2026, 1, 5), 6.0)
 
@@ -580,10 +571,11 @@ class PortfolioServiceTestCase(unittest.TestCase):
         pos = acc["positions"][0]
 
         self.assertAlmostEqual(acc["total_cash"], 9100.0, places=6)
-        self.assertAlmostEqual(acc["total_market_value"], 1200.0, places=6)
-        self.assertAlmostEqual(acc["total_equity"], 10300.0, places=6)
-        self.assertAlmostEqual(pos["quantity"], 200.0, places=6)
-        self.assertAlmostEqual(pos["avg_cost"], 5.0, places=6)
+        self.assertAlmostEqual(acc["realized_pnl"], 100.0, places=6)
+        self.assertAlmostEqual(acc["total_market_value"], 600.0, places=6)
+        self.assertAlmostEqual(acc["total_equity"], 9700.0, places=6)
+        self.assertAlmostEqual(pos["quantity"], 100.0, places=6)
+        self.assertAlmostEqual(pos["avg_cost"], 10.0, places=6)
 
     def test_normalize_symbol_preserves_cn_exchange_prefix_and_suffix(self) -> None:
         self.assertEqual(self.service._normalize_symbol("sh600519"), "SH600519")
@@ -650,7 +642,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             action_type="cash_dividend",
             market="cn",
             currency="CNY",
-            cash_dividend_per_share=1.0,
+            dividend_amount=100.0,
         )
         self.service.record_trade(
             account_id=aid,
@@ -671,56 +663,20 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(acc["total_market_value"], 1000.0, places=6)
         self.assertAlmostEqual(acc["total_equity"], 2000.0, places=6)
 
-    def test_same_day_split_processed_before_trade(self) -> None:
+    def test_split_adjustment_rejected(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
 
-        self.service.record_cash_ledger(
-            account_id=aid,
-            event_date=date(2026, 1, 1),
-            direction="in",
-            amount=2000,
-            currency="CNY",
-        )
-        self.service.record_trade(
-            account_id=aid,
-            symbol="600519",
-            trade_date=date(2026, 1, 1),
-            side="buy",
-            quantity=100,
-            price=10,
-            market="cn",
-            currency="CNY",
-        )
-        self.service.record_corporate_action(
-            account_id=aid,
-            symbol="600519",
-            effective_date=date(2026, 1, 2),
-            action_type="split_adjustment",
-            market="cn",
-            currency="CNY",
-            split_ratio=2.0,
-        )
-        self.service.record_trade(
-            account_id=aid,
-            symbol="600519",
-            trade_date=date(2026, 1, 2),
-            side="sell",
-            quantity=100,
-            price=6,
-            market="cn",
-            currency="CNY",
-        )
-        self._save_close("600519", date(2026, 1, 2), 6.0)
-
-        snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 1, 2), cost_method="fifo")
-        acc = snapshot["accounts"][0]
-        pos = acc["positions"][0]
-
-        self.assertAlmostEqual(acc["realized_pnl"], 100.0, places=6)
-        self.assertAlmostEqual(acc["total_cash"], 1600.0, places=6)
-        self.assertAlmostEqual(pos["quantity"], 100.0, places=6)
-        self.assertAlmostEqual(pos["avg_cost"], 5.0, places=6)
+        with self.assertRaises(ValueError):
+            self.service.record_corporate_action(
+                account_id=aid,
+                symbol="600519",
+                effective_date=date(2026, 1, 2),
+                action_type="split_adjustment",
+                market="cn",
+                currency="CNY",
+                dividend_amount=100.0,
+            )
 
     def test_sell_oversell_rejected_before_write(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
@@ -1025,7 +981,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="CNY",
             effective_date=date(2026, 1, 3),
             action_type="cash_dividend",
-            cash_dividend_per_share=1.0,
+            cash_dividend_per_share=100.0,
         )
 
         trades = self.service.list_trade_events(account_id=aid, symbol="600519", page=1, page_size=20)
@@ -1060,7 +1016,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="CNY",
             effective_date=date(2026, 1, 3),
             action_type="cash_dividend",
-            cash_dividend_per_share=1.0,
+            cash_dividend_per_share=100.0,
         )
 
         trades = self.service.list_trade_events(account_id=aid, symbol="600519", page=1, page_size=20)
@@ -1121,7 +1077,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="HKD",
             effective_date=date(2026, 1, 4),
             action_type="cash_dividend",
-            cash_dividend_per_share=1.0,
+            cash_dividend_per_share=100.0,
         )
         self.service.repo.add_corporate_action(
             account_id=aid,
@@ -1130,7 +1086,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="HKD",
             effective_date=date(2026, 1, 5),
             action_type="cash_dividend",
-            cash_dividend_per_share=1.5,
+            cash_dividend_per_share=150.0,
         )
         self.service.repo.add_corporate_action(
             account_id=aid,
@@ -1139,7 +1095,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="HKD",
             effective_date=date(2026, 1, 6),
             action_type="cash_dividend",
-            cash_dividend_per_share=2.0,
+            cash_dividend_per_share=200.0,
         )
 
         trades = self.service.list_trade_events(account_id=aid, symbol="HK00700", page=1, page_size=20)

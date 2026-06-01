@@ -125,26 +125,26 @@ export function usePortfolioOverview() {
   const refreshPrices = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await portfolioApi.refreshPrices();
-      await load();
+      const positionsResp = await portfolioApi.realtimeRevaluePositions({ costMethod: 'fifo' });
+      setPositions((positionsResp.items || []).slice().sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0)));
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
       setIsRefreshing(false);
     }
-  }, [load]);
+  }, []);
 
   const syncData = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await portfolioApi.refreshPrices();
-      await load();
+      const positionsResp = await portfolioApi.realtimeRevaluePositions({ costMethod: 'fifo' });
+      setPositions((positionsResp.items || []).slice().sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0)));
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
       setIsRefreshing(false);
     }
-  }, [load]);
+  }, []);
 
   useEffect(() => {
     void load();

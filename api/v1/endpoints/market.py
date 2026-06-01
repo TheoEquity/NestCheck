@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from src.storage import get_db, MarketQuote
 from src.services.market_cache_service import get_market_cache_payload, refresh_all_market_caches, MARKET_CACHE_BUILDERS
+from src.services.equity_ratio_service import calculate_equity_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,6 @@ def refresh_market_dashboard() -> dict:
 )
 def get_equity_ratio() -> dict:
     try:
-        return get_market_cache_payload("equity_ratio")
+        return calculate_equity_ratio()
     except Exception as exc:
         raise _internal_error("Get equity ratio failed", exc)

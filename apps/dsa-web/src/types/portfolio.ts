@@ -1,7 +1,7 @@
 export type PortfolioCostMethod = 'fifo' | 'avg';
 export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
-export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
+export type PortfolioCorporateActionType = 'cash_dividend';
 
 export interface PortfolioAccountItem {
   id: number;
@@ -46,6 +46,7 @@ export interface PortfolioPositionItem {
   avgCost: number;
   totalCost: number;
   lastPrice: number;
+  priceChangePct?: number | null;
   marketValueBase: number;
   unrealizedPnlBase: number;
   unrealizedPnlPct?: number | null;
@@ -207,8 +208,8 @@ export interface PortfolioTradeCreateRequest {
   assetCategory?: string;
   assetSubcategory?: string;
   assetRiskClass?: string;
-  riskLevel?: string;
   symbol: string;
+  name?: string;
   tradeDate: string;
   side: PortfolioSide;
   quantity: number;
@@ -226,7 +227,6 @@ export interface PortfolioCashLedgerCreateRequest {
   assetCategory?: string;
   assetSubcategory?: string;
   assetRiskClass?: string;
-  riskLevel?: string;
   eventDate: string;
   direction: PortfolioCashDirection;
   amount: number;
@@ -237,12 +237,13 @@ export interface PortfolioCashLedgerCreateRequest {
 export interface PortfolioCorporateActionCreateRequest {
   accountId: number;
   symbol: string;
+  assetCategory?: string;
+  assetSubcategory?: string;
   effectiveDate: string;
   actionType: PortfolioCorporateActionType;
   market?: 'cn' | 'hk' | 'us';
   currency?: string;
-  cashDividendPerShare?: number;
-  splitRatio?: number;
+  dividendAmount: number;
   note?: string;
 }
 
@@ -261,8 +262,8 @@ export interface PortfolioTradeListItem {
   assetCategory?: string | null;
   assetSubcategory?: string | null;
   assetRiskClass?: string | null;
-  riskLevel?: string | null;
   symbol: string;
+  name?: string | null;
   market: string;
   currency: string;
   tradeDate: string;
@@ -271,6 +272,7 @@ export interface PortfolioTradeListItem {
   price: number;
   fee: number;
   tax: number;
+  realizedPnl: number;
   note?: string | null;
   createdAt?: string | null;
 }
@@ -288,7 +290,6 @@ export interface PortfolioCashLedgerListItem {
   assetCategory?: string | null;
   assetSubcategory?: string | null;
   assetRiskClass?: string | null;
-  riskLevel?: string | null;
   eventDate: string;
   direction: PortfolioCashDirection;
   amount: number;
@@ -310,10 +311,12 @@ export interface PortfolioCorporateActionListItem {
   symbol: string;
   market: string;
   currency: string;
+  assetCategory?: string | null;
+  assetSubcategory?: string | null;
   effectiveDate: string;
   actionType: PortfolioCorporateActionType;
-  cashDividendPerShare?: number | null;
-  splitRatio?: number | null;
+  dividendAmount?: number | null;
+  realizedPnl: number;
   note?: string | null;
   createdAt?: string | null;
 }

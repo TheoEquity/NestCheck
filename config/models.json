@@ -1,0 +1,18 @@
+[
+  {
+    "provider": "openai",
+    "model_name": "gpt-4o-mini",
+    "api_key": "",
+    "base_url": "https://api.openai.com/v1",
+    "enabled": false,
+    "description": "OpenAI GPT-4o Mini（需配置 API Key）"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen-turbo",
+    "api_key": "",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "enabled": true,
+    "description": "阿里云通义千问 Turbo"
+  }
+]

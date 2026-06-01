@@ -27,11 +27,20 @@ SEED_TASKS: List[Dict] = [
     {
         "task_key": "market_cache_refresh",
         "name": "市场缓存刷新",
-        "description": "刷新市场大盘数据缓存（指数、估值分位、涨跌幅分布、趋势雷达等），供首页仪表盘使用。",
+        "description": "刷新首页市场缓存（趋势、情绪、雷达、相关性等），全年择时由低频任务单独维护。",
         "schedule_type": "daily",
         "schedule_time": "20:30",
         "interval_seconds": None,
         "enabled": False,
+    },
+    {
+        "task_key": "seasonality_cache_refresh",
+        "name": "全年择时缓存刷新",
+        "description": "低频刷新沪深300近5年月度季节性统计，写入 market_cache.seasonality 供首页读取。",
+        "schedule_type": "daily",
+        "schedule_time": "20:30",
+        "interval_seconds": None,
+        "enabled": True,
     },
     {
         "task_key": "agent_event_monitor",
@@ -46,21 +55,26 @@ SEED_TASKS: List[Dict] = [
 
 
 def ensure_seed_tasks() -> None:
-    """确保种子任务记录存在（不会覆盖已有配置）"""
+    """确保种子任务记录存在，并同步内置任务的展示元数据。"""
     db = DatabaseManager.get_instance()
     with db.session_scope() as session:
-        existing = set(
-            row[0]
-            for row in session.execute(
-                select(ScheduledTask.task_key)
-            ).fetchall()
-        )
+        existing_rows = {
+            row[0].task_key: row[0]
+            for row in session.execute(select(ScheduledTask)).fetchall()
+        }
+        existing = set(existing_rows.keys())
         to_create = [s for s in SEED_TASKS if s["task_key"] not in existing]
         if to_create:
             session.add_all([ScheduledTask(**kwargs) for kwargs in to_create])
-            session.commit()
             for s in to_create:
                 logger.info("已注册定时任务定义: %s", s["task_key"])
+        for seed in SEED_TASKS:
+            task = existing_rows.get(seed["task_key"])
+            if task is None:
+                continue
+            for key in ("name", "description", "schedule_type", "schedule_time", "interval_seconds"):
+                setattr(task, key, seed[key])
+        session.commit()
 
 
 def list_tasks() -> List[Dict]:

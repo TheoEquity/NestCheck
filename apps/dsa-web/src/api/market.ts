@@ -102,6 +102,9 @@ export interface MarketRefreshResponse {
 
 export interface EquityRatioResponse {
   equityRatio: number;
+  plannedEquityRatio?: number | null;
+  activeAllocationPlanId?: number | null;
+  activeAllocationPlanGeneratedAt?: string | null;
   totalCny: number;
   equityCny: number;
   detail: Record<string, { total: number; equity: number; weight: number }>;
@@ -118,8 +121,10 @@ export const marketApi = {
     return toCamelCase<MarketRiskResponse>(response.data);
   },
 
-  async getTrend(): Promise<MarketTrendResponse> {
-    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/trend');
+  async getTrend(refreshToken?: number): Promise<MarketTrendResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/trend', {
+      params: refreshToken ? { t: refreshToken } : undefined,
+    });
     return toCamelCase<MarketTrendResponse>(response.data);
   },
 

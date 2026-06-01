@@ -1,0 +1,38 @@
+[
+  {
+    "name": "AKShare",
+    "type": "akshare",
+    "enabled": true,
+    "priority": 1,
+    "retry_times": 3,
+    "timeout": 30,
+    "description": "AKShare 开源金融数据接口"
+  },
+  {
+    "name": "yfinance",
+    "type": "yfinance",
+    "enabled": true,
+    "priority": 2,
+    "retry_times": 2,
+    "timeout": 15,
+    "description": "Yahoo Finance 数据源"
+  },
+  {
+    "name": "EFinance",
+    "type": "efinance",
+    "enabled": true,
+    "priority": 3,
+    "retry_times": 2,
+    "timeout": 15,
+    "description": "东方财富数据接口"
+  },
+  {
+    "name": "Tushare",
+    "type": "tushare",
+    "enabled": false,
+    "priority": 4,
+    "retry_times": 2,
+    "timeout": 15,
+    "description": "Tushare 专业金融数据接口（需 Token）"
+  }
+]

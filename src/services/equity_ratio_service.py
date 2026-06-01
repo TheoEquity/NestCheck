@@ -131,9 +131,38 @@ def calculate_equity_ratio() -> Dict[str, Any]:
         }
 
     ratio = equity_cny / total_cny if total_cny > 0 else 0.0
+    planned_equity_ratio = None
+    active_plan_id = None
+    active_plan_generated_at = None
+
+    try:
+        with db.get_session() as session:
+            from src.storage import AssetAllocationPlan
+            active_plan = session.query(AssetAllocationPlan).filter(
+                AssetAllocationPlan.is_active == True
+            ).order_by(AssetAllocationPlan.generated_at.desc()).first()
+            if active_plan is not None:
+                active_plan_id = active_plan.id
+                active_plan_generated_at = active_plan.generated_at.isoformat() if active_plan.generated_at else None
+                plan_ratio_map = {
+                    "R1": float(active_plan.r1_ratio or 0.0) / 100,
+                    "R2": float(active_plan.r2_ratio or 0.0) / 100,
+                    "R3": float(active_plan.r3_ratio or 0.0) / 100,
+                    "R4": float(active_plan.r4_ratio or 0.0) / 100,
+                    "R5": float(active_plan.r5_ratio or 0.0) / 100,
+                }
+                planned_equity_ratio = sum(
+                    plan_ratio_map[risk_class] * equity_weight_map.get(risk_class, 1.0)
+                    for risk_class in ["R1", "R2", "R3", "R4", "R5"]
+                )
+    except Exception as exc:
+        logger.warning("读取生效资产配置计划失败：%s", exc)
 
     return {
         "equity_ratio": round(ratio, 4),
+        "planned_equity_ratio": round(planned_equity_ratio, 4) if planned_equity_ratio is not None else None,
+        "active_allocation_plan_id": active_plan_id,
+        "active_allocation_plan_generated_at": active_plan_generated_at,
         "total_cny": round(total_cny, 2),
         "equity_cny": round(equity_cny, 2),
         "detail": detail,

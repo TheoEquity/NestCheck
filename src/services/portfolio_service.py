@@ -35,8 +35,10 @@ VALID_MARKETS = {"cn", "hk", "us"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
-VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
+VALID_CORPORATE_ACTIONS = {"cash_dividend"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
+
+REALTIME_ASSET_RISK_CLASSES = {"R4", "R5"}
 
 
 class PortfolioConflictError(Exception):
@@ -84,6 +86,15 @@ class _ResolvedPositionPrice:
     is_stale: bool
     is_available: bool
     provider: Optional[str] = None
+    change_pct: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class _RealtimePositionQuote:
+    price: float
+    provider: Optional[str]
+    name: Optional[str]
+    change_pct: Optional[float]
 
 
 @dataclass
@@ -323,8 +334,8 @@ class PortfolioService:
         asset_category: Optional[str] = None,
         asset_subcategory: Optional[str] = None,
         asset_risk_class: Optional[str] = None,
-        risk_level: Optional[str] = None,
         symbol: str,
+        name: Optional[str] = None,
         trade_date: date,
         side: str,
         quantity: float,
@@ -354,31 +365,21 @@ class PortfolioService:
                 account = self._require_active_account_in_session(session=session, account_id=account_id)
                 market_norm = self._normalize_market(market or account.market)
                 currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+                name_norm = (name or "").strip() or None
+                asset_category_norm = (asset_category or "").strip() or None
+                asset_subcategory_norm = (asset_subcategory or "").strip() or None
+                asset_risk_class_norm = (asset_risk_class or "").strip().upper() or None
                 self._validate_trade_identity(
                     account_id=account_id,
                     trade_uid=trade_uid_norm,
                     dedup_hash=dedup_hash_norm,
                     session=session,
                     )
-                if side_norm == "sell":
-                    self._validate_sell_quantity(
-                        account_id=account_id,
-                        symbol=symbol,
-                        market=market_norm,
-                        currency=currency_norm,
-                        trade_date=trade_date,
-                        quantity=float(quantity),
-                        session=session,
-                    )
-                row = self.repo.add_trade_in_session(
+                realized_pnl = self._apply_trade_to_master_positions(
                     session=session,
-                    account_id=account_id,
-                    trade_uid=trade_uid_norm,
-                    asset_category=(asset_category or "").strip() or None,
-                    asset_subcategory=(asset_subcategory or "").strip() or None,
-                    asset_risk_class=(asset_risk_class or "").strip().upper() or None,
-                    risk_level=(risk_level or "").strip().upper() or None,
+                    account=account,
                     symbol=symbol_norm,
+                    name=name_norm,
                     market=market_norm,
                     currency=currency_norm,
                     trade_date=trade_date,
@@ -387,6 +388,28 @@ class PortfolioService:
                     price=float(price),
                     fee=float(fee),
                     tax=float(tax),
+                    asset_category=asset_category_norm,
+                    asset_subcategory=asset_subcategory_norm,
+                    asset_risk_class=asset_risk_class_norm,
+                )
+                row = self.repo.add_trade_in_session(
+                    session=session,
+                    account_id=account_id,
+                    trade_uid=trade_uid_norm,
+                    asset_category=asset_category_norm,
+                    asset_subcategory=asset_subcategory_norm,
+                    asset_risk_class=asset_risk_class_norm,
+                    symbol=symbol_norm,
+                    name=name_norm,
+                    market=market_norm,
+                    currency=currency_norm,
+                    trade_date=trade_date,
+                    side=side_norm,
+                    quantity=float(quantity),
+                    price=float(price),
+                    fee=float(fee),
+                    tax=float(tax),
+                    realized_pnl=realized_pnl,
                     note=(note or "").strip() or None,
                     dedup_hash=dedup_hash_norm,
                 )
@@ -401,7 +424,6 @@ class PortfolioService:
         asset_category: Optional[str] = None,
         asset_subcategory: Optional[str] = None,
         asset_risk_class: Optional[str] = None,
-        risk_level: Optional[str] = None,
         event_date: date,
         direction: str,
         amount: float,
@@ -416,13 +438,21 @@ class PortfolioService:
         with self.repo.portfolio_write_session() as session:
             account = self._require_active_account_in_session(session=session, account_id=account_id)
             currency_norm = self._normalize_currency(currency or account.base_currency)
+            amount_delta = float(amount) if direction_norm == "in" else -float(amount)
+            self._apply_cash_delta(
+                session=session,
+                account=account,
+                market=account.market,
+                currency=currency_norm,
+                trade_date=event_date,
+                amount_delta=amount_delta,
+            )
             row = self.repo.add_cash_ledger_in_session(
                 session=session,
                 account_id=account_id,
-                asset_category=(asset_category or "").strip() or None,
+                asset_category=(asset_category or "cash").strip() or "cash",
                 asset_subcategory=(asset_subcategory or "").strip() or None,
-                asset_risk_class=(asset_risk_class or "").strip().upper() or None,
-                risk_level=(risk_level or "").strip().upper() or None,
+                asset_risk_class=(asset_risk_class or "R1").strip().upper() or "R1",
                 event_date=event_date,
                 direction=direction_norm,
                 amount=float(amount),
@@ -436,24 +466,21 @@ class PortfolioService:
         *,
         account_id: int,
         symbol: str,
+        asset_category: Optional[str] = None,
+        asset_subcategory: Optional[str] = None,
         effective_date: date,
         action_type: str,
         market: Optional[str] = None,
         currency: Optional[str] = None,
-        cash_dividend_per_share: Optional[float] = None,
-        split_ratio: Optional[float] = None,
+        dividend_amount: Optional[float] = None,
         note: Optional[str] = None,
     ) -> Dict[str, Any]:
         action_type_norm = (action_type or "").strip().lower()
         if action_type_norm not in VALID_CORPORATE_ACTIONS:
-            raise ValueError("action_type must be cash_dividend or split_adjustment")
+            raise ValueError("action_type must be cash_dividend")
 
-        if action_type_norm == "cash_dividend":
-            if cash_dividend_per_share is None or cash_dividend_per_share < 0:
-                raise ValueError("cash_dividend_per_share must be >= 0 for cash_dividend")
-        if action_type_norm == "split_adjustment":
-            if split_ratio is None or split_ratio <= 0:
-                raise ValueError("split_ratio must be > 0 for split_adjustment")
+        if dividend_amount is None or dividend_amount <= 0:
+            raise ValueError("dividend_amount must be > 0 for cash_dividend")
         with self.repo.portfolio_write_session() as session:
             account = self._require_active_account_in_session(session=session, account_id=account_id)
             market_norm = self._normalize_market(market or account.market)
@@ -461,16 +488,27 @@ class PortfolioService:
             symbol_norm = self._normalize_symbol_for_storage(symbol)
             if not symbol_norm:
                 raise ValueError("symbol is required")
+            dividend_amount_value = float(dividend_amount)
+            self._apply_cash_delta(
+                session=session,
+                account=account,
+                market=market_norm,
+                currency=currency_norm,
+                trade_date=effective_date,
+                amount_delta=dividend_amount_value,
+            )
             row = self.repo.add_corporate_action_in_session(
                 session=session,
                 account_id=account_id,
                 symbol=symbol_norm,
                 market=market_norm,
                 currency=currency_norm,
+                asset_category=(asset_category or "").strip() or None,
+                asset_subcategory=(asset_subcategory or "").strip() or None,
                 effective_date=effective_date,
                 action_type=action_type_norm,
-                cash_dividend_per_share=cash_dividend_per_share,
-                split_ratio=split_ratio,
+                cash_dividend_per_share=dividend_amount_value,
+                realized_pnl=dividend_amount_value,
                 note=(note or "").strip() or None,
             )
             return {"id": int(row.id)}
@@ -486,6 +524,165 @@ class PortfolioService:
     def delete_corporate_action_event(self, action_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
             return self.repo.delete_corporate_action_in_session(session=session, action_id=action_id)
+
+    def _apply_trade_to_master_positions(
+        self,
+        *,
+        session: Any,
+        account: Any,
+        symbol: str,
+        name: Optional[str],
+        market: str,
+        currency: str,
+        trade_date: date,
+        side: str,
+        quantity: float,
+        price: float,
+        fee: float,
+        tax: float,
+        asset_category: Optional[str],
+        asset_subcategory: Optional[str],
+        asset_risk_class: Optional[str],
+    ) -> float:
+        from src.storage import PortfolioPosition
+
+        method = "fifo"
+        position = self.repo.get_position_in_session(
+            session=session,
+            account_id=int(account.id),
+            symbol=symbol,
+            market=market,
+            currency=currency,
+            cost_method=method,
+        )
+        old_quantity = float(position.quantity or 0.0) if position else 0.0
+        old_avg_cost = float(position.avg_cost or 0.0) if position else 0.0
+        realized_pnl = 0.0
+
+        if side == "buy":
+            total_quantity = old_quantity + quantity
+            total_cost = old_avg_cost * old_quantity + price * quantity + fee + tax
+            next_avg_cost = total_cost / total_quantity
+            if position is None:
+                position = PortfolioPosition(
+                    account_id=int(account.id),
+                    cost_method=method,
+                    symbol=symbol,
+                    name=name,
+                    market=market,
+                    currency=currency,
+                    quantity=total_quantity,
+                    avg_cost=next_avg_cost,
+                    total_cost=total_quantity * next_avg_cost,
+                    last_price=0.0,
+                    market_value_base=0.0,
+                    unrealized_pnl_base=0.0,
+                    asset_category=asset_category,
+                    asset_subcategory=asset_subcategory,
+                    asset_risk_class=asset_risk_class,
+                    valuation_currency=account.base_currency,
+                )
+                session.add(position)
+            else:
+                position.quantity = total_quantity
+                position.avg_cost = next_avg_cost
+                position.total_cost = total_quantity * next_avg_cost
+                position.name = name or position.name
+                position.asset_category = asset_category or position.asset_category
+                position.asset_subcategory = asset_subcategory or position.asset_subcategory
+                position.asset_risk_class = asset_risk_class or position.asset_risk_class
+                position.updated_at = datetime.now()
+            self._apply_cash_delta(
+                session=session,
+                account=account,
+                market=market,
+                currency=currency,
+                trade_date=trade_date,
+                amount_delta=-(price * quantity + fee + tax),
+            )
+            return 0.0
+
+        if position is None or old_quantity + EPS < quantity:
+            raise PortfolioOversellError(
+                symbol=symbol,
+                trade_date=trade_date,
+                requested_quantity=quantity,
+                available_quantity=old_quantity,
+            )
+
+        next_quantity = old_quantity - quantity
+        if next_quantity <= EPS:
+            next_quantity = 0.0
+        realized_pnl = (price - old_avg_cost) * quantity - fee - tax
+        position.quantity = next_quantity
+        position.total_cost = next_quantity * old_avg_cost
+        position.name = name or position.name
+        position.asset_category = asset_category or position.asset_category
+        position.asset_subcategory = asset_subcategory or position.asset_subcategory
+        position.asset_risk_class = asset_risk_class or position.asset_risk_class
+        position.updated_at = datetime.now()
+        self._apply_cash_delta(
+            session=session,
+            account=account,
+            market=market,
+            currency=currency,
+            trade_date=trade_date,
+            amount_delta=price * quantity - fee - tax,
+        )
+        return realized_pnl
+
+    def _apply_cash_delta(
+        self,
+        *,
+        session: Any,
+        account: Any,
+        market: str,
+        currency: str,
+        trade_date: date,
+        amount_delta: float,
+    ) -> None:
+        from src.storage import PortfolioPosition
+
+        method = "fifo"
+        cash_symbol = f"CASH_{currency}"
+        cash_position = self.repo.get_position_in_session(
+            session=session,
+            account_id=int(account.id),
+            symbol=cash_symbol,
+            market=market,
+            currency=currency,
+            cost_method=method,
+        )
+        if cash_position is None:
+            cash_position = PortfolioPosition(
+                account_id=int(account.id),
+                cost_method=method,
+                symbol=cash_symbol,
+                name=f"现金 {currency}",
+                market=market,
+                currency=currency,
+                quantity=0.0,
+                avg_cost=1.0,
+                total_cost=0.0,
+                last_price=1.0,
+                market_value_base=0.0,
+                unrealized_pnl_base=0.0,
+                asset_category="cash",
+                asset_subcategory=None,
+                asset_risk_class="R1",
+                valuation_currency=account.base_currency,
+            )
+            session.add(cash_position)
+        cash_position.quantity = float(cash_position.quantity or 0.0) + amount_delta
+        cash_position.avg_cost = 1.0
+        cash_position.total_cost = float(cash_position.quantity or 0.0)
+        cash_position.last_price = 1.0
+        cash_position.updated_at = datetime.now()
+        self.repo._invalidate_account_cache_in_session(
+            session=session,
+            account_id=int(account.id),
+            from_date=trade_date,
+        )
 
     def list_trade_events(
         self,
@@ -596,7 +793,7 @@ class PortfolioService:
         if action_type is not None and action_type.strip():
             action_norm = action_type.strip().lower()
             if action_norm not in VALID_CORPORATE_ACTIONS:
-                raise ValueError("action_type must be cash_dividend or split_adjustment")
+                raise ValueError("action_type must be cash_dividend")
 
         rows, total = self.repo.query_corporate_actions(
             account_id=account_id,
@@ -850,6 +1047,7 @@ class PortfolioService:
                     "avg_cost": avg_cost_val,
                     "total_cost": total_cost,
                     "last_price": round(last_price, 8),
+                    "price_change_pct": round(float(position.price_change_pct), 8) if position.price_change_pct is not None else None,
                     "market_value_base": round(market_base, 8),
                     "unrealized_pnl_base": round(unrealized, 8),
                     "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
@@ -866,6 +1064,70 @@ class PortfolioService:
                 }
             )
         return {"items": items, "total": len(items)}
+
+    def realtime_revalue_positions(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        cost_method: str = "fifo",
+    ) -> Dict[str, Any]:
+        data = self.list_positions(account_id=account_id, cost_method=cost_method)
+        items: List[Dict[str, Any]] = []
+        refreshed = 0
+        failed = 0
+        failures: List[str] = []
+        today = date.today()
+
+        for item in data["items"]:
+            risk_class = (item.get("asset_risk_class") or "").strip().upper()
+            if risk_class not in REALTIME_ASSET_RISK_CLASSES:
+                items.append(item)
+                continue
+
+            symbol = self._normalize_symbol_for_position(str(item.get("symbol") or ""))
+            quote = self._fetch_realtime_position_price(symbol)
+            if quote is None:
+                failed += 1
+                failures.append(str(item.get("symbol") or ""))
+                items.append(item)
+                continue
+
+            qty = float(item.get("quantity") or 0.0)
+            total_cost = float(item.get("total_cost") or 0.0)
+            currency = str(item.get("currency") or "CNY")
+            local_market_value = qty * quote.price
+            market_base, stale_market, _ = self._convert_amount(
+                amount=local_market_value,
+                from_currency=currency,
+                to_currency="CNY",
+                as_of_date=today,
+            )
+            cost_base, stale_cost, _ = self._convert_amount(
+                amount=total_cost,
+                from_currency=currency,
+                to_currency="CNY",
+                as_of_date=today,
+            )
+            unrealized = market_base - cost_base
+            unrealized_pct = (unrealized / cost_base * 100.0) if abs(cost_base) > EPS else None
+            updated_item = dict(item)
+            updated_item.update({
+                "name": quote.name or item.get("name"),
+                "last_price": round(float(quote.price), 8),
+                "price_change_pct": round(float(quote.change_pct), 8) if quote.change_pct is not None else None,
+                "market_value_base": round(market_base, 8),
+                "unrealized_pnl_base": round(unrealized, 8),
+                "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                "price_source": "realtime_quote",
+                "price_provider": quote.provider,
+                "price_date": today.isoformat(),
+                "price_stale": stale_market or stale_cost,
+                "price_available": True,
+            })
+            items.append(updated_item)
+            refreshed += 1
+
+        return {"items": items, "total": len(items), "refreshed": refreshed, "failed": failed, "failures": failures[:20]}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -959,15 +1221,6 @@ class PortfolioService:
         quantity_held = 0.0
         for event_type, event_date, _, event in events:
             if event_type == "corp":
-                action_type = (event.action_type or "").strip().lower()
-                if action_type != "split_adjustment":
-                    continue
-                split_ratio = float(event.split_ratio or 0.0)
-                if split_ratio <= 0:
-                    raise ValueError(f"Invalid split_ratio for {key[0]}")
-                if abs(split_ratio - 1.0) <= EPS:
-                    continue
-                quantity_held *= split_ratio
                 continue
 
             qty = float(event.quantity or 0.0)
@@ -1266,30 +1519,17 @@ class PortfolioService:
                 )
                 action_type = (event.action_type or "").strip().lower()
                 if action_type == "cash_dividend":
-                    per_share = float(event.cash_dividend_per_share or 0.0)
-                    if per_share <= 0:
-                        continue
-                    qty_held = self._held_quantity(
-                        key=key,
-                        cost_method=cost_method,
-                        fifo_lots=fifo_lots,
-                        avg_state=avg_state,
-                    )
-                    if qty_held > EPS:
-                        cash_balances[key[2]] += qty_held * per_share
-                elif action_type == "split_adjustment":
-                    split_ratio = float(event.split_ratio or 0.0)
-                    if split_ratio <= 0:
-                        raise ValueError(f"Invalid split_ratio for {event.symbol}")
-                    if abs(split_ratio - 1.0) <= EPS:
-                        continue
-                    if cost_method == "fifo":
-                        for lot in fifo_lots[key]:
-                            lot["remaining_quantity"] *= split_ratio
-                            lot["unit_cost"] /= split_ratio
-                    else:
-                        state = avg_state[key]
-                        state.quantity *= split_ratio
+                    dividend_amount = float(event.realized_pnl or event.cash_dividend_per_share or 0.0)
+                    if dividend_amount > 0:
+                        cash_balances[key[2]] += dividend_amount
+                        dividend_base, stale_dividend, _ = self._convert_amount(
+                            amount=dividend_amount,
+                            from_currency=key[2],
+                            to_currency=account.base_currency,
+                            as_of_date=event_date,
+                        )
+                        realized_pnl_base += dividend_base
+                        fx_stale = fx_stale or stale_dividend
                 else:
                     raise ValueError(f"Unsupported corporate action type: {event.action_type}")
 
@@ -1585,15 +1825,16 @@ class PortfolioService:
             )
 
         if as_of_date == today:
-            realtime_price, provider, _ = self._fetch_realtime_position_price(symbol)
-            if realtime_price is not None and realtime_price > 0:
+            realtime_quote = self._fetch_realtime_position_price(symbol)
+            if realtime_quote is not None and realtime_quote.price > 0:
                 return _ResolvedPositionPrice(
-                    price=float(realtime_price),
+                    price=float(realtime_quote.price),
                     source="realtime_quote",
                     price_date=today,
                     is_stale=False,
                     is_available=True,
-                    provider=provider,
+                    provider=realtime_quote.provider,
+                    change_pct=realtime_quote.change_pct,
                 )
 
         close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
@@ -1617,31 +1858,36 @@ class PortfolioService:
         )
 
     @staticmethod
-    def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+    def _fetch_realtime_position_price(symbol: str) -> Optional[_RealtimePositionQuote]:
         try:
             from data_provider.base import DataFetcherManager
 
             quote = DataFetcherManager().get_realtime_quote(symbol, log_final_failure=False)
         except Exception as exc:
             logger.warning("Failed to fetch realtime portfolio price for %s: %s", symbol, exc)
-            return None, None, None
+            return None
 
         if quote is None:
-            return None, None, None
+            return None
 
         price = getattr(quote, "price", None)
         try:
             numeric_price = float(price)
         except (TypeError, ValueError):
-            return None, None, None
+            return None
 
         if numeric_price <= 0:
-            return None, None, None
+            return None
 
         source = getattr(quote, "source", None)
         provider = getattr(source, "value", None) or (str(source) if source is not None else None)
         name = getattr(quote, "name", None)
-        return numeric_price, provider, name
+        change_pct = getattr(quote, "change_pct", None)
+        try:
+            numeric_change_pct = float(change_pct) if change_pct is not None else None
+        except (TypeError, ValueError):
+            numeric_change_pct = None
+        return _RealtimePositionQuote(numeric_price, provider, name, numeric_change_pct)
 
     @staticmethod
     def _fetch_fund_nav(symbol: str) -> Tuple[Optional[float], Optional[str]]:
@@ -2152,8 +2398,8 @@ class PortfolioService:
             "asset_category": row.asset_category,
             "asset_subcategory": row.asset_subcategory,
             "asset_risk_class": row.asset_risk_class,
-            "risk_level": row.risk_level,
             "symbol": row.symbol,
+            "name": row.name,
             "market": row.market,
             "currency": row.currency,
             "trade_date": row.trade_date.isoformat() if row.trade_date else "",
@@ -2162,6 +2408,7 @@ class PortfolioService:
             "price": float(row.price),
             "fee": float(row.fee),
             "tax": float(row.tax),
+            "realized_pnl": float(row.realized_pnl or 0.0),
             "note": row.note,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
@@ -2174,7 +2421,6 @@ class PortfolioService:
             "asset_category": row.asset_category,
             "asset_subcategory": row.asset_subcategory,
             "asset_risk_class": row.asset_risk_class,
-            "risk_level": row.risk_level,
             "event_date": row.event_date.isoformat() if row.event_date else "",
             "direction": row.direction,
             "amount": float(row.amount),
@@ -2191,12 +2437,14 @@ class PortfolioService:
             "symbol": row.symbol,
             "market": row.market,
             "currency": row.currency,
+            "asset_category": row.asset_category,
+            "asset_subcategory": row.asset_subcategory,
             "effective_date": row.effective_date.isoformat() if row.effective_date else "",
             "action_type": row.action_type,
-            "cash_dividend_per_share": (
+            "dividend_amount": (
                 float(row.cash_dividend_per_share) if row.cash_dividend_per_share is not None else None
             ),
-            "split_ratio": float(row.split_ratio) if row.split_ratio is not None else None,
+            "realized_pnl": float(row.realized_pnl or 0.0),
             "note": row.note,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
@@ -2247,9 +2495,9 @@ class PortfolioService:
         *,
         refresh_positions: bool = True,
         refresh_indices: bool = True,
-        refresh_fx: bool = True,
+        refresh_fx: bool = False,
     ) -> Dict[str, Any]:
-        """Refresh cached prices across positions, indices, and FX rates."""
+        """Refresh realtime R4/R5 positions and dashboard market quotes."""
         results: Dict[str, Any] = {}
 
         if refresh_positions:
@@ -2268,7 +2516,10 @@ class PortfolioService:
 
         db = get_db()
         with db.get_session() as s:
-            positions = s.query(PortfolioPosition).filter(PortfolioPosition.quantity > EPS).all()
+            positions = s.query(PortfolioPosition).filter(
+                PortfolioPosition.quantity > EPS,
+                PortfolioPosition.asset_risk_class.in_(REALTIME_ASSET_RISK_CLASSES),
+            ).all()
 
         refreshed = 0
         failed = 0
@@ -2277,87 +2528,63 @@ class PortfolioService:
         for position in positions:
             asset_cat = position.asset_category
             symbol = self._normalize_symbol_for_position(position.symbol)
-            new_price, source, name = self._resolve_latest_price_with_name(symbol, asset_cat)
+            quote = self._resolve_latest_price_with_name(symbol, asset_cat)
 
-            if new_price is not None and new_price > 0:
+            if quote is not None and quote.price > 0:
                 with db.get_session() as s:
                     s.query(PortfolioPosition).filter_by(id=position.id).update({
-                        PortfolioPosition.last_price: new_price,
-                        PortfolioPosition.name: name or position.name,
+                        PortfolioPosition.last_price: quote.price,
+                        PortfolioPosition.price_change_pct: quote.change_pct,
+                        PortfolioPosition.name: quote.name or position.name,
                         PortfolioPosition.updated_at: datetime.now(),
                     })
                     s.commit()
                 refreshed += 1
             else:
                 failed += 1
-                failures.append(f"{position.symbol} (resolved={new_price})")
+                failures.append(f"{position.symbol} (resolved=missing)")
 
         return {"refreshed": refreshed, "failed": failed, "failures": failures[:20]}
 
     def _refresh_index_prices(self) -> Dict[str, Any]:
-        from src.storage import get_db, MarketQuote
+        from data_provider.base import DataFetcherManager
+        from src.services.market_trend_service import MARKET_INDICES
+        from src.storage import StockDaily, get_db
 
-        indices = [
-            {"code": "000001", "market": "cn", "category": "index"},  # 上证综指
-            {"code": "399001", "market": "cn", "category": "index"},  # 深成指
-            {"code": "399006", "market": "cn", "category": "index"},  # 创业板指
-            {"code": "000016", "market": "cn", "category": "index"},  # 上证50
-            {"code": "000300", "market": "cn", "category": "index"},  # 沪深300
-        ]
-
+        manager = DataFetcherManager()
         refreshed = 0
         failed = 0
         failures: List[str] = []
 
-        try:
-            import akshare as ak
-            df = ak.stock_zh_index_spot_em()
-            spot_map = {}
-            for _, row in df.iterrows():
-                spot_map[row.get("代码", "")] = row
-
-            for idx_cfg in indices:
-                try:
-                    spot = spot_map.get(idx_cfg["code"])
-                    if spot is not None:
-                        latest = float(spot.get("最新价", 0) or 0)
-                        if latest > 0:
-                            db = get_db()
-                            with db.get_session() as s:
-                                q = s.query(MarketQuote).filter_by(
-                                    code=idx_cfg["code"], market=idx_cfg["market"]
-                                ).first()
-                                if q is None:
-                                    q = MarketQuote(
-                                        code=idx_cfg["code"],
-                                        market=idx_cfg["market"],
-                                        category=idx_cfg["category"],
-                                    )
-                                    s.add(q)
-                                q.name = spot.get("名称", "")
-                                q.latest_price = latest
-                                q.pct_change = float(spot.get("涨跌幅", 0) or 0)
-                                q.volume = float(spot.get("成交量", 0) or 0)
-                                q.prev_close = float(spot.get("昨收", 0) or 0)
-                                q.open_price = float(spot.get("今开", 0) or 0)
-                                q.high_price = float(spot.get("最高", 0) or 0)
-                                q.low_price = float(spot.get("最低", 0) or 0)
-                                q.updated_at = datetime.now()
-                                q.is_stale = False
-                                q.quote_date = date.today()
-                                s.commit()
-                                refreshed += 1
-                            continue
+        for idx_cfg in MARKET_INDICES:
+            code = idx_cfg["code"]
+            try:
+                quote = manager.get_realtime_quote(code, log_final_failure=False)
+                if quote is None or getattr(quote, "price", None) is None or float(quote.price) <= 0:
                     failed += 1
-                    failures.append(f"{idx_cfg['code']} not found")
-                except Exception as e:
-                    failed += 1
-                    failures.append(f"{idx_cfg['code']}: {e}")
-        except ImportError:
-            failures.append("akshare not installed")
-        except Exception as e:
-            failures.append(f"Index fetch failed: {e}")
-            failed += len(indices)
+                    failures.append(f"{code} not found")
+                    continue
+                today = date.today()
+                with get_db().get_session() as s:
+                    row = s.query(StockDaily).filter_by(code=code, date=today).one_or_none()
+                    if row is None:
+                        row = StockDaily(code=code, date=today)
+                        s.add(row)
+                    price = float(quote.price)
+                    row.close = price
+                    row.open = getattr(quote, "open_price", None) or price
+                    row.high = getattr(quote, "high", None) or price
+                    row.low = getattr(quote, "low", None) or price
+                    row.volume = getattr(quote, "volume", None)
+                    row.amount = getattr(quote, "amount", None)
+                    row.pct_chg = getattr(quote, "change_pct", None)
+                    row.data_source = "realtime_quote"
+                    row.updated_at = datetime.now()
+                    s.commit()
+                refreshed += 1
+            except Exception as e:
+                failed += 1
+                failures.append(f"{code}: {e}")
 
         return {"refreshed": refreshed, "failed": failed, "failures": failures[:20]}
 
@@ -2438,16 +2665,16 @@ class PortfolioService:
     def _resolve_latest_price(self, symbol: str, asset_category: Optional[str]) -> Tuple[Optional[float], str]:
         """Resolve latest price for a symbol (price, source)."""
         result = self._resolve_latest_price_with_name(symbol, asset_category)
-        return result[0], result[2]
+        return (result.price, result.provider or "realtime_quote") if result is not None else (None, "missing")
 
-    def _resolve_latest_price_with_name(self, symbol: str, asset_category: Optional[str]) -> Tuple[Optional[float], str, Optional[str]]:
+    def _resolve_latest_price_with_name(self, symbol: str, asset_category: Optional[str]) -> Optional[_RealtimePositionQuote]:
         if (asset_category or "").lower() == "fund":
             fund_nav, fund_name = self._fetch_fund_nav(symbol)
             if fund_nav is not None and fund_nav > 0:
-                return fund_nav, "fund_nav", fund_name
+                return _RealtimePositionQuote(fund_nav, "fund_nav", fund_name, None)
         else:
-            realtime_price, provider, stock_name = self._fetch_realtime_position_price(symbol)
-            if realtime_price is not None and realtime_price > 0:
-                return realtime_price, "realtime_quote", stock_name
+            realtime_quote = self._fetch_realtime_position_price(symbol)
+            if realtime_quote is not None and realtime_quote.price > 0:
+                return realtime_quote
 
-        return None, "missing", None
+        return None

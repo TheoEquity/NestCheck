@@ -37,6 +37,10 @@ def _get_bond_ice_bofa_series() -> Optional[pd.Series]:
             series = df
             
         s = series.dropna()
+        if isinstance(s.index, pd.PeriodIndex):
+            s.index = s.index.to_timestamp()
+        else:
+            s.index = pd.to_datetime(s.index)
         # 转为周收益率
         return s.pct_change().dropna()
         
@@ -73,7 +77,7 @@ def get_correlation_heatmap_data() -> Dict[str, Any]:
         return {"labels": [], "data": [], "error": "数据源未初始化"}
     
     assets_config = [
-        {"key": "csi300", "label": "沪深300", "code": "sh000001"},
+        {"key": "csi300", "label": "沪深300", "code": "sh000300"},
         {"key": "bond", "label": "债券(中债)", "is_bond": True},
         {"key": "dxy", "label": "美元(DXY)", "code": "DX-Y.NYB"},
         {"key": "spx", "label": "美股(SPX)", "code": "^GSPC"},
@@ -88,10 +92,15 @@ def get_correlation_heatmap_data() -> Dict[str, Any]:
                 # 债券特殊处理：使用 ICE BofA 7-10Y 总回报指数
                 bond_ret_weekly = _get_bond_ice_bofa_series()
                 if bond_ret_weekly is not None and len(bond_ret_weekly) > 10:
-                    bond_ret_weekly.index = pd.to_datetime(bond_ret_weekly.index)
                     returns_dict[asset["key"]] = bond_ret_weekly.tail(52)
                 else:
-                    logger.warning("资产 债券(中债) 周收益数据不足 (ICE BofA)")
+                    from src.storage import get_db
+                    df = get_db().get_daily_history_df("bond_cn_10y", days=900)
+                    bond_ret_weekly = _get_weekly_returns(df, inverse_label=True)
+                    if len(bond_ret_weekly) > 10:
+                        returns_dict[asset["key"]] = bond_ret_weekly.tail(52)
+                    else:
+                        logger.warning("资产 债券(中债) 周收益数据不足")
             else:
                 # 优先从数据库读取
                 from src.storage import get_db

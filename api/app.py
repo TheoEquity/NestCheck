@@ -147,11 +147,15 @@ async def app_lifespan(app: FastAPI):
     market_refresh_task = asyncio.create_task(_daily_market_cache_refresh_loop())
     app.state._market_refresh_task = market_refresh_task
 
+    seasonality_refresh_task = asyncio.create_task(_daily_seasonality_cache_refresh())
+    app.state._seasonality_refresh_task = seasonality_refresh_task
+
     try:
         yield
     finally:
         refresh_task.cancel()
         market_refresh_task.cancel()
+        seasonality_refresh_task.cancel()
         try:
             await refresh_task
         except asyncio.CancelledError:
@@ -160,12 +164,18 @@ async def app_lifespan(app: FastAPI):
             await market_refresh_task
         except asyncio.CancelledError:
             pass
+        try:
+            await seasonality_refresh_task
+        except asyncio.CancelledError:
+            pass
         if hasattr(app.state, "system_config_service"):
             delattr(app.state, "system_config_service")
         if hasattr(app.state, "_price_refresh_task"):
             delattr(app.state, "_price_refresh_task")
         if hasattr(app.state, "_market_refresh_task"):
             delattr(app.state, "_market_refresh_task")
+        if hasattr(app.state, "_seasonality_refresh_task"):
+            delattr(app.state, "_seasonality_refresh_task")
 
 
 async def _daily_portfolio_price_refresh():
@@ -199,10 +209,10 @@ def _run_price_refresh():
     from src.services.portfolio_service import PortfolioService
 
     svc = PortfolioService()
-    result = svc.refresh_all_prices()
+    result = svc.refresh_all_prices(refresh_fx=True)
     pos = result.get("positions", {})
     idx = result.get("indices", {})
-    fx = result.get("fx", {})
+    fx = result.get("fx", {"refreshed": 0, "failed": 0})
     logger.info(
         "Price refresh: pos=%d/%d, indices=%d/%d, fx=%d/%d",
         pos.get("refreshed", 0), pos.get("failed", 0),
@@ -235,6 +245,29 @@ async def _daily_market_cache_refresh_loop():
             await asyncio.sleep(refresh_interval_seconds)
 
 
+async def _daily_seasonality_cache_refresh():
+    """Refresh low-frequency seasonality cache once daily after market close."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    await asyncio.sleep(30)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        while True:
+            try:
+                now = datetime.now()
+                if now.hour == 20 and now.minute >= 30:
+                    logger.info("Seasonality cache refresh started")
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(executor, _run_seasonality_cache_refresh)
+                    logger.info("Seasonality cache refresh completed")
+                    await asyncio.sleep(60)
+            except Exception as exc:
+                logger.error("Seasonality cache refresh error: %s", exc, exc_info=True)
+
+            await asyncio.sleep(30)
+
+
 def _run_market_cache_refresh():
     """Synchronous wrapper for market cache refresh."""
     from src.services.market_cache_service import refresh_all_market_caches
@@ -243,6 +276,13 @@ def _run_market_cache_refresh():
     items = result.get("items", {})
     ok_count = sum(1 for item in items.values() if item.get("status") == "success")
     logger.info("Market cache refresh: success=%d/%d", ok_count, len(items))
+
+
+def _run_seasonality_cache_refresh():
+    """Synchronous wrapper for low-frequency seasonality cache refresh."""
+    from src.services.market_cache_service import refresh_market_cache
+
+    refresh_market_cache("seasonality")
 
 
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:

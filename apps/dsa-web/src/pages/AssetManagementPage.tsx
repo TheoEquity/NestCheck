@@ -313,7 +313,7 @@ const AssetManagementPage: React.FC = () => {
     document.title = '资产管理 - NestCheck';
   }, []);
 
-  const { accounts, positions, error, syncData, isRefreshing } = usePortfolioOverview();
+  const { accounts, positions, error, reload, syncData, isRefreshing } = usePortfolioOverview();
   const [fxRates, setFxRates] = useState<PortfolioLatestFxRateItem[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [accountFilter, setAccountFilter] = useState('全部');
@@ -490,7 +490,7 @@ const AssetManagementPage: React.FC = () => {
         avg_cost: avgCost,
         last_price: lastPrice 
       });
-      await syncData();
+      await reload();
       setAdjustTarget(null);
     } catch (err) {
       console.error('调整持仓失败:', err);
@@ -514,7 +514,7 @@ const AssetManagementPage: React.FC = () => {
             size="sm"
             className="!px-4 !py-1.5"
           >
-            {isRefreshing ? '重估中...' : '重估'}
+            {isRefreshing ? '实时重估中...' : '实时重估'}
           </Button>
         }
       />
@@ -644,7 +644,12 @@ const AssetManagementPage: React.FC = () => {
                       <td className="px-1 py-1.5 text-right">{Number(row.quantity || 0).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}</td>
                       <td className="px-1 py-1.5 text-right text-[11px]">{row.currency}</td>
                       <td className="px-3 py-1.5 text-right" style={{minWidth: '112px'}}>{formatMoney(row.avgCost, row.currency)}</td>
-                      <td className="px-2 py-1.5 text-right">{formatMoney(row.lastPrice, row.currency)}</td>
+                      <td className="px-2 py-1.5 text-right">
+                        <div>{formatMoney(row.lastPrice, row.currency)}</div>
+                        <div className={Number(row.priceChangePct || 0) >= 0 ? 'text-[11px] text-red-500' : 'text-[11px] text-green-600'}>
+                          {formatSignedPct(row.priceChangePct)}
+                        </div>
+                      </td>
                       <td className="px-2 py-1.5 text-right font-medium">
                         <div>{formatMoney(row.marketValueBase, 'CNY')}</div>
                         <div className="text-[11px] font-normal text-secondary-text">{formatMoney(localMarketValue, row.currency)}</div>

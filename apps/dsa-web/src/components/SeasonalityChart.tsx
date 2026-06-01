@@ -38,13 +38,13 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
     xAxis: {
       type: 'category',
       data: data.months,
-      axisLabel: { color: '#aaa', fontSize: 11, rotate: 0 },
+      axisLabel: { color: '#d4d4d4', fontSize: 11, rotate: 0 },
       axisLine: { lineStyle: { color: 'rgba(128,128,128,0.3)' } },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: '#888', formatter: '{value}%' },
+      axisLabel: { color: '#d4d4d4', formatter: '{value}%' },
       splitLine: { lineStyle: { color: 'rgba(128,128,128,0.15)' } },
       axisLine: { lineStyle: { color: 'rgba(128,128,128,0.3)' } },
     },
@@ -62,7 +62,7 @@ export const SeasonalityChart: React.FC<SeasonalityChartProps> = ({ data }) => {
       label: {
         show: true,
         position: 'top',
-        color: '#aaa',
+        color: '#d4d4d4',
         fontSize: 9,
         formatter: (p: BarLabelParam) => `${p.value >= 0 ? '+' : ''}${p.value}%`,
       },

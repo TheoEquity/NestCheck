@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button, Loading } from '../../components/common';
 import { schedulerApi, type SchedulerTask } from '../../api/scheduler';
 import { getParsedApiError, type ParsedApiError } from '../../api/error';
@@ -92,23 +92,75 @@ export const SchedulerTasksPanel: React.FC = () => {
     void loadData();
   }, []);
 
+  const pollingIntervals = useRef<Record<string, number | null>>({});
+
+  const stopPolling = useCallback((taskKey: string) => {
+    const id = pollingIntervals.current[taskKey];
+    if (id) {
+      window.clearInterval(id);
+      pollingIntervals.current[taskKey] = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const currentIntervals = pollingIntervals.current;
+    return () => {
+      Object.values(currentIntervals).forEach((id) => {
+        if (id) window.clearInterval(id);
+      });
+    };
+  }, []);
+
   const handleTrigger = async (taskKey: string) => {
     setTriggerLoading(taskKey);
     setTriggerMessage(null);
+
+    // 锚点：获取当前最新的一条记录时间
+    let lastExecutedAt = '';
+    try {
+      const history = await schedulerApi.getTaskHistory(taskKey, 1);
+      if (history && history.length > 0) {
+        lastExecutedAt = history[0].executedAt || '';
+      }
+    } catch {
+      // 忽略获取失败，当作没有历史记录
+    }
+
     try {
       const result = await schedulerApi.triggerTask(taskKey);
       if (result.status === 'success') {
         setTriggerMessage(`任务执行成功，耗时 ${result.durationMs || 0}ms`);
         setTriggerLoading(null);
-        setTimeout(() => void loadData(), 1500);
+        setTimeout(() => void loadData(), 500);
       } else if (result.status === 'accepted') {
-        setTriggerMessage(result.message || '任务已提交后台执行，预计需要2-3分钟完成');
-        // 长耗时任务：保持 loading 状态，30秒后自动刷新列表并解锁按钮
-        setTimeout(async () => {
-          await loadData();
-          setTriggerLoading(null);
-          setTriggerMessage('后台任务已完成，请查看最新结果');
-        }, 30000);
+        setTriggerMessage('任务已提交后台执行，等待完成确认...');
+
+        // 启动轮询，直到检测到新的历史记录产生
+        const intervalId = window.setInterval(async () => {
+          try {
+            const history = await schedulerApi.getTaskHistory(taskKey, 1);
+            if (history && history.length > 0) {
+              const latest = history[0];
+              // 双重确认：必须是新的记录，且状态必须是终态 (success/failed)
+              if (latest.executedAt > lastExecutedAt && (latest.status === 'success' || latest.status === 'failed')) {
+                stopPolling(taskKey);
+                setTriggerLoading(null);
+                setTimeout(() => void loadData(), 500);
+                
+                if (latest.status === 'success') {
+                  setTriggerMessage(`任务已全部完成`);
+                } else {
+                  setTriggerMessage(`任务执行失败：${latest.error || '未知错误'}`);
+                }
+              }
+            }
+          } catch {
+            // 忽略轮询失败
+          }
+        }, 2000); // 每2秒检查一次
+        
+        pollingIntervals.current[taskKey] = intervalId;
+        
       } else if (result.status === 'skipped') {
         setTriggerMessage(result.message || '任务已跳过');
         setTriggerLoading(null);

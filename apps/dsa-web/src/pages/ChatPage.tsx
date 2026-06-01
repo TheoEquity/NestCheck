@@ -657,7 +657,7 @@ const ChatPage: React.FC = () => {
   return (
     <div
       data-testid="chat-workspace"
-      className="flex h-[calc(100vh-5rem)] w-full min-w-0 gap-4 overflow-hidden sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
+      className="flex h-[calc(100vh-5rem)] w-full gap-4 overflow-hidden px-3 sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)] lg:px-4"
     >
       {/* Desktop sidebar */}
       <div className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-card/82 shadow-soft-card md:flex">
@@ -902,7 +902,7 @@ const ChatPage: React.FC = () => {
                   </div>
                   <div
                     className={cn(
-                      'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden px-5 py-3.5 transition-colors',
+                      'group/message min-w-0 w-fit max-w-[90%] overflow-hidden px-5 py-3.5 transition-colors',
                       msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'
                     )}
                   >
@@ -980,7 +980,7 @@ const ChatPage: React.FC = () => {
                 <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0 text-xs font-bold">
                   AI
                 </div>
-                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm border border-white/6 bg-card/72 px-5 py-4">
+                <div className="min-w-[200px] max-w-[90%] overflow-hidden rounded-2xl rounded-tl-sm border border-white/6 bg-card/72 px-5 py-4">
                   <div className="flex items-center gap-2.5 text-sm text-secondary-text">
                     <div className="relative w-4 h-4 flex-shrink-0">
                       <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />

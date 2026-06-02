@@ -19,6 +19,7 @@ export interface AnalysisRequest {
   selectionSource?: 'manual' | 'autocomplete' | 'import' | 'image';
   notify?: boolean;
   skills?: string[];
+  profileId?: string;
 }
 
 export interface MarketReviewRequest {

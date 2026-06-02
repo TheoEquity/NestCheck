@@ -31,6 +31,7 @@ export const analysisApi = {
       original_query: data.originalQuery,
       selection_source: data.selectionSource,
       skills: data.skills,
+      profile_id: data.profileId,
       ...(data.notify !== undefined && { notify: data.notify }),
     };
 
@@ -65,6 +66,7 @@ export const analysisApi = {
       original_query: data.originalQuery,
       selection_source: data.selectionSource,
       skills: data.skills,
+      profile_id: data.profileId,
       ...(data.notify !== undefined && { notify: data.notify }),
     };
 

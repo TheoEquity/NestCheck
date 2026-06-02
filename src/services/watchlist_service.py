@@ -1,0 +1,241 @@
+# -*- coding: utf-8 -*-
+"""Watchlist service."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from src.repositories.watchlist_repo import WatchlistConflictError, WatchlistRepository
+from src.storage import AlertRuleRecord, AlertTriggerRecord, WatchlistItem
+
+
+VALID_MARKETS = {"cn", "hk", "us"}
+VALID_ASSET_CATEGORIES = {"fund", "stock"}
+VALID_PRIORITIES = {"low", "medium", "high"}
+VALID_FREQUENCIES = {"daily", "weekly", "manual"}
+
+
+class WatchlistNotFoundError(ValueError):
+    pass
+
+
+class WatchlistService:
+    def __init__(self, repo: Optional[WatchlistRepository] = None):
+        self.repo = repo or WatchlistRepository()
+
+    def create_item(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        row = self.repo.create_item(self._normalize_payload(payload))
+        return self._serialize_item(row)
+
+    def list_items(
+        self,
+        *,
+        asset_category: Optional[str] = None,
+        watch_enabled: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        rows, total = self.repo.list_items(asset_category=asset_category, watch_enabled=watch_enabled)
+        summaries = self.repo.alert_summary_for_items(rows)
+        quote_summaries = self.repo.quote_summary_for_items(rows)
+        analysis_summaries = self.repo.stock_analysis_summary_for_items(rows)
+        return {
+            "items": [self._serialize_item(row, summaries.get(row.id), analysis_summaries.get(row.id), quote_summaries.get(row.id)) for row in rows],
+            "total": total,
+            "market_review": self.repo.latest_market_review_summary(),
+        }
+
+    def get_item(self, item_id: int) -> Dict[str, Any]:
+        row = self.repo.get_item(item_id)
+        if row is None:
+            raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
+        summary = self.repo.alert_summary_for_items([row]).get(row.id)
+        analysis_summary = self.repo.stock_analysis_summary_for_items([row]).get(row.id)
+        quote_summary = self.repo.quote_summary_for_items([row]).get(row.id)
+        return self._serialize_item(row, summary, analysis_summary, quote_summary)
+
+    def update_item(self, item_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        fields = self._normalize_payload(payload, partial=True)
+        if not fields:
+            raise ValueError("No fields provided for update")
+        row = self.repo.update_item(item_id, fields)
+        if row is None:
+            raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
+        return self._serialize_item(row)
+
+    def delete_item(self, item_id: int) -> bool:
+        return self.repo.delete_item(item_id)
+
+    def related_alerts(self, item_id: int) -> Dict[str, List[Dict[str, Any]]]:
+        row = self.repo.get_item(item_id)
+        if row is None:
+            raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
+        related = self.repo.related_alerts(row)
+        return {
+            "rules": [self._serialize_alert_rule(item) for item in related["rules"]],
+            "triggers": [self._serialize_alert_trigger(item) for item in related["triggers"]],
+        }
+
+    def _normalize_payload(self, payload: Dict[str, Any], *, partial: bool = False) -> Dict[str, Any]:
+        fields: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if value is None:
+                if partial:
+                    fields[key] = None
+                continue
+            fields[key] = value
+
+        if "market" in fields:
+            market = str(fields["market"]).strip().lower()
+            if market not in VALID_MARKETS:
+                raise ValueError(f"market must be one of {sorted(VALID_MARKETS)}")
+            fields["market"] = market
+        elif not partial:
+            fields["market"] = "cn"
+
+        if "symbol" in fields:
+            symbol = str(fields["symbol"]).strip()
+            if not symbol:
+                raise ValueError("symbol is required")
+            fields["symbol"] = symbol.upper()
+
+        if "name" in fields and fields["name"] is not None:
+            fields["name"] = str(fields["name"]).strip() or None
+
+        if "currency" in fields:
+            fields["currency"] = str(fields["currency"]).strip().upper() or "CNY"
+        elif not partial:
+            fields["currency"] = "CNY"
+
+        if "asset_category" in fields:
+            category = str(fields["asset_category"]).strip().lower()
+            if category not in VALID_ASSET_CATEGORIES:
+                raise ValueError(f"asset_category must be one of {sorted(VALID_ASSET_CATEGORIES)}")
+            fields["asset_category"] = category
+        elif not partial:
+            fields["asset_category"] = "stock"
+
+        if "watch_priority" in fields:
+            priority = str(fields["watch_priority"]).strip().lower()
+            if priority not in VALID_PRIORITIES:
+                raise ValueError(f"watch_priority must be one of {sorted(VALID_PRIORITIES)}")
+            fields["watch_priority"] = priority
+        elif not partial:
+            fields["watch_priority"] = "medium"
+
+        if "analysis_frequency" in fields:
+            frequency = str(fields["analysis_frequency"]).strip().lower()
+            if frequency not in VALID_FREQUENCIES:
+                raise ValueError(f"analysis_frequency must be one of {sorted(VALID_FREQUENCIES)}")
+            fields["analysis_frequency"] = frequency
+        elif not partial:
+            fields["analysis_frequency"] = "daily"
+
+        if "watch_tags" in fields:
+            fields["watch_tags"] = self._dump_tags(fields["watch_tags"])
+
+        for key in ("asset_subcategory", "asset_risk_class", "watch_reason", "source", "notes"):
+            if key in fields and fields[key] is not None:
+                fields[key] = str(fields[key]).strip() or None
+
+        if "source" not in fields and not partial:
+            fields["source"] = "manual"
+
+        return fields
+
+    @staticmethod
+    def _dump_tags(value: Any) -> str:
+        if isinstance(value, str):
+            tags = [item.strip() for item in value.split(",") if item.strip()]
+        elif isinstance(value, list):
+            tags = [str(item).strip() for item in value if str(item).strip()]
+        else:
+            tags = []
+        return json.dumps(tags, ensure_ascii=False)
+
+    @staticmethod
+    def _load_tags(raw: Optional[str]) -> List[str]:
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+        except Exception:
+            pass
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    def _serialize_item(
+        self,
+        row: WatchlistItem,
+        summary: Optional[Dict[str, Any]] = None,
+        analysis_summary: Optional[Dict[str, Any]] = None,
+        quote_summary: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        summary = summary or {}
+        analysis_summary = analysis_summary or {}
+        quote_summary = quote_summary or {}
+        return {
+            "id": row.id,
+            "market": row.market,
+            "symbol": row.symbol,
+            "name": row.name,
+            "currency": row.currency,
+            "asset_category": row.asset_category,
+            "asset_subcategory": row.asset_subcategory,
+            "asset_risk_class": row.asset_risk_class,
+            "watch_priority": row.watch_priority,
+            "watch_tags": self._load_tags(row.watch_tags),
+            "watch_reason": row.watch_reason,
+            "watch_enabled": row.watch_enabled,
+            "analysis_enabled": row.analysis_enabled,
+            "analysis_frequency": row.analysis_frequency,
+            "alert_enabled": row.alert_enabled,
+            "source": row.source,
+            "notes": row.notes,
+            "alert_rule_count": int(summary.get("alert_rule_count") or 0),
+            "alert_trigger_count": int(summary.get("alert_trigger_count") or 0),
+            "latest_alert_triggered_at": summary.get("latest_alert_triggered_at"),
+            "latest_price": quote_summary.get("latest_price"),
+            "latest_change_pct": quote_summary.get("latest_change_pct"),
+            "latest_analysis_id": analysis_summary.get("latest_analysis_id"),
+            "latest_analysis_at": analysis_summary.get("latest_analysis_at"),
+            "latest_analysis_summary": analysis_summary.get("latest_analysis_summary"),
+            "latest_operation_advice": analysis_summary.get("latest_operation_advice"),
+            "latest_trend_prediction": analysis_summary.get("latest_trend_prediction"),
+            "created_at": self._dt(row.created_at),
+            "updated_at": self._dt(row.updated_at),
+        }
+
+    @staticmethod
+    def _serialize_alert_rule(row: AlertRuleRecord) -> Dict[str, Any]:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "target_scope": row.target_scope,
+            "target": row.target,
+            "alert_type": row.alert_type,
+            "severity": row.severity,
+            "enabled": row.enabled,
+            "source": row.source,
+            "updated_at": WatchlistService._dt(row.updated_at),
+        }
+
+    @staticmethod
+    def _serialize_alert_trigger(row: AlertTriggerRecord) -> Dict[str, Any]:
+        return {
+            "id": row.id,
+            "rule_id": row.rule_id,
+            "target": row.target,
+            "observed_value": row.observed_value,
+            "threshold": row.threshold,
+            "reason": row.reason,
+            "data_source": row.data_source,
+            "data_timestamp": WatchlistService._dt(row.data_timestamp),
+            "triggered_at": WatchlistService._dt(row.triggered_at),
+            "status": row.status,
+        }
+
+    @staticmethod
+    def _dt(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None

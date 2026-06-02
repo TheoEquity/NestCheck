@@ -559,6 +559,37 @@ class PortfolioPositionLot(Base):
     )
 
 
+class WatchlistItem(Base):
+    """Focused asset identity and watch metadata."""
+
+    __tablename__ = 'watchlist_items'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    market = Column(String(8), nullable=False, default='cn', index=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    name = Column(String(100))
+    currency = Column(String(8), nullable=False, default='CNY')
+    asset_category = Column(String(32), nullable=False, default='stock', index=True)
+    asset_subcategory = Column(String(64))
+    asset_risk_class = Column(String(8))
+    watch_priority = Column(String(16), nullable=False, default='medium', index=True)
+    watch_tags = Column(Text)
+    watch_reason = Column(Text)
+    watch_enabled = Column(Boolean, nullable=False, default=True, index=True)
+    analysis_enabled = Column(Boolean, nullable=False, default=True, index=True)
+    analysis_frequency = Column(String(16), nullable=False, default='daily')
+    alert_enabled = Column(Boolean, nullable=False, default=True, index=True)
+    source = Column(String(32), nullable=False, default='manual', index=True)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('market', 'symbol', 'asset_category', name='uix_watchlist_market_symbol_category'),
+        Index('ix_watchlist_category_enabled', 'asset_category', 'watch_enabled'),
+    )
+
+
 class AssetRiskDefinition(Base):
     """Definition of asset risk classes (R1-R5) with expected return, volatility, max drawdown, and equity weight."""
 

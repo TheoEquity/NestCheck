@@ -97,6 +97,7 @@ class StockAnalysisPipeline:
         save_context_snapshot: Optional[bool] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         analysis_skills: Optional[List[str]] = None,
+        profile_id: Optional[str] = None,
     ):
         """
         初始化调度器
@@ -116,6 +117,7 @@ class StockAnalysisPipeline:
         )
         self.progress_callback = progress_callback
         self.analysis_skills = list(analysis_skills) if analysis_skills is not None else None
+        self.profile_id = str(profile_id).strip() if profile_id else None
         
         # 初始化各模块
         self.db = get_db()
@@ -908,6 +910,8 @@ class StockAnalysisPipeline:
             }
             if self.analysis_skills is not None:
                 initial_context["skills"] = self.analysis_skills
+            if self.profile_id:
+                initial_context["profile_id"] = self.profile_id
             if market_phase_context is not None:
                 initial_context["market_phase_context"] = market_phase_context
             

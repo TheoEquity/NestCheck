@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { analysisApi } from '../api/analysis';
 import { agentApi, type SkillInfo } from '../api/agent';
+import { agentManagementApi, type AgentManagementProfile } from '../api/agentManagement';
 import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, ConfirmDialog, Button, EmptyState, InlineAlert } from '../components/common';
 import { DashboardStateBlock } from '../components/dashboard';
@@ -33,12 +34,17 @@ const HomePage: React.FC = () => {
   const [marketReviewReport, setMarketReviewReport] = useState<string | null>(null);
   const [marketReviewReportCopied, setMarketReviewReportCopied] = useState(false);
   const [analysisSkills, setAnalysisSkills] = useState<SkillInfo[]>([]);
+  const [agentProfiles, setAgentProfiles] = useState<AgentManagementProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('stock_standard');
   const [selectedStrategyId, setSelectedStrategyId] = useState('');
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [strategyMenuOpen, setStrategyMenuOpen] = useState(false);
   const marketReviewPollTimer = useRef<number | null>(null);
   const dashboardScrollRef = useRef<HTMLElement | null>(null);
   const strategyMenuRef = useRef<HTMLDivElement | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const strategyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const strategyItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const strategyInitialFocusIndexRef = useRef<number | null>(null);
 
@@ -147,6 +153,32 @@ const HomePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    agentManagementApi.getOverview()
+      .then((overview) => {
+        if (!active) {
+          return;
+        }
+        const profiles = overview.profiles.filter(
+          (profile) => profile.asset_type === 'stock' && profile.status === 'available',
+        );
+        setAgentProfiles(profiles);
+        if (profiles.length > 0 && !profiles.some((profile) => profile.id === 'stock_standard')) {
+          setSelectedProfileId(profiles[0].id);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAgentProfiles([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!strategyMenuOpen) {
       return;
     }
@@ -164,6 +196,23 @@ const HomePage: React.FC = () => {
   }, [strategyMenuOpen]);
 
   useEffect(() => {
+    if (!profileMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && profileMenuRef.current?.contains(target)) {
+        return;
+      }
+      setProfileMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
     if (selectedStrategyId && !analysisSkills.some((skill) => skill.id === selectedStrategyId)) {
       setSelectedStrategyId('');
     }
@@ -175,6 +224,10 @@ const HomePage: React.FC = () => {
   const selectedStrategy = useMemo(
     () => analysisSkills.find((skill) => skill.id === selectedStrategyId),
     [analysisSkills, selectedStrategyId],
+  );
+  const selectedProfile = useMemo(
+    () => agentProfiles.find((profile) => profile.id === selectedProfileId),
+    [agentProfiles, selectedProfileId],
   );
   const selectedAnalysisSkills = useMemo(
     () => (selectedStrategyId ? [selectedStrategyId] : undefined),
@@ -200,6 +253,10 @@ const HomePage: React.FC = () => {
   const selectStrategy = useCallback((strategyId: string) => {
     setSelectedStrategyId(strategyId);
     setStrategyMenuOpen(false);
+  }, []);
+  const selectProfile = useCallback((profileId: string) => {
+    setSelectedProfileId(profileId);
+    setProfileMenuOpen(false);
   }, []);
   const focusStrategyItem = useCallback((index: number) => {
     const itemCount = strategyOptions.length;
@@ -313,9 +370,10 @@ const HomePage: React.FC = () => {
         originalQuery: query,
         selectionSource: selectionSource ?? 'manual',
         skills: selectedAnalysisSkills,
+        profileId: selectedProfileId || undefined,
       });
     },
-    [query, selectedAnalysisSkills, submitAnalysis],
+    [query, selectedAnalysisSkills, selectedProfileId, submitAnalysis],
   );
 
   const handleAskFollowUp = useCallback(() => {
@@ -341,8 +399,9 @@ const HomePage: React.FC = () => {
       selectionSource: 'manual',
       forceRefresh: true,
       skills: selectedAnalysisSkills,
+      profileId: selectedProfileId || undefined,
     });
-  }, [selectedAnalysisSkills, selectedReport, submitAnalysis]);
+  }, [selectedAnalysisSkills, selectedProfileId, selectedReport, submitAnalysis]);
 
   const pollMarketReviewStatus = useCallback(
     async (taskId: string) => {
@@ -570,6 +629,48 @@ const HomePage: React.FC = () => {
                   className={inputError ? 'border-danger/50' : undefined}
                 />
               </div>
+              {agentProfiles.length > 0 ? (
+                <div ref={profileMenuRef} className="relative flex-shrink-0">
+                  <button
+                    ref={profileButtonRef}
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={profileMenuOpen}
+                    onClick={() => setProfileMenuOpen((open) => !open)}
+                    disabled={isAnalyzing || agentProfiles.length === 0}
+                    className="home-surface-button flex h-10 max-w-[8.5rem] items-center gap-1.5 rounded-xl px-3 text-xs text-foreground disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[11rem]"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                    <span className="truncate">{selectedProfile?.name || '分析方案'}</span>
+                  </button>
+                  {profileMenuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-[120] mt-2 max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
+                    >
+                      {agentProfiles.map((profile) => {
+                        const selected = selectedProfileId === profile.id;
+                        return (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selected}
+                            onClick={() => selectProfile(profile.id)}
+                            className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover"
+                          >
+                            <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${selected ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
+                            <span className="min-w-0">
+                              <span className="block font-medium">{profile.name}</span>
+                              <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-text">{profile.description || profile.id}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {analysisSkills.length > 0 ? (
                 <div ref={strategyMenuRef} className="relative flex-shrink-0">
                   <button

@@ -337,6 +337,7 @@ def _handle_async_analysis_batch(
     selection_source = request.selection_source if (is_single or preserve_batch_metadata) else None
     notify = getattr(request, "notify", True)
     skills = getattr(request, "skills", None)
+    profile_id = getattr(request, "profile_id", None)
 
     submit_kwargs = dict(
         stock_codes=stock_codes,
@@ -349,6 +350,8 @@ def _handle_async_analysis_batch(
     )
     if skills is not None:
         submit_kwargs["skills"] = skills
+    if profile_id:
+        submit_kwargs["profile_id"] = profile_id
 
     accepted_tasks, duplicate_errors = task_queue.submit_tasks_batch(**submit_kwargs)
 
@@ -433,6 +436,7 @@ def _handle_sync_analysis(
             query_id=query_id,
             send_notification=getattr(request, "notify", True),
             skills=getattr(request, "skills", None),
+            profile_id=getattr(request, "profile_id", None),
         )
 
         if result is None:

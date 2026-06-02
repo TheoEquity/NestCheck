@@ -54,6 +54,7 @@ class AnalysisService:
         send_notification: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         skills: Optional[List[str]] = None,
+        profile_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         执行股票分析
@@ -93,6 +94,10 @@ class AnalysisService:
             
             # 获取配置
             config = get_config()
+            if profile_id:
+                from src.agent.configs.resolver import resolve_profile_runtime_config
+
+                config = resolve_profile_runtime_config(config, profile_id)
             
             # 创建分析流水线
             pipeline = StockAnalysisPipeline(
@@ -102,6 +107,7 @@ class AnalysisService:
                 query_source="api",
                 progress_callback=progress_callback,
                 analysis_skills=skills,
+                profile_id=profile_id,
             )
             
             # 确定报告类型 (API: simple/detailed/full/brief -> ReportType)

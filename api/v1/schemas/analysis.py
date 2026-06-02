@@ -77,6 +77,11 @@ class AnalyzeRequest(BaseModel):
         description="本次分析使用的策略 skill ID 列表；兼容 legacy strategies 字段",
         json_schema_extra={"example": ["bull_trend", "growth_quality"]},
     )
+    profile_id: Optional[str] = Field(
+        None,
+        description="本次分析使用的 Agent profile ID，用于选择执行方案",
+        json_schema_extra={"example": "stock_standard"},
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -88,7 +93,8 @@ class AnalyzeRequest(BaseModel):
             "original_query": "茅台",
             "selection_source": "autocomplete",
             "notify": True,
-            "skills": ["bull_trend"]
+            "skills": ["bull_trend"],
+            "profile_id": "stock_standard"
         }
     })
 

@@ -55,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 资产初始化页新增可展开的已建账户列表，支持回填当前账户信息与已入库资产；账户删除同步彻底清空该账户关联资产台账。
 - [改进] 资产初始化页的“风险分类”改为独立使用 `asset_risk_class` 字段，与系统原有 `risk_level` 语义隔离，避免混用。
 - [改进] 资产管理页升级为更高密度的组合监控台，新增账户维度总览、筛选后摘要和更完整的持仓明细列。
+- [新功能] 新增只读 Agent 管理页与 `/api/v1/agent-management/overview`，通过 `agent_configs/catalog.yaml` 配置定义层统一展示当前 Agent runtime、内置分析方案、专业 Agent、skills 与 tools。
+- [新功能] 问股 Agent 请求新增 `profile_id`，可将 `stock_quick`、`stock_standard`、`stock_full`、`stock_specialist` 映射到现有 multi-agent 编排模式执行。
+- [改进] Agent 管理页升级为 Profiles、专业 Agent、Tools、Skills 四页签，并支持在线编辑保存 `agent_configs/catalog.yaml` 与新增 profile/agent 流程节点。
+- [改进] Agent 管理页的专业 Agent 配置改为单 Agent 下拉编辑表单，tools 与 skills 支持从清单中多选后写入 catalog YAML。
+- [改进] Agent 管理页的 Profiles 配置改为单 Profile 下拉编辑表单，workflow 支持从专业 Agent 清单中下拉添加节点。
+- [改进] 个股分析台接入 Agent `profile_id`，支持从 stock profiles 选择执行方案并映射到 multi-agent 编排模式。
+- [新功能] 关注标的页新增指数、个股、基金分组管理，支持关注属性维护并聚合现有告警规则与触发历史。
 
 ## [3.18.0] - 2026-05-21
 

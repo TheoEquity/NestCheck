@@ -25,6 +25,7 @@ type SubmitAnalysisOptions = {
   notify?: boolean;
   forceRefresh?: boolean;
   skills?: string[];
+  profileId?: string;
 };
 
 let reportRequestSeq = 0;
@@ -315,6 +316,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     const notify = options?.notify ?? state.notify;
     const forceRefresh = options?.forceRefresh ?? false;
     const skills = options?.skills;
+    const profileId = options?.profileId;
 
     if (!stockCodeInput) {
       set({ inputError: '请输入股票代码', duplicateError: null });
@@ -354,6 +356,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
         notify,
         forceRefresh,
         skills,
+        profileId,
       });
 
       if (requestId !== analyzeRequestSeq) {

@@ -77,6 +77,7 @@ class TaskInfo:
     original_query: Optional[str] = None
     selection_source: Optional[str] = None
     skills: Optional[List[str]] = None
+    profile_id: Optional[str] = None
     trace_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
@@ -97,6 +98,7 @@ class TaskInfo:
             "original_query": self.original_query,
             "selection_source": self.selection_source,
             "skills": self.skills,
+            "profile_id": self.profile_id,
         }
     
     def copy(self) -> 'TaskInfo':
@@ -117,6 +119,7 @@ class TaskInfo:
             original_query=self.original_query,
             selection_source=self.selection_source,
             skills=list(self.skills) if self.skills is not None else None,
+            profile_id=self.profile_id,
             trace_id=self.trace_id or self.task_id,
         )
 
@@ -312,6 +315,7 @@ class AnalysisTaskQueue:
         report_type: str = "detailed",
         force_refresh: bool = False,
         skills: Optional[List[str]] = None,
+        profile_id: Optional[str] = None,
     ) -> TaskInfo:
         """
         Submit a single analysis task.
@@ -342,6 +346,7 @@ class AnalysisTaskQueue:
             report_type=report_type,
             force_refresh=force_refresh,
             skills=skills,
+            profile_id=profile_id,
         )
         if duplicates:
             raise duplicates[0]
@@ -357,6 +362,7 @@ class AnalysisTaskQueue:
         force_refresh: bool = False,
         notify: bool = True,
         skills: Optional[List[str]] = None,
+        profile_id: Optional[str] = None,
     ) -> Tuple[List[TaskInfo], List[DuplicateTaskError]]:
         """
         Submit analysis tasks in batch.
@@ -396,6 +402,7 @@ class AnalysisTaskQueue:
                     original_query=original_query,
                     selection_source=selection_source,
                     skills=task_skills,
+                    profile_id=profile_id,
                 )
                 self._tasks[task_id] = task_info
                 self._analyzing_stocks[dedupe_key] = task_id
@@ -409,6 +416,7 @@ class AnalysisTaskQueue:
                         force_refresh,
                         notify,
                         task_skills,
+                        profile_id,
                     )
                 except Exception:
                     # Roll back the current batch to avoid partial submission.
@@ -594,6 +602,7 @@ class AnalysisTaskQueue:
         force_refresh: bool,
         notify: bool = True,
         skills: Optional[List[str]] = None,
+        profile_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         执行分析任务（在线程池中运行）
@@ -648,6 +657,7 @@ class AnalysisTaskQueue:
                 send_notification=notify,
                 progress_callback=_on_progress,
                 skills=skills,
+                profile_id=profile_id,
             )
             reset_run_diagnostic_context(diag_token)
             diag_token = None

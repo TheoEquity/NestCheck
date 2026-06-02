@@ -17,10 +17,12 @@ from api.v1.endpoints import (
     system_config,
     auth,
     agent,
+    agent_management,
     usage,
     portfolio,
     alerts,
     funds,
+    watchlist,
 )
 __all__ = [
     "health",
@@ -31,8 +33,10 @@ __all__ = [
     "system_config",
     "auth",
     "agent",
+    "agent_management",
     "usage",
     "portfolio",
     "alerts",
     "funds",
+    "watchlist",
 ]

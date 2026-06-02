@@ -1,0 +1,167 @@
+version: 1
+profiles:
+  - id: stock_quick
+    name: 个股快速分析
+    asset_type: stock
+    status: available
+    mode: quick
+    workflow:
+      - technical
+      - decision
+    description: 适合快速判断趋势与关键价位。
+
+  - id: stock_standard
+    name: 个股标准分析
+    asset_type: stock
+    status: available
+    mode: standard
+    workflow:
+      - technical
+      - intel
+      - decision
+    description: 适合日常问股，兼顾技术面和消息面。
+
+  - id: stock_full
+    name: 个股深度分析
+    asset_type: stock
+    status: available
+    mode: full
+    workflow:
+      - technical
+      - intel
+      - risk
+      - decision
+    description: 适合需要明确风险过滤的深度分析。
+
+  - id: stock_specialist
+    name: 个股专家分析
+    asset_type: stock
+    status: available
+    mode: specialist
+    workflow:
+      - technical
+      - intel
+      - risk
+      - skill
+      - decision
+    description: 适合结合特定策略 skill 的专项研究。
+
+  - id: fund_analysis
+    name: 基金分析
+    asset_type: fund
+    status: planned
+    mode: fund
+    workflow:
+      - fund_nav
+      - fund_holding
+      - fund_risk
+      - fund_decision
+    description: 后续扩展为基金净值、持仓、风险和决策专用 Agent。
+
+  - id: market_review
+    name: 大盘复盘
+    asset_type: market
+    status: planned
+    mode: market
+    workflow:
+      - market_context
+      - market_risk
+      - market_decision
+    description: 后续扩展为大盘环境、指数与风险联动复盘 Agent。
+
+  - id: portfolio_diagnosis
+    name: 组合诊断
+    asset_type: portfolio
+    status: planned
+    mode: portfolio
+    workflow:
+      - portfolio
+    description: 后续面向持仓组合做集中度、风险和再平衡诊断。
+
+agents:
+  - id: technical
+    name: TechnicalAgent
+    display_name: 技术分析 Agent
+    description: 负责行情、K 线、均线、量能、形态和筹码分析。
+    type: llm_agent
+    max_steps: 6
+    tools:
+      - get_realtime_quote
+      - get_daily_history
+      - analyze_trend
+      - calculate_ma
+      - get_volume_analysis
+      - analyze_pattern
+      - get_chip_distribution
+      - get_analysis_context
+    skills:
+      routing: auto
+    prompt:
+      system: |
+        You are a Technical Analysis Agent specialising in Chinese A-shares, Hong Kong stocks, and US equities.
+        Focus on trend, MA alignment, volume, chart patterns, support and resistance.
+
+  - id: intel
+    name: IntelAgent
+    display_name: 情报分析 Agent
+    description: 负责新闻、公告、综合情报、资金流和催化因素分析。
+    type: llm_agent
+    max_steps: 4
+    tools:
+      - search_stock_news
+      - search_comprehensive_intel
+      - get_stock_info
+      - get_capital_flow
+    skills:
+      routing: auto
+    prompt:
+      system: |
+        You are an Intelligence and Sentiment Agent.
+        Gather news, announcements, capital flow, catalysts and risk signals for the target asset.
+
+  - id: risk
+    name: RiskAgent
+    display_name: 风险筛查 Agent
+    description: 负责减持、业绩预警、监管、估值异常和技术破位等风险筛查。
+    type: llm_agent
+    max_steps: 4
+    tools:
+      - search_stock_news
+      - get_realtime_quote
+      - get_stock_info
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        You are a Risk Screening Agent.
+        Identify insider sell-downs, earnings warnings, regulatory actions, valuation anomalies and technical breakdowns.
+
+  - id: decision
+    name: DecisionAgent
+    display_name: 决策汇总 Agent
+    description: 汇总前置 Agent 观点并生成最终建议。
+    type: llm_agent
+    max_steps: 3
+    tools: []
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        You are a Decision Synthesis Agent.
+        Combine upstream opinions into a concise actionable recommendation.
+
+  - id: portfolio
+    name: PortfolioAgent
+    display_name: 组合分析 Agent
+    description: 面向多标的组合做仓位、集中度和再平衡分析。
+    type: llm_agent
+    max_steps: null
+    tools:
+      - get_realtime_quote
+      - get_stock_info
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        You are a portfolio analyst.
+        Assess position sizing, concentration, correlation, cross-market linkage and rebalance suggestions.

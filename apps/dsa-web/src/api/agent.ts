@@ -9,6 +9,7 @@ export interface ChatStreamOptions {
 export interface ChatRequest {
   message: string;
   skills?: string[];
+  profile_id?: string;
 }
 
 export interface ChatStreamRequest extends ChatRequest {

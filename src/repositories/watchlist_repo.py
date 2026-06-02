@@ -61,6 +61,28 @@ class WatchlistRepository:
             ).scalars().all()
             return list(rows), int(total)
 
+    def list_analysis_targets(self, frequency: str = "daily") -> List[WatchlistItem]:
+        """获取需进行分析的标的列表。
+        
+        Args:
+            frequency: 分析频率，默认仅获取每日 (daily) 关注的标的。
+            
+        Returns:
+            符合频率且启用的关注标的列表。
+        """
+        with self.db.get_session() as session:
+            stmt = (
+                select(WatchlistItem)
+                .where(
+                    WatchlistItem.watch_enabled == True,
+                    WatchlistItem.analysis_enabled == True,
+                    WatchlistItem.analysis_frequency == frequency,
+                )
+                .order_by(WatchlistItem.id.asc())
+            )
+            rows = session.execute(stmt).scalars().all()
+            return list(rows)
+
     def update_item(self, item_id: int, fields: Dict[str, Any]) -> Optional[WatchlistItem]:
         with self.db.get_session() as session:
             row = session.execute(

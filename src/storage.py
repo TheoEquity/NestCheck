@@ -839,55 +839,236 @@ class AlertTriggerRecord(Base):
     diagnostics = Column(Text)
 
     __table_args__ = (
-        Index('ix_alert_trigger_rule_time', 'rule_id', 'triggered_at'),
-    )
-
-
-class AlertNotificationRecord(Base):
-    """Notification attempt row for alert triggers.
-
-    P1 exposes read APIs and table shape; runtime writer integration lands in
-    later phases.
-    """
-
-    __tablename__ = 'alert_notifications'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    trigger_id = Column(Integer, index=True)
-    channel = Column(String(32), nullable=False, index=True)
-    attempt = Column(Integer, nullable=False, default=1)
-    success = Column(Boolean, nullable=False, default=False, index=True)
-    error_code = Column(String(64))
-    retryable = Column(Boolean, nullable=False, default=False)
-    latency_ms = Column(Integer)
-    diagnostics = Column(Text)
-    created_at = Column(DateTime, default=datetime.now, index=True)
-
-    __table_args__ = (
-        Index('ix_alert_notification_trigger_channel', 'trigger_id', 'channel'),
+        Index('ix_alert_notification_rule_time', 'rule_id', 'triggered_at'),
     )
 
 
 class AlertCooldownRecord(Base):
-    """Persisted alert cooldown state for DB-managed alert rules."""
+    """Alert cooldown tracking per rule/target/severity."""
 
     __tablename__ = 'alert_cooldowns'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    rule_id = Column(Integer, index=True)
-    # Reserved for future non-DB/expanded-scope rules; P4 queries by rule_id.
-    rule_key = Column(String(255), index=True)
-    target = Column(String(64), nullable=False, index=True)
-    severity = Column(String(16), nullable=False, default='warning', index=True)
-    last_triggered_at = Column(DateTime, index=True)
-    cooldown_until = Column(DateTime, index=True)
+    rule_id = Column(Integer, index=True, nullable=False)
+    rule_key = Column(String(64))
+    target = Column(String(64), nullable=False)
+    severity = Column(String(16))
+    last_triggered_at = Column(DateTime)
+    cooldown_until = Column(DateTime)
     reason = Column(Text)
-    state = Column(String(16), nullable=False, default='active', index=True)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+    state = Column(String(16), nullable=False, default='active')
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AlertNotificationRecord(Base):
+    """Alert notification delivery tracking."""
+
+    __tablename__ = 'alert_notifications'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trigger_id = Column(Integer, index=True, nullable=False)
+    channel = Column(String(32), nullable=False)
+    success = Column(Integer)  # 0/1 boolean proxy
+    details = Column(Text)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+# === 基金模块数据模型 ===
+
+class FundInfo(Base):
+    """基金基本信息"""
+    __tablename__ = 'fund_info'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fund_code = Column(String(10), unique=True, nullable=False, index=True)
+    fund_name = Column(String(100), nullable=False)
+    fund_type = Column(String(30))       # 股票型/混合型/债券型/指数型/QDII/FOF/货币
+    fund_manager = Column(String(50))
+    management_company = Column(String(100))
+    custodian = Column(String(100))
+    inception_date = Column(Date)
+    fund_size = Column(Float)            # 规模（亿元）
+    management_fee = Column(Float)       # 管理费率
+    custodian_fee = Column(Float)        # 托管费率
+    benchmark = Column(String(500))      # 业绩比较基准
+    investment_target = Column(Text)     # 投资目标
+    investment_strategy = Column(Text)   # 投资策略
+    risk_level = Column(String(20))      # 低/中低/中/中高/高
+    status = Column(String(20), default='normal')  # normal/closed
+    last_fetch_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     __table_args__ = (
-        UniqueConstraint('rule_id', 'target', 'severity', name='uix_alert_cooldown_rule_target_severity'),
+        Index('ix_fund_info_name', 'fund_name'),
+        Index('ix_fund_info_type', 'fund_type'),
+        Index('ix_fund_info_manager', 'fund_manager'),
     )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'fund_code': self.fund_code,
+            'fund_name': self.fund_name,
+            'fund_type': self.fund_type,
+            'fund_manager': self.fund_manager,
+            'management_company': self.management_company,
+            'custodian': self.custodian,
+            'inception_date': str(self.inception_date) if self.inception_date else None,
+            'fund_size': self.fund_size,
+            'management_fee': self.management_fee,
+            'custodian_fee': self.custodian_fee,
+            'benchmark': self.benchmark,
+            'investment_target': self.investment_target,
+            'investment_strategy': self.investment_strategy,
+            'risk_level': self.risk_level,
+            'status': self.status,
+        }
+
+
+class FundDailyNav(Base):
+    """基金每日净值"""
+    __tablename__ = 'fund_daily_nav'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fund_code = Column(String(10), nullable=False, index=True)
+    nav_date = Column(Date, nullable=False, index=True)
+    unit_nav = Column(Float)             # 单位净值
+    accumulated_nav = Column(Float)      # 累计净值
+    daily_return = Column(Float)         # 日收益率(%)
+    daily_change = Column(Float)         # 日涨跌额
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('fund_code', 'nav_date', name='uix_fund_code_nav_date'),
+        Index('ix_fund_daily_nav_code_date', 'fund_code', 'nav_date'),
+        Index('ix_fund_daily_nav_date', 'nav_date'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'fund_code': self.fund_code,
+            'nav_date': str(self.nav_date) if self.nav_date else None,
+            'unit_nav': self.unit_nav,
+            'accumulated_nav': self.accumulated_nav,
+            'daily_return': self.daily_return,
+            'daily_change': self.daily_change,
+        }
+
+
+class FundHolding(Base):
+    """基金持仓明细"""
+    __tablename__ = 'fund_holding'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fund_code = Column(String(10), nullable=False, index=True)
+    report_date = Column(Date, nullable=False, index=True)
+    stock_code = Column(String(10), nullable=False)
+    stock_name = Column(String(50), nullable=False)
+    stock_market = Column(String(10))    # A/HK/US
+    holding_pct = Column(Float)          # 占净值比例(%)
+    holding_shares = Column(Float)       # 持仓股数（万股）
+    holding_amount = Column(Float)       # 持仓金额（万元）
+    rank = Column(Integer)               # 持仓排名（1-10）
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('fund_code', 'report_date', 'stock_code', name='uix_fund_holding_uniq'),
+        Index('ix_fund_holding_code_date', 'fund_code', 'report_date'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'fund_code': self.fund_code,
+            'report_date': str(self.report_date) if self.report_date else None,
+            'stock_code': self.stock_code,
+            'stock_name': self.stock_name,
+            'stock_market': self.stock_market,
+            'holding_pct': self.holding_pct,
+            'holding_shares': self.holding_shares,
+            'holding_amount': self.holding_amount,
+            'rank': self.rank,
+        }
+
+
+class FundPerformance(Base):
+    """基金业绩指标"""
+    __tablename__ = 'fund_performance'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fund_code = Column(String(10), nullable=False, index=True)
+    calc_date = Column(Date, nullable=False)
+    period = Column(String(20), nullable=False)  # 1m/3m/6m/1y/3y/5y/since
+    return_pct = Column(Float)           # 区间收益率(%)
+    benchmark_return = Column(Float)     # 基准收益率(%)
+    excess_return = Column(Float)        # 超额收益(%)
+    max_drawdown = Column(Float)         # 最大回撤(%)
+    sharpe_ratio = Column(Float)
+    volatility = Column(Float)
+    sortino_ratio = Column(Float)
+    information_ratio = Column(Float)
+    rank_in_category = Column(Integer)
+    total_in_category = Column(Integer)
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('fund_code', 'calc_date', 'period', name='uix_fund_perf_uniq'),
+        Index('ix_fund_performance_code_date', 'fund_code', 'calc_date'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'fund_code': self.fund_code,
+            'calc_date': str(self.calc_date) if self.calc_date else None,
+            'period': self.period,
+            'return_pct': self.return_pct,
+            'benchmark_return': self.benchmark_return,
+            'excess_return': self.excess_return,
+            'max_drawdown': self.max_drawdown,
+            'sharpe_ratio': self.sharpe_ratio,
+            'volatility': self.volatility,
+            'sortino_ratio': self.sortino_ratio,
+            'information_ratio': self.information_ratio,
+            'rank_in_category': self.rank_in_category,
+            'total_in_category': self.total_in_category,
+        }
+
+
+class FundReport(Base):
+    """基金分析报告"""
+    __tablename__ = 'fund_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fund_code = Column(String(10), nullable=False, index=True)
+    query_text = Column(Text)            # 用户查询原文
+    report_type = Column(String(30), default='normal')  # normal/compare/macro
+    report_json = Column(Text)           # 完整报告 JSON
+    report_markdown = Column(Text)       # 渲染用 Markdown
+    analysis_duration = Column(Float)    # 分析耗时（秒）
+    data_sources = Column(Text)          # JSON 列表
+    status = Column(String(20), default='completed')  # pending/computing/completed/failed
+    error_info = Column(Text)            # 失败原因
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index('ix_fund_reports_code_date', 'fund_code', 'created_at'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'fund_code': self.fund_code,
+            'query_text': self.query_text,
+            'report_type': self.report_type,
+            'report_json': self.report_json,
+            'report_markdown': self.report_markdown,
+            'analysis_duration': self.analysis_duration,
+            'status': self.status,
+            'error_info': self.error_info,
+            'created_at': str(self.created_at) if self.created_at else None,
+        }
 
 
 class _DatabaseManagerMeta(type):

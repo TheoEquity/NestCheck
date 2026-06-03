@@ -294,38 +294,38 @@ const AssetDashboardPage: React.FC = () => {
               <Gauge
                 title="A 股情绪"
                 unit=""
-                value={marketRisk.chineseVix.value ?? 0}
+                value={marketRisk.chineseVix?.value ?? 0}
                 minValue={0}
                 maxValue={50}
                 segments={GAUGE_SEGMENTS.sentiment}
-                description={marketRisk.chineseVix.description}
+                description={marketRisk.chineseVix?.description}
               />
               <Gauge
                 title="美股情绪"
                 unit=""
-                value={marketRisk.usVix.value ?? 0}
+                value={marketRisk.usVix?.value ?? 0}
                 minValue={0}
                 maxValue={50}
                 segments={GAUGE_SEGMENTS.sentiment}
-                description={marketRisk.usVix.description}
+                description={marketRisk.usVix?.description}
               />
               <Gauge
                 title="美元强弱"
                 unit=""
-                value={marketRisk.dollarStrength.value ?? 7.0}
+                value={marketRisk.dollarStrength?.value ?? 7.0}
                 minValue={6.5}
                 maxValue={7.8}
                 segments={GAUGE_SEGMENTS.fx}
-                description={marketRisk.dollarStrength.description}
+                description={marketRisk.dollarStrength?.description}
               />
               <Gauge
                 title="中美利差"
                 unit="%"
-                value={marketRisk.bondSpread.spread ?? 0}
+                value={marketRisk.bondSpread?.spread ?? 0}
                 minValue={-2}
                 maxValue={4}
                 segments={GAUGE_SEGMENTS.spread}
-                description={marketRisk.bondSpread.description}
+                description={marketRisk.bondSpread?.description}
               />
             </div>
           )}

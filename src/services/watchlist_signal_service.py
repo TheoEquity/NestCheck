@@ -33,6 +33,14 @@ LIGHT_LABELS = {
     "L_TECH": "周线节奏",
 }
 
+FUND_LIGHT_LABELS = {
+    "F_RANK_1M": "近1月排名",
+    "F_RANK_3M": "近3月排名",
+    "F_RANK_1Y": "近1年排名",
+    "F_MGR": "基金经理",
+    "F_DRAWDOWN": "近1年回撤",
+}
+
 SECTOR_TAGS = {"stable", "cyclical", "financial"}
 CYCLICAL_HINTS = ("煤", "钢", "有色", "矿", "化工", "石油", "油", "航运", "资源")
 FINANCIAL_HINTS = ("银行", "保险", "证券", "券商", "金融", "信托")
@@ -60,13 +68,18 @@ def _first_float(row: Any, keys: Iterable[str]) -> Optional[float]:
 
 
 def _light(code: str, status: str, reason: str, value: Optional[float] = None) -> Dict[str, Any]:
+    labels = LIGHT_LABELS if code in LIGHT_LABELS else FUND_LIGHT_LABELS
     return {
         "code": code,
-        "label": LIGHT_LABELS[code],
+        "label": labels.get(code, code),
         "status": status,
         "reason": reason,
         "value": value,
     }
+
+
+def _fund_light(code: str, status: str, reason: str, value: Optional[float] = None) -> Dict[str, Any]:
+    return _light(code, status, reason, value)
 
 
 def _compound_pct(values: List[float]) -> Optional[float]:
@@ -130,13 +143,14 @@ class WatchlistSignalService:
             item = session.execute(select(WatchlistItem).where(WatchlistItem.id == item_id)).scalar_one_or_none()
             if item is None:
                 raise ValueError(f"关注标的不存在: {item_id}")
-            if item.asset_category != "stock":
-                raise ValueError("当前只支持股票关注标的红绿灯刷新")
+            if item.asset_category not in ("stock", "fund"):
+                raise ValueError(f"当前不支持 {item.asset_category} 关注标的红绿灯刷新")
             session.expunge(item)
         return self.refresh_item(item)
 
     def refresh_item(self, item: WatchlistItem) -> Dict[str, Any]:
-        self._backfill_daily_data(item.symbol)
+        if item.asset_category == "stock":
+            self._backfill_daily_data(item.symbol)
         indicator, flags = self._build_indicator(item)
         signal = self._calculate_signal(indicator, flags)
         self._save_indicator_and_signal(item, indicator, signal)
@@ -183,6 +197,34 @@ class WatchlistSignalService:
                 session.expunge(row)
             return list(rows)
 
+    def _list_enabled_fund_items(self) -> List[WatchlistItem]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(WatchlistItem)
+                .where(WatchlistItem.watch_enabled == True, WatchlistItem.asset_category == "fund")
+                .order_by(WatchlistItem.id.asc())
+            ).scalars().all()
+            for row in rows:
+                session.expunge(row)
+            return list(rows)
+
+    def refresh_enabled_funds(self) -> Dict[str, Any]:
+        items = self._list_enabled_fund_items()
+        results = []
+        for item in items:
+            try:
+                results.append(self.refresh_item(item))
+            except Exception as exc:
+                logger.warning("Watchlist signal refresh failed for fund %s: %s", item.symbol, exc, exc_info=True)
+                results.append({"item_id": item.id, "symbol": item.symbol, "status": "failed", "error": str(exc)})
+        return {
+            "status": "success",
+            "total": len(items),
+            "success": sum(1 for item in results if item.get("status") == "success"),
+            "failed": sum(1 for item in results if item.get("status") == "failed"),
+            "items": results,
+        }
+
     def _backfill_daily_data(self, symbol: str) -> None:
         code = normalize_stock_code(symbol)
         manager = DataFetcherManager()
@@ -192,9 +234,16 @@ class WatchlistSignalService:
 
     def _build_indicator(self, item: WatchlistItem) -> Tuple[Dict[str, Any], List[str]]:
         flags: List[str] = []
+        today = date.today()
+        
+        if item.asset_category == "fund":
+            payload: Dict[str, Any] = {"symbol": item.symbol, "as_of_date": today, "asset_category": "fund"}
+            payload["risk_class"] = (item.asset_risk_class or "").strip()  # 传递 R 类
+            payload.update(self._build_fund_indicator(item, flags))
+            return payload, flags
+            
         symbol = normalize_stock_code(item.symbol)
         ts_code = _ts_code(symbol)
-        today = date.today()
         payload: Dict[str, Any] = {"symbol": symbol, "as_of_date": today, "sector_tag": _sector_tag(item)}
         payload.update(self._latest_price(symbol, flags))
         payload.update(self._weekly_metrics(symbol, flags))
@@ -314,6 +363,132 @@ class WatchlistSignalService:
         result["raw_payload"] = raw
         return result
 
+    def _build_fund_indicator(self, item: WatchlistItem, flags: List[str]) -> Dict[str, Any]:
+        """构建基金指标：同类排名、经理任职、近1年最大回撤。"""
+        result: Dict[str, Any] = {}
+        fund_code = item.symbol.strip()
+        
+        try:
+            import akshare as ak
+        except ImportError:
+            flags.append("akshare_unavailable")
+            return result
+            
+        # 1. 获取 Akshare 官方分类，确保按“户口本”参与同类排名
+        ak_type = "全部"  # 兜底
+        try:
+            info = ak.fund_individual_basic_info_xq(symbol=fund_code)
+            type_row = info[info["item"].astype(str).str.contains("基金类型")]
+            if not type_row.empty:
+                full_type = str(type_row.iloc[0]["value"]).strip()
+                # 取大类：如 "债券型-普通债券" -> "债券型"
+                main_type = full_type.split("-")[0]
+                # 映射到接口支持的 symbol
+                if any(k in main_type for k in ("股票", "混合", "偏股")):
+                    ak_type = "混合型"
+                elif "债券" in main_type:
+                    ak_type = "债券型"
+                elif "指数" in main_type:
+                    ak_type = "指数型"
+        except Exception as exc:
+            flags.append(f"fund_type_fetch_failed: {exc}")
+            
+        # 2. 拉取同类全榜单（已排序）
+        # 2. 拉取同类全榜单（已按近期维度默认排序）
+        try:
+            rank_df = ak.fund_open_fund_rank_em(symbol=ak_type)
+            matched = rank_df[rank_df["基金代码"].astype(str).str.zfill(6) == fund_code.zfill(6)]
+            
+            if not matched.empty:
+                total = len(rank_df)
+                
+                # 获取该基金的各项收益指标
+                row = matched.iloc[0]
+                ret_1m = _safe_float(row.get("近1月"))
+                ret_3m = _safe_float(row.get("近3月"))
+                ret_1y = _safe_float(row.get("近1年"))
+                
+                result["raw_rank_1m"] = ret_1m
+                result["raw_rank_3m"] = ret_3m
+                result["raw_rank_1y"] = ret_1y
+                
+                # 计算排名分位 (同类中超过多少比例的基金)
+                def calc_pct(col: str, val: Optional[float]) -> Optional[float]:
+                    if val is None:
+                        return None
+                    s = pd.to_numeric(rank_df[col], errors="coerce").dropna()
+                    cnt_better = (s > val).sum()
+                    cnt_total = len(s)
+                    if cnt_total == 0:
+                        return None
+                    return round(1.0 - (cnt_better / cnt_total), 4)
+                    
+                result["rank_1m_pct"] = calc_pct("近1月", ret_1m)
+                result["rank_3m_pct"] = calc_pct("近3月", ret_3m)
+                result["rank_1y_pct"] = calc_pct("近1年", ret_1y)
+            else:
+                flags.append("fund_not_in_rank_list")
+        except Exception as exc:
+            flags.append(f"fund_rank_fetch_failed: {exc}")
+            
+        # 3. 获取经理任职时长（Tushare fund_manager 接口）
+        try:
+            import tushare as ts
+            from datetime import datetime
+            pro = ts.pro_api()
+            mgr_df = pro.fund_manager(ts_code=f"{fund_code.zfill(6)}.OF")
+            if mgr_df is not None and not mgr_df.empty:
+                # 筛选现任经理（end_date 为空或 None）
+                current_mgrs = mgr_df[mgr_df["end_date"].isna()]
+                if not current_mgrs.empty:
+                    # 计算每位现任经理的任职天数，取最短的
+                    today = datetime.now()
+                    mgr_years_list = []
+                    for _, mgr in current_mgrs.iterrows():
+                        begin = mgr.get("begin_date")
+                        if begin and len(str(begin)) == 8:
+                            import re
+                            begin_str = str(int(begin))
+                            begin_dt = datetime.strptime(begin_str, "%Y%m%d")
+                            mgr_days = (today - begin_dt).days
+                            mgr_years_list.append(mgr_days / 365.25)
+                    if mgr_years_list:
+                        result["mgr_years"] = min(mgr_years_list)
+        except Exception as exc:
+            flags.append(f"fund_manager_fetch_failed: {exc}")
+            
+        # 4. 获取近1年最大回撤（优先从 analysis 接口获取）
+        try:
+            analysis = ak.fund_individual_analysis_xq(symbol=fund_code)
+            if analysis is not None and not analysis.empty:
+                yr_row = analysis[analysis["周期"].astype(str) == "近1年"]
+                if not yr_row.empty:
+                    dd_val = _safe_float(yr_row.iloc[0].get("最大回撤"))
+                    if dd_val is not None:
+                        result["max_drawdown_1y"] = abs(dd_val)
+        except Exception as exc:
+            flags.append(f"fund_drawdown_fetch_failed: {exc}")
+            
+        # 5. 回撤兜底：用净值序列计算
+        if result.get("max_drawdown_1y") is None:
+            try:
+                nav_df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+                if nav_df is not None and not nav_df.empty:
+                    dates = pd.to_datetime(nav_df.iloc[:, 0])
+                    navs = pd.to_numeric(nav_df.iloc[:, 1], errors="coerce")
+                    valid = pd.DataFrame({"date": dates, "nav": navs}).dropna()
+                    if len(valid) > 5:
+                        valid = valid.sort_values("date").reset_index(drop=True)
+                        window = min(len(valid), 250)
+                        lookback = valid.iloc[-window:]
+                        peak = lookback["nav"].expanding().max()
+                        drawdowns = (peak - lookback["nav"]) / peak * 100
+                        result["max_drawdown_1y"] = _safe_float(drawdowns.max())
+            except Exception as exc:
+                flags.append(f"fund_nav_drawdown_calc_failed: {exc}")
+                
+        return result
+
     def _ts_query(self, api: Any, api_name: str, flags: List[str], **params: Any) -> Optional[pd.DataFrame]:
         try:
             df = api.query(api_name, **params)
@@ -331,13 +506,19 @@ class WatchlistSignalService:
         return df.sort_values(sort_col, ascending=False).iloc[0]
 
     def _calculate_signal(self, indicator: Dict[str, Any], flags: List[str]) -> Dict[str, Any]:
-        lights = [
-            self._calc_val_light(indicator, flags),
-            self._calc_quality_light(indicator),
-            self._calc_solvency_light(indicator),
-            self._calc_pay_light(indicator),
-            self._calc_tech_light(indicator, flags),
-        ]
+        asset_cat = indicator.get("asset_category") or "stock"
+        
+        if asset_cat == "fund":
+            lights = self._calc_fund_lights(indicator, flags)
+        else:
+            lights = [
+                self._calc_val_light(indicator, flags),
+                self._calc_quality_light(indicator),
+                self._calc_solvency_light(indicator),
+                self._calc_pay_light(indicator),
+                self._calc_tech_light(indicator, flags),
+            ]
+            
         red = sum(1 for light in lights if light["status"] == "R")
         green = sum(1 for light in lights if light["status"] == "G")
         if red >= 2:
@@ -438,6 +619,83 @@ class WatchlistSignalService:
             return _light("L_TECH", "G", reason)
         reason = "周线 MA5 在 MA10 下方" if prev10 < prev30 else "周线 MA5 下穿 MA10"
         return _light("L_TECH", "R", reason)
+
+    def _calc_fund_lights(self, indicator: Dict[str, Any], flags: List[str]) -> List[Dict[str, Any]]:
+        """计算基金 5 灯状态。"""
+        risk_class = (indicator.get("risk_class") or "").upper()
+        
+        if risk_class == "R2":
+            max_dd_g = 3.0
+            dd_type = "R2纯债"
+        elif risk_class == "R3":
+            max_dd_g = 8.0
+            dd_type = "R3固收+"
+        elif risk_class == "R4":
+            max_dd_g = 15.0
+            dd_type = "R4股混"
+        elif risk_class == "R5":
+            max_dd_g = 20.0
+            dd_type = "R5高波"
+        else:
+            max_dd_g = 20.0
+            dd_type = "基金"
+            
+        lights = []
+        
+        p1m = _safe_float(indicator.get("rank_1m_pct"))
+        if p1m is not None:
+            if p1m >= 0.7:
+                lights.append(_fund_light("F_RANK_1M", "G", f"近1月同类排名前30% ({p1m:.0%})"))
+            elif p1m >= 0.5:
+                lights.append(_fund_light("F_RANK_1M", "Y", f"近1月同类排名前30-50% ({p1m:.0%})"))
+            else:
+                lights.append(_fund_light("F_RANK_1M", "R", f"近1月同类排名50%后 ({p1m:.0%})"))
+        else:
+            lights.append(_fund_light("F_RANK_1M", "Y", "近1月排名数据缺失"))
+            
+        p3m = _safe_float(indicator.get("rank_3m_pct"))
+        if p3m is not None:
+            if p3m >= 0.7:
+                lights.append(_fund_light("F_RANK_3M", "G", f"近3月同类排名前30% ({p3m:.0%})"))
+            elif p3m >= 0.5:
+                lights.append(_fund_light("F_RANK_3M", "Y", f"近3月同类排名前30-50% ({p3m:.0%})"))
+            else:
+                lights.append(_fund_light("F_RANK_3M", "R", f"近3月同类排名50%后 ({p3m:.0%})"))
+        else:
+            lights.append(_fund_light("F_RANK_3M", "Y", "近3月排名数据缺失"))
+            
+        p1y = _safe_float(indicator.get("rank_1y_pct"))
+        if p1y is not None:
+            if p1y >= 0.7:
+                lights.append(_fund_light("F_RANK_1Y", "G", f"近1年同类排名前30% ({p1y:.0%})"))
+            elif p1y >= 0.5:
+                lights.append(_fund_light("F_RANK_1Y", "Y", f"近1年同类排名前30-50% ({p1y:.0%})"))
+            else:
+                lights.append(_fund_light("F_RANK_1Y", "R", f"近1年同类排名50%后 ({p1y:.0%})"))
+        else:
+            lights.append(_fund_light("F_RANK_1Y", "Y", "近1年排名数据缺失"))
+            
+        mgr_years = _safe_float(indicator.get("mgr_years"))
+        if mgr_years is not None:
+            if mgr_years > 3:
+                lights.append(_fund_light("F_MGR", "G", f"基金经理任职超3年 ({mgr_years:.1f}年)"))
+            elif mgr_years < 0.25:
+                lights.append(_fund_light("F_MGR", "R", f"基金经理任职不足3个月 ({mgr_years*12:.1f}个月))"))
+            else:
+                lights.append(_fund_light("F_MGR", "Y", f"基金经理任职{mgr_years:.1f}年"))
+        else:
+            lights.append(_fund_light("F_MGR", "Y", "经理任职时长未知"))
+            
+        dd = _safe_float(indicator.get("max_drawdown_1y"))
+        if dd is not None and dd >= 0:
+            if dd < max_dd_g:
+                lights.append(_fund_light("F_DRAWDOWN", "G", f"{dd_type}回撤{dd:.1f}% < {max_dd_g}%"))
+            else:
+                lights.append(_fund_light("F_DRAWDOWN", "R", f"{dd_type}回撤{dd:.1f}% >= {max_dd_g}%"))
+        else:
+            lights.append(_fund_light("F_DRAWDOWN", "Y", "近1年回撤数据缺失"))
+            
+        return lights
 
     def _save_indicator_and_signal(self, item: WatchlistItem, indicator: Dict[str, Any], signal: Dict[str, Any]) -> None:
         as_of_date = indicator.get("as_of_date") or date.today()

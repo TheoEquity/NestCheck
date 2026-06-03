@@ -27,6 +27,7 @@ try:
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
     from apscheduler.triggers.date import DateTrigger
+    from apscheduler.events import EVENT_SCHEDULER_SHUTDOWN
     HAS_APSCHEDULER = True
 except ImportError:
     HAS_APSCHEDULER = False
@@ -299,7 +300,7 @@ class Scheduler:
         # 注册退出事件
         self.scheduler.add_listener(
             self._on_scheduler_shutdown,
-            signal=signal.SIGTERM | signal.SIGINT,
+            EVENT_SCHEDULER_SHUTDOWN,
         )
 
         try:
@@ -318,9 +319,10 @@ class Scheduler:
         """获取下次执行时间"""
         jobs = self.scheduler.get_jobs()
         if jobs:
-            next_job = min(jobs, key=lambda j: j.next_run_time or datetime.max)
-            if next_job.next_run_time:
-                return next_job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')
+            next_job = min(jobs, key=lambda j: getattr(j, 'next_run_time', None) or datetime.max)
+            run_time = getattr(next_job, 'next_run_time', None)
+            if run_time:
+                return run_time.strftime('%Y-%m-%d %H:%M:%S')
         return "未设置"
 
     def stop(self):

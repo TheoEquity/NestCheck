@@ -315,6 +315,13 @@ def _run_price_refresh():
             signal_result.get("failed", 0),
         )
 
+        fund_result = WatchlistSignalService().refresh_enabled_funds()
+        logger.info(
+            "Watchlist fund signal refresh: success=%d, failed=%d",
+            fund_result.get("success", 0),
+            fund_result.get("failed", 0),
+        )
+
         for cache_key in MARKET_CACHE_BUILDERS:
             if cache_key == "trend":
                 refresh_trend_realtime_quotes()

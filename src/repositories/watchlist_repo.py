@@ -14,6 +14,7 @@ from src.storage import (
     AlertTriggerRecord,
     AnalysisHistory,
     DatabaseManager,
+    FundDailyNav,
     MarketQuote,
     StockDaily,
     WatchlistIndicatorSnapshot,
@@ -44,6 +45,16 @@ class WatchlistRepository:
                 raise WatchlistConflictError("关注标的已存在") from exc
             session.refresh(row)
             return row
+
+    def _update_item_name(self, item_id: int, name: str) -> None:
+        from sqlalchemy import update
+        with self.db.get_session() as session:
+            session.execute(
+                update(WatchlistItem)
+                .where(WatchlistItem.id == item_id)
+                .values(name=name, updated_at=datetime.now())
+            )
+            session.commit()
 
     def get_item(self, item_id: int) -> Optional[WatchlistItem]:
         with self.db.get_session() as session:
@@ -190,36 +201,53 @@ class WatchlistRepository:
 
     def quote_summary_for_items(self, items: List[WatchlistItem]) -> Dict[int, Dict[str, Any]]:
         stock_items = [item for item in items if item.asset_category == "stock"]
+        fund_items = [item for item in items if item.asset_category == "fund"]
         summary: Dict[int, Dict[str, Any]] = {}
-        if not stock_items:
-            return summary
 
-        with self.db.get_session() as session:
-            for item in stock_items:
-                row = session.execute(
-                    select(MarketQuote)
-                    .where(MarketQuote.code == item.symbol, MarketQuote.market == item.market)
-                    .order_by(desc(MarketQuote.updated_at), desc(MarketQuote.id))
-                    .limit(1)
-                ).scalar_one_or_none()
-                if row is None:
-                    daily = session.execute(
-                        select(StockDaily)
-                        .where(StockDaily.code == item.symbol)
-                        .order_by(desc(StockDaily.date), desc(StockDaily.id))
+        if stock_items:
+            with self.db.get_session() as session:
+                for item in stock_items:
+                    row = session.execute(
+                        select(MarketQuote)
+                        .where(MarketQuote.code == item.symbol, MarketQuote.market == item.market)
+                        .order_by(desc(MarketQuote.updated_at), desc(MarketQuote.id))
                         .limit(1)
                     ).scalar_one_or_none()
-                    if daily is None:
+                    if row is None:
+                        daily = session.execute(
+                            select(StockDaily)
+                            .where(StockDaily.code == item.symbol)
+                            .order_by(desc(StockDaily.date), desc(StockDaily.id))
+                            .limit(1)
+                        ).scalar_one_or_none()
+                        if daily is None:
+                            continue
+                        summary[item.id] = {
+                            "latest_price": daily.close,
+                            "latest_change_pct": daily.pct_chg,
+                        }
                         continue
                     summary[item.id] = {
-                        "latest_price": daily.close,
-                        "latest_change_pct": daily.pct_chg,
+                        "latest_price": row.latest_price,
+                        "latest_change_pct": row.pct_change,
                     }
-                    continue
-                summary[item.id] = {
-                    "latest_price": row.latest_price,
-                    "latest_change_pct": row.pct_change,
-                }
+
+        if fund_items:
+            with self.db.get_session() as session:
+                for item in fund_items:
+                    nav = session.execute(
+                        select(FundDailyNav)
+                        .where(FundDailyNav.fund_code == item.symbol)
+                        .order_by(desc(FundDailyNav.nav_date), desc(FundDailyNav.id))
+                        .limit(1)
+                    ).scalar_one_or_none()
+                    if nav is None:
+                        continue
+                    summary[item.id] = {
+                        "latest_price": nav.unit_nav,
+                        "latest_change_pct": nav.daily_return,
+                    }
+
         return summary
 
     def stock_analysis_summary_for_items(self, items: List[WatchlistItem]) -> Dict[int, Dict[str, Any]]:

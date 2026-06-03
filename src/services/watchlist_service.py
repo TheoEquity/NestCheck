@@ -30,14 +30,19 @@ class WatchlistService:
 
     def create_item(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         row = self.repo.create_item(self._normalize_payload(payload))
+        row.name = self._resolve_official_name(row)
+        self.repo._update_item_name(row.id, row.name)
+        if row.asset_category == "fund":
+            self._seed_fund_nav(row.symbol)
         signal_summary = None
-        if row.asset_category == "stock" and row.watch_enabled:
+        if row.asset_category in ("stock", "fund") and row.watch_enabled:
             try:
                 WatchlistSignalService().refresh_item(row)
                 signal_summary = WatchlistSignalService().latest_signals_for_items([row.id]).get(row.id)
             except Exception as exc:
                 logger.warning("Watchlist initial signal refresh failed for %s: %s", row.symbol, exc, exc_info=True)
-        return self._serialize_item(row, signal_summary=signal_summary)
+        quote_summary = self.repo.quote_summary_for_items([row]).get(row.id, {})
+        return self._serialize_item(row, quote_summary=quote_summary, signal_summary=signal_summary)
 
     def list_items(
         self,
@@ -245,6 +250,73 @@ class WatchlistService:
             "created_at": self._dt(row.created_at),
             "updated_at": self._dt(row.updated_at),
         }
+
+    def _resolve_official_name(self, row: WatchlistItem) -> str:
+        """Resolve the official name from data sources. Falls back to the current name."""
+        try:
+            if row.asset_category == "fund":
+                return self._resolve_fund_name(row.symbol)
+            if row.asset_category == "stock":
+                return self._resolve_stock_name(row)
+        except Exception as exc:
+            logger.debug("Name resolution failed for %s/%s: %s", row.asset_category, row.symbol, exc)
+        return row.name or row.symbol
+
+    @staticmethod
+    def _resolve_fund_name(fund_code: str) -> str:
+        from src.storage import FundInfo, get_db
+        from src.repositories.fund_repo import FundRepository
+        db = get_db()
+        with db.get_session() as session:
+            info = session.query(FundInfo).filter_by(fund_code=fund_code).first()
+            if info and info.fund_name:
+                return info.fund_name
+        try:
+            import akshare as ak
+            df = ak.fund_name_em()
+            if df is not None and not df.empty:
+                match = df[df["基金代码"].astype(str) == fund_code]
+                if not match.empty:
+                    name = str(match.iloc[0].get("基金简称", "")).strip()
+                    if name:
+                        fund_repo = FundRepository()
+                        fund_repo.upsert_fund_info({
+                            "fund_code": fund_code,
+                            "fund_name": name,
+                            "fund_type": str(match.iloc[0].get("基金类型", "")).strip() or None,
+                        })
+                        return name
+        except Exception as e:
+            logger.debug("akshare fund_name_em failed [%s]: %s", fund_code, e)
+        return fund_code
+
+    def _resolve_stock_name(self, row: WatchlistItem) -> str:
+        try:
+            from data_provider.base import DataFetcherManager
+            manager = DataFetcherManager()
+            code = row.symbol
+            market = str(row.market or "cn").lower()
+            if market == "cn":
+                if code.startswith(("6", "9")):
+                    code = f"{code}.SH"
+                elif code.startswith(("0", "2", "3")):
+                    code = f"{code}.SZ"
+                elif code.startswith(("4", "8")):
+                    code = f"{code}.BJ"
+            name = manager.get_stock_name(code, allow_realtime=True)
+            if name:
+                return name
+        except Exception as e:
+            logger.debug("Stock name resolution failed [%s]: %s", row.symbol, e)
+        return row.name or row.symbol
+
+    def _seed_fund_nav(self, fund_code: str) -> None:
+        """Fetch and persist fund NAV data so the watchlist can display price/change."""
+        try:
+            from src.services.fund_service import FundService
+            FundService().fetch_and_save_nav(fund_code, days=90)
+        except Exception as e:
+            logger.debug("Seed fund NAV failed [%s]: %s", fund_code, e)
 
     @staticmethod
     def _display_symbol(row: WatchlistItem) -> str:

@@ -36,7 +36,6 @@ LIGHT_LABELS = {
 SECTOR_TAGS = {"stable", "cyclical", "financial"}
 CYCLICAL_HINTS = ("煤", "钢", "有色", "矿", "化工", "石油", "油", "航运", "资源")
 FINANCIAL_HINTS = ("银行", "保险", "证券", "券商", "金融", "信托")
-MIN_DAILY_ROWS_FOR_TECH = 55
 TARGET_DAILY_ROWS_FOR_INIT = 520
 
 
@@ -186,12 +185,6 @@ class WatchlistSignalService:
 
     def _backfill_daily_data(self, symbol: str) -> None:
         code = normalize_stock_code(symbol)
-        with self.db.get_session() as session:
-            existing_count = session.execute(
-                select(func.count(StockDaily.id)).where(StockDaily.code == code)
-            ).scalar() or 0
-        if int(existing_count) >= MIN_DAILY_ROWS_FOR_TECH:
-            return
         manager = DataFetcherManager()
         df, source = manager.get_daily_data(code, days=TARGET_DAILY_ROWS_FOR_INIT)
         if df is not None and not df.empty:

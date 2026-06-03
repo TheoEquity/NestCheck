@@ -9,7 +9,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from src.storage import AlertRuleRecord, AlertTriggerRecord, AnalysisHistory, DatabaseManager, MarketQuote, StockDaily, WatchlistItem
+from src.storage import (
+    AlertRuleRecord,
+    AlertTriggerRecord,
+    AnalysisHistory,
+    DatabaseManager,
+    MarketQuote,
+    StockDaily,
+    WatchlistIndicatorSnapshot,
+    WatchlistItem,
+    WatchlistSignalSnapshot,
+)
 
 
 class WatchlistConflictError(ValueError):
@@ -129,7 +139,21 @@ class WatchlistRepository:
 
     def delete_item(self, item_id: int) -> bool:
         with self.db.get_session() as session:
+            row = session.execute(
+                select(WatchlistItem).where(WatchlistItem.id == item_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            session.execute(delete(WatchlistIndicatorSnapshot).where(WatchlistIndicatorSnapshot.watchlist_item_id == item_id))
+            session.execute(delete(WatchlistSignalSnapshot).where(WatchlistSignalSnapshot.watchlist_item_id == item_id))
             result = session.execute(delete(WatchlistItem).where(WatchlistItem.id == item_id))
+            remaining = session.execute(
+                select(WatchlistItem).order_by(WatchlistItem.sort_order.asc(), WatchlistItem.id.asc())
+            ).scalars().all()
+            now = datetime.now()
+            for sort_order, item in enumerate(remaining, start=1):
+                item.sort_order = sort_order
+                item.updated_at = now
             session.commit()
             return bool(result.rowcount)
 

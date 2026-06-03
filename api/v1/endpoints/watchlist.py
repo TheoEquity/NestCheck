@@ -16,9 +16,11 @@ from api.v1.schemas.watchlist import (
     WatchlistItemListResponse,
     WatchlistItemUpdateRequest,
     WatchlistRelatedAlertsResponse,
+    WatchlistRefreshResponse,
 )
 from src.repositories.watchlist_repo import WatchlistConflictError
 from src.services.watchlist_service import WatchlistNotFoundError, WatchlistService
+from src.services.watchlist_signal_service import WatchlistSignalService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -47,6 +49,25 @@ def list_items(
         return WatchlistItemListResponse(**service.list_items(asset_category=asset_category, watch_enabled=watch_enabled))
     except Exception as exc:
         raise _internal_error("List watchlist items failed", exc)
+
+
+@router.post("/signals/refresh", response_model=WatchlistRefreshResponse, responses={500: {"model": ErrorResponse}})
+def refresh_signals() -> WatchlistRefreshResponse:
+    try:
+        return WatchlistRefreshResponse(**WatchlistSignalService().refresh_enabled_stocks())
+    except Exception as exc:
+        raise _internal_error("Refresh watchlist signals failed", exc)
+
+
+@router.post("/items/{item_id}/signals/refresh", response_model=WatchlistRefreshResponse, responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+def refresh_item_signal(item_id: int) -> WatchlistRefreshResponse:
+    try:
+        result = WatchlistSignalService().refresh_item_by_id(item_id)
+        return WatchlistRefreshResponse(status="success", total=1, success=1, failed=0, items=[result])
+    except ValueError as exc:
+        raise _not_found(exc)
+    except Exception as exc:
+        raise _internal_error("Refresh watchlist item signal failed", exc)
 
 
 @router.post("/items", response_model=WatchlistItem, responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -87,6 +87,49 @@ def get_market_trend() -> dict:
         return get_market_cache_payload("trend")
     except Exception as exc:
         raise _internal_error("Get market trend failed", exc)
+
+
+@router.get(
+    "/sector-etfs",
+    response_model=dict,
+    summary="Get sector ETF hard-indicator rankings",
+)
+def get_sector_etfs(force_refresh: bool = Query(False, alias="force_refresh")) -> dict:
+    try:
+        from src.services.sector_etf_service import get_sector_etf_dashboard
+        return get_sector_etf_dashboard(force_refresh=force_refresh)
+    except Exception as exc:
+        raise _internal_error("Get sector ETFs failed", exc)
+
+
+@router.get(
+    "/sector-etfs/configs",
+    response_model=list,
+    summary="Get fixed sector ETF representative configuration",
+)
+def get_sector_etf_configs() -> list:
+    try:
+        from src.services.sector_etf_service import list_sector_etf_configs
+        return list_sector_etf_configs()
+    except Exception as exc:
+        raise _internal_error("Get sector ETF configs failed", exc)
+
+
+@router.patch(
+    "/sector-etfs/configs/{sector}",
+    response_model=dict,
+    summary="Update representative ETF for a fixed sector",
+)
+def update_sector_etf_config(sector: str, payload: Dict[str, Any]) -> dict:
+    try:
+        from src.services.sector_etf_service import update_sector_etf_config as _update
+        return _update(sector, payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"行业不存在：{sector}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _internal_error("Update sector ETF config failed", exc)
 
 
 @router.get(

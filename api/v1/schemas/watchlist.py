@@ -69,6 +69,11 @@ class WatchlistItem(BaseModel):
     latest_alert_triggered_at: Optional[str] = None
     latest_price: Optional[float] = None
     latest_change_pct: Optional[float] = None
+    signal_as_of_date: Optional[str] = None
+    signal_verdict_code: Optional[str] = None
+    signal_reason: Optional[str] = None
+    signal_lights: List[Dict[str, Any]] = Field(default_factory=list)
+    signal_data_quality_flags: List[str] = Field(default_factory=list)
     latest_analysis_id: Optional[int] = None
     latest_analysis_at: Optional[str] = None
     latest_analysis_summary: Optional[str] = None
@@ -96,6 +101,14 @@ class WatchlistItemListResponse(BaseModel):
 
 class WatchlistDeleteResponse(BaseModel):
     deleted: int
+
+
+class WatchlistRefreshResponse(BaseModel):
+    status: str
+    total: int = 0
+    success: int = 0
+    failed: int = 0
+    items: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class WatchlistRelatedAlertsResponse(BaseModel):

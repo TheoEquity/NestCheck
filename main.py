@@ -727,7 +727,7 @@ def _reload_runtime_config() -> Config:
 
 
 def run_daily_analysis():
-    """每日定时任务入口：大盘同步 -> 标的解析 -> 分析与研报"""
+    """每日定时任务入口：同步基础行情并刷新关注标的红绿灯。"""
     try:
         runtime_config = _reload_runtime_config()
         args = parse_arguments()
@@ -746,45 +746,22 @@ def run_daily_analysis():
             from src.repositories.watchlist_repo import WatchlistRepository
             repo = WatchlistRepository()
             targets = repo.list_analysis_targets(frequency="daily")
-            
-            a_stock_codes = []
-            skipped_targets = []
-
-            for t in targets:
-                # 仅支持 A 股股票 (cn, stock) 的分析
-                if t.market == "cn" and t.asset_category == "stock":
-                    a_stock_codes.append(t.symbol)
-                else:
-                    skipped_targets.append(t)
-
-            # 记录跳过的其他类别资产 (预留扩展接口)
-            for t in skipped_targets:
-                logger.info(
-                    f"[目标路由] 标的 {t.symbol} ({t.name}): "
-                    f"暂不支持 {t.market.upper()} 市场或 {t.asset_category} 类别分析，已跳过 (待扩展)"
-                )
-
-            # 如果数据库有 A 股数据，则覆盖配置；否则回退到 .env 的逻辑
-            if a_stock_codes:
-                logger.info(
-                    f"[目标路由] 从数据库加载 {len(a_stock_codes)} 个 A 股标的进行每日分析"
-                )
-                # 覆盖本次运行的 stock_list，屏蔽 .env 中的旧文本
-                runtime_config.stock_list = a_stock_codes
-                # 同时设置环境变量，确保 refresh_stock_list() 读到正确的值
-                import os
-                os.environ['STOCK_LIST'] = ','.join(a_stock_codes)
+            if targets:
+                logger.info("[红绿灯] 从数据库加载 %s 个关注标的，跳过个股/大盘深度研报", len(targets))
+                for t in targets:
+                    logger.info(
+                        "[红绿灯] 标的 %s (%s): market=%s, category=%s, 暂使用前端固定灯规则",
+                        t.symbol,
+                        t.name or "",
+                        t.market,
+                        t.asset_category,
+                    )
             else:
-                if targets:
-                    logger.warning("[目标路由] 数据库中标的不满足 A 股分析条件，将回退到 .env 默认列表")
-                else:
-                    logger.warning("[目标路由] 数据库为空，将回退到 .env 默认列表")
+                logger.warning("[红绿灯] 数据库关注标的为空，本轮无需计算")
         except Exception as e:
-            logger.error(f"[目标路由] 数据库加载标的失败，回退到 .env 列表: {e}")
+            logger.error(f"[红绿灯] 数据库加载标的失败: {e}")
 
-        # Step 3: Run Stock Analysis
-        stock_codes = _resolve_scheduled_stock_codes(None)
-        run_full_analysis(runtime_config, args, stock_codes)
+        logger.info("[红绿灯] 轻量资产管理模式已启用，本轮不生成大盘复盘、个股定时报告或通知")
     except Exception as e:
         logger.exception(f"每日定时任务执行失败: {e}")
         raise
@@ -1000,23 +977,7 @@ def main() -> int:
 
             background_tasks = []
             if getattr(config, 'agent_event_monitor_enabled', False):
-                from src.services.alert_worker import AlertWorker
-
-                interval_minutes = max(1, getattr(config, 'agent_event_monitor_interval_minutes', 5))
-                alert_worker = AlertWorker(config_provider=_reload_runtime_config)
-
-                def event_monitor_task():
-                    stats = alert_worker.run_once()
-                    triggered_count = stats.get("triggered", 0)
-                    if triggered_count:
-                        logger.info("[EventMonitor] 本轮触发 %d 条提醒", triggered_count)
-
-                background_tasks.append({
-                    "task": event_monitor_task,
-                    "interval_seconds": interval_minutes * 60,
-                    "run_immediately": True,
-                    "name": "agent_event_monitor",
-                })
+                logger.info("轻量资产管理模式已停用后台告警扫描；告警状态由关注标的红绿灯展示")
 
             run_with_schedule(
                 task=scheduled_task,

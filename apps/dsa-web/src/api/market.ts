@@ -110,6 +110,37 @@ export interface EquityRatioResponse {
   detail: Record<string, { total: number; equity: number; weight: number }>;
 }
 
+export interface SectorEtfConfig {
+  id: number;
+  sector: string;
+  tsCode: string;
+  name: string | null;
+  weight: number;
+  isCore: boolean;
+  sortOrder: number;
+  updatedAt?: string | null;
+}
+
+export interface SectorEtfItem extends SectorEtfConfig {
+  date: string | null;
+  close: number | null;
+  dailyPctChg: number | null;
+  monthPctChg: number | null;
+  rs: number | null;
+  status: string;
+}
+
+export interface SectorEtfDashboardResponse {
+  snapshotDate: string;
+  benchmark: { code: string; monthPctChg: number | null };
+  items: SectorEtfItem[];
+  topGainers: SectorEtfItem[];
+  topLosers: SectorEtfItem[];
+  monthlyRankings: SectorEtfItem[];
+  configs: SectorEtfConfig[];
+  updatedAt: string;
+}
+
 export const marketApi = {
   async getIndices(): Promise<MarketIndexItem[]> {
     const response = await apiClient.get<Record<string, unknown>[]>('/api/v1/market/indices');
@@ -151,5 +182,22 @@ export const marketApi = {
   async getEquityRatio(): Promise<EquityRatioResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/equity-ratio');
     return toCamelCase<EquityRatioResponse>(response.data);
+  },
+
+  async getSectorEtfs(forceRefresh = false): Promise<SectorEtfDashboardResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/sector-etfs', {
+      params: forceRefresh ? { force_refresh: true } : undefined,
+    });
+    return toCamelCase<SectorEtfDashboardResponse>(response.data);
+  },
+
+  async updateSectorEtfConfig(sector: string, input: Partial<Pick<SectorEtfConfig, 'tsCode' | 'name' | 'weight' | 'isCore'>>): Promise<SectorEtfConfig> {
+    const response = await apiClient.patch<Record<string, unknown>>(`/api/v1/market/sector-etfs/configs/${encodeURIComponent(sector)}`, {
+      ts_code: input.tsCode,
+      name: input.name,
+      weight: input.weight,
+      is_core: input.isCore,
+    });
+    return toCamelCase<SectorEtfConfig>(response.data);
   },
 };

@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth, useSystemConfig } from '../hooks';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
 import { systemConfigApi } from '../api/systemConfig';
@@ -201,6 +202,7 @@ function formatEnvBackupFilename(isDesktopRuntime: boolean) {
 }
 
 const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { authEnabled, passwordChangeable } = useAuth();
   const [envBackupActionError, setEnvBackupActionError] = useState<ParsedApiError | null>(null);
   const [envBackupActionSuccess, setEnvBackupActionSuccess] = useState<string>('');
@@ -609,6 +611,22 @@ const SettingsPage: React.FC = () => {
 
           <section className="space-y-4">
             {activeCategory === 'system' ? <AuthSettingsCard /> : null}
+            {activeCategory === 'system' ? (
+              <SettingsSectionCard
+                title="高级配置入口"
+                description="将低频管理能力收敛到设置页，保持主菜单简洁。"
+              >
+                <div className="flex flex-col gap-3 rounded-2xl border settings-border bg-background/40 px-4 py-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Agent 管理</p>
+                    <p className="mt-1 text-xs leading-6 text-muted-text">管理 Profiles、专业 Agent、Tools 和 Skills 配置。</p>
+                  </div>
+                  <Button type="button" variant="settings-secondary" onClick={() => navigate('/agents')}>
+                    打开 Agent 管理
+                  </Button>
+                </div>
+              </SettingsSectionCard>
+            ) : null}
             {activeCategory === 'system' ? (
               <SettingsSectionCard
                 title="版本信息"

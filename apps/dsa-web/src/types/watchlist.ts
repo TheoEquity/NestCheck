@@ -1,5 +1,5 @@
 export type WatchlistMarket = 'cn' | 'hk' | 'us';
-export type WatchlistAssetCategory = 'fund' | 'stock';
+export type WatchlistAssetCategory = 'fund' | 'stock' | 'index';
 export type WatchlistAssetSubcategory = '' | 'pure_bond_fund' | 'fixed_income_plus' | 'index_fund' | 'equity_fund';
 export type WatchlistPriority = 'low' | 'medium' | 'high';
 export type WatchlistAnalysisFrequency = 'daily' | 'weekly' | 'manual';
@@ -27,6 +27,11 @@ export interface WatchlistItem {
   latestAlertTriggeredAt?: string | null;
   latestPrice?: number | null;
   latestChangePct?: number | null;
+  signalAsOfDate?: string | null;
+  signalVerdictCode?: string | null;
+  signalReason?: string | null;
+  signalLights: WatchlistSignalLight[];
+  signalDataQualityFlags: string[];
   latestAnalysisId?: number | null;
   latestAnalysisAt?: string | null;
   latestAnalysisSummary?: string | null;
@@ -34,6 +39,14 @@ export interface WatchlistItem {
   latestTrendPrediction?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+}
+
+export interface WatchlistSignalLight {
+  code: string;
+  label: string;
+  status: 'G' | 'Y' | 'R' | string;
+  reason: string;
+  value?: number | null;
 }
 
 export interface WatchlistItemListResponse {
@@ -99,4 +112,12 @@ export interface WatchlistAlertTrigger {
 export interface WatchlistRelatedAlertsResponse {
   rules: WatchlistAlertRule[];
   triggers: WatchlistAlertTrigger[];
+}
+
+export interface WatchlistRefreshResponse {
+  status: string;
+  total: number;
+  success: number;
+  failed: number;
+  items: Array<Record<string, unknown>>;
 }

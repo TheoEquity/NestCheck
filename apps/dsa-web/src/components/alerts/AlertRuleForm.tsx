@@ -94,7 +94,7 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
   const [target, setTarget] = useState('');
   const [marketRegion, setMarketRegion] = useState<MarketRegion>('cn');
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
-  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistLoading, setWatchlistLoading] = useState(true);
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [alertType, setAlertType] = useState<AlertType>('price_cross');
   const [severity, setSeverity] = useState<AlertSeverity>('warning');
@@ -120,8 +120,6 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
 
   useEffect(() => {
     let cancelled = false;
-    setWatchlistLoading(true);
-    setWatchlistError(null);
     void watchlistApi.listItems()
       .then((response) => {
         if (cancelled) return;

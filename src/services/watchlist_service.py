@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from src.repositories.watchlist_repo import WatchlistConflictError, WatchlistRepository
+from src.services.watchlist_signal_service import WatchlistSignalService
 from src.storage import AlertRuleRecord, AlertTriggerRecord, WatchlistItem
 
 
@@ -39,8 +40,18 @@ class WatchlistService:
         summaries = self.repo.alert_summary_for_items(rows)
         quote_summaries = self.repo.quote_summary_for_items(rows)
         analysis_summaries = self.repo.stock_analysis_summary_for_items(rows)
+        signal_summaries = WatchlistSignalService().latest_signals_for_items([row.id for row in rows])
         return {
-            "items": [self._serialize_item(row, summaries.get(row.id), analysis_summaries.get(row.id), quote_summaries.get(row.id)) for row in rows],
+            "items": [
+                self._serialize_item(
+                    row,
+                    summaries.get(row.id),
+                    analysis_summaries.get(row.id),
+                    quote_summaries.get(row.id),
+                    signal_summaries.get(row.id),
+                )
+                for row in rows
+            ],
             "total": total,
             "market_review": self.repo.latest_market_review_summary(),
         }
@@ -52,7 +63,8 @@ class WatchlistService:
         summary = self.repo.alert_summary_for_items([row]).get(row.id)
         analysis_summary = self.repo.stock_analysis_summary_for_items([row]).get(row.id)
         quote_summary = self.repo.quote_summary_for_items([row]).get(row.id)
-        return self._serialize_item(row, summary, analysis_summary, quote_summary)
+        signal_summary = WatchlistSignalService().latest_signals_for_items([row.id]).get(row.id)
+        return self._serialize_item(row, summary, analysis_summary, quote_summary, signal_summary)
 
     def update_item(self, item_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         fields = self._normalize_payload(payload, partial=True)
@@ -171,10 +183,12 @@ class WatchlistService:
         summary: Optional[Dict[str, Any]] = None,
         analysis_summary: Optional[Dict[str, Any]] = None,
         quote_summary: Optional[Dict[str, Any]] = None,
+        signal_summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         summary = summary or {}
         analysis_summary = analysis_summary or {}
         quote_summary = quote_summary or {}
+        signal_summary = signal_summary or {}
         return {
             "id": row.id,
             "market": row.market,
@@ -198,6 +212,11 @@ class WatchlistService:
             "latest_alert_triggered_at": summary.get("latest_alert_triggered_at"),
             "latest_price": quote_summary.get("latest_price"),
             "latest_change_pct": quote_summary.get("latest_change_pct"),
+            "signal_as_of_date": signal_summary.get("as_of_date"),
+            "signal_verdict_code": signal_summary.get("verdict_code"),
+            "signal_reason": signal_summary.get("reason"),
+            "signal_lights": signal_summary.get("lights") or [],
+            "signal_data_quality_flags": signal_summary.get("data_quality_flags") or [],
             "latest_analysis_id": analysis_summary.get("latest_analysis_id"),
             "latest_analysis_at": analysis_summary.get("latest_analysis_at"),
             "latest_analysis_summary": analysis_summary.get("latest_analysis_summary"),

@@ -4,6 +4,7 @@ import type {
   WatchlistItem,
   WatchlistItemInput,
   WatchlistItemListResponse,
+  WatchlistRefreshResponse,
   WatchlistRelatedAlertsResponse,
 } from '../types/watchlist';
 
@@ -46,6 +47,16 @@ export const watchlistApi = {
 
   async deleteItem(itemId: number): Promise<void> {
     await apiClient.delete(`/api/v1/watchlist/items/${itemId}`);
+  },
+
+  async refreshSignals(): Promise<WatchlistRefreshResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/watchlist/signals/refresh');
+    return toCamelCase<WatchlistRefreshResponse>(response.data);
+  },
+
+  async refreshItemSignal(itemId: number): Promise<WatchlistRefreshResponse> {
+    const response = await apiClient.post<Record<string, unknown>>(`/api/v1/watchlist/items/${itemId}/signals/refresh`);
+    return toCamelCase<WatchlistRefreshResponse>(response.data);
   },
 
   async getRelatedAlerts(itemId: number): Promise<WatchlistRelatedAlertsResponse> {

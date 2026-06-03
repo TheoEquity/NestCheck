@@ -69,6 +69,7 @@ export function getAssetCategory(position: FlatPosition): string {
 const CATEGORY_LABELS: Record<string, string> = {
   stock: '股票',
   fund: '基金',
+  index: '指数',
   bond: '债券',
   cash: '现金',
 };

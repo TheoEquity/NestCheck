@@ -255,11 +255,6 @@ function ProfilesTab({
   const selectedProfile = profiles.find((profile) => profile.id === selectedId) ?? profiles[0];
   const [form, setForm] = useState<ProfileFormState>(() => toProfileForm(selectedProfile));
 
-  useEffect(() => {
-    if (editingNew) return;
-    setForm(toProfileForm(selectedProfile));
-  }, [editingNew, selectedProfile]);
-
   const updateForm = (field: keyof ProfileFormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -292,8 +287,10 @@ function ProfilesTab({
             placeholder="请选择 Profile"
             options={profiles.map((profile) => ({ value: profile.id, label: `${profile.name} (${profile.id})` }))}
             onChange={(value) => {
+              const nextProfile = profiles.find((profile) => profile.id === value) ?? profiles[0];
               setEditingNew(false);
               setSelectedId(value);
+              setForm(toProfileForm(nextProfile));
             }}
           />
           <div className="flex items-end">
@@ -359,6 +356,7 @@ function ProfilesTab({
               onClick={() => {
                 setEditingNew(false);
                 setSelectedId(profile.id);
+                setForm(toProfileForm(profile));
               }}
             >
               <span className="block font-medium">{profile.name}</span>
@@ -443,11 +441,6 @@ function AgentsTab({
   const selectedAgent = agents.find((agent) => agent.id === selectedId) ?? agents[0];
   const [form, setForm] = useState<AgentFormState>(() => toAgentForm(selectedAgent));
 
-  useEffect(() => {
-    if (editingNew) return;
-    setForm(toAgentForm(selectedAgent));
-  }, [editingNew, selectedAgent]);
-
   const updateForm = (field: keyof AgentFormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -483,8 +476,10 @@ function AgentsTab({
             placeholder="请选择 Agent"
             options={agents.map((agent) => ({ value: agent.id, label: `${agent.display_name} (${agent.id})` }))}
             onChange={(value) => {
+              const nextAgent = agents.find((agent) => agent.id === value) ?? agents[0];
               setEditingNew(false);
               setSelectedId(value);
+              setForm(toAgentForm(nextAgent));
             }}
           />
           <div className="flex items-end">
@@ -549,6 +544,7 @@ function AgentsTab({
               onClick={() => {
                 setEditingNew(false);
                 setSelectedId(agent.id);
+                setForm(toAgentForm(agent));
               }}
             >
               <span className="block font-medium">{agent.display_name}</span>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, Bell, Bot, BriefcaseBusiness, Database, Eye, Home, Landmark, LogOut, MessageSquareQuote, PieChart, Settings2 } from 'lucide-react';
+import { BarChart3, Database, Eye, HeartPulse, Home, Landmark, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
@@ -29,14 +29,9 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'watchlist', label: '关注标的', to: '/watchlist', icon: Eye },
   { key: 'asset-manage', label: '资产管理', to: '/assets/manage', icon: Landmark },
   { key: 'asset-allocation', label: '资产配置', to: '/assets/allocation', icon: BarChart3 },
-  { key: 'asset-init', label: '资产初始化', to: '/assets/init', icon: BriefcaseBusiness },
   { key: 'asset-events', label: '资产事件', to: '/assets/events', icon: Database },
-  { key: 'analysis', label: '分析台', to: '/analysis', icon: BarChart3 },
-  { key: 'chat', label: '问股', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
-  { key: 'funds', label: '基金', to: '/funds', icon: PieChart },
-  { key: 'agents', label: 'Agent 管理', to: '/agents', icon: Bot },
-  { key: 'backtest', label: '回测', to: '/backtest', icon: BarChart3 },
-  { key: 'alerts', label: '告警', to: '/alerts', icon: Bell },
+  { key: 'asset-diagnosis', label: '资产诊断', to: '/assets/diagnosis', icon: HeartPulse },
+  { key: 'chat', label: '资产问答', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
   { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
 ];
 

@@ -176,18 +176,19 @@ async def _daily_portfolio_price_refresh():
     # Wait before first check so server can start normally
     await asyncio.sleep(30)
 
+    last_refresh_date = None
     with ThreadPoolExecutor(max_workers=1) as executor:
         while True:
             try:
                 now = datetime.now()
+                today = now.date()
                 # Refresh at 20:30 daily
-                if now.hour == 20 and now.minute >= 30:
+                if now.hour == 20 and now.minute >= 30 and last_refresh_date != today:
                     logger.info("Daily portfolio price refresh started")
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(executor, _run_price_refresh)
+                    last_refresh_date = today
                     logger.info("Daily portfolio price refresh completed")
-                    # Sleep to avoid multiple refreshes in the same minute
-                    await asyncio.sleep(60)
             except Exception as exc:
                 logger.error("Portfolio price refresh error: %s", exc)
 
@@ -291,10 +292,27 @@ def _run_price_refresh():
 
     # Rebuild all 6 market_cache keys
     try:
+        from src.services.sector_etf_service import refresh_sector_etf_daily_data
         from src.services.market_cache_service import (
             MARKET_CACHE_BUILDERS,
             refresh_market_cache,
             refresh_trend_realtime_quotes,
+        )
+
+        sector_result = refresh_sector_etf_daily_data()
+        logger.info(
+            "Sector ETF refresh: refreshed=%d, failed=%d",
+            sector_result.get("refreshed", 0),
+            sector_result.get("failed", 0),
+        )
+
+        from src.services.watchlist_signal_service import WatchlistSignalService
+
+        signal_result = WatchlistSignalService().refresh_enabled_stocks()
+        logger.info(
+            "Watchlist signal refresh: success=%d, failed=%d",
+            signal_result.get("success", 0),
+            signal_result.get("failed", 0),
         )
 
         for cache_key in MARKET_CACHE_BUILDERS:
@@ -496,6 +514,8 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         async def serve_asset(request: Request, asset_path: str):
             file_path = _resolve_asset_path(assets_dir, asset_path)
             if file_path is None:
+                if not Path(asset_path).suffix:
+                    return _frontend_index_response(static_dir)
                 return Response(
                     content="not found",
                     status_code=404,
@@ -504,6 +524,8 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
             if file_path.is_file():
                 relative_path = file_path.relative_to(assets_root).as_posix()
                 return await assets_static_files.get_response(relative_path, request.scope)
+            if not Path(asset_path).suffix:
+                return _frontend_index_response(static_dir)
             return Response(
                 content="asset not found",
                 status_code=404,

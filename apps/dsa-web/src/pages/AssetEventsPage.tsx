@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { portfolioApi } from '../api/portfolio';
 import { ApiErrorAlert, AppPage, Button, Card, InlineAlert, PageHeader } from '../components/common';
@@ -77,6 +78,7 @@ const getTodayIso = () => toDateInputValue(new Date());
 const formatNumber = (value: number) => Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 4 });
 
 const AssetEventsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | ''>('');
   const [loading, setLoading] = useState(false);
@@ -425,7 +427,17 @@ const AssetEventsPage: React.FC = () => {
 
   return (
     <AppPage className="max-w-[1600px] space-y-3">
-      <PageHeader eyebrow="Portfolio Ledger" title="资产事件" description="把交易、资金流水和现金分红集中管理，初始化页只负责账户和初始资产。" className="!rounded-xl !px-4 !py-3" />
+      <PageHeader
+        eyebrow="Portfolio Ledger"
+        title="资产事件"
+        description="把交易、资金流水和现金分红集中管理，初始化页只负责账户和初始资产。"
+        className="!rounded-xl !px-4 !py-3"
+        actions={(
+          <Button type="button" variant="secondary" onClick={() => navigate('/assets/init')}>
+            账户初始化
+          </Button>
+        )}
+      />
       {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
       {successMessage ? <InlineAlert variant="success" title="已保存" message={successMessage} /> : null}
       <section className="grid gap-2 xl:grid-cols-3">

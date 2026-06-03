@@ -11,6 +11,7 @@ import logging
 import re
 import threading
 import time
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -286,6 +287,23 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
                         MARKET_CACHE_BUILDERS,
                         refresh_market_cache,
                         refresh_trend_realtime_quotes,
+                    )
+                    from src.services.sector_etf_service import refresh_sector_etf_daily_data
+
+                    sector_result = refresh_sector_etf_daily_data()
+                    logger.info(
+                        "Sector ETF refresh: refreshed=%d, failed=%d",
+                        sector_result.get("refreshed", 0),
+                        sector_result.get("failed", 0),
+                    )
+
+                    from src.services.watchlist_signal_service import WatchlistSignalService
+
+                    signal_result = WatchlistSignalService().refresh_enabled_stocks()
+                    logger.info(
+                        "Watchlist signal refresh: success=%d, failed=%d",
+                        signal_result.get("success", 0),
+                        signal_result.get("failed", 0),
                     )
 
                     for cache_key in MARKET_CACHE_BUILDERS:

@@ -139,6 +139,33 @@ class StockDaily(Base):
         }
 
 
+class SectorEtf(Base):
+    """Representative ETF configuration for a fixed sector."""
+
+    __tablename__ = 'sector_etf'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sector = Column(String(32), nullable=False, unique=True, index=True)
+    ts_code = Column(String(16), nullable=False)
+    name = Column(String(64), nullable=True)
+    weight = Column(Float, nullable=False, default=1.0)
+    is_core = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'sector': self.sector,
+            'ts_code': self.ts_code,
+            'name': self.name,
+            'weight': self.weight,
+            'is_core': self.is_core,
+            'sort_order': self.sort_order,
+        }
+
+
 class NewsIntel(Base):
     """
     新闻情报数据模型
@@ -210,6 +237,64 @@ class FundamentalSnapshot(Base):
 
     def __repr__(self) -> str:
         return f"<FundamentalSnapshot(query_id={self.query_id}, code={self.code})>"
+
+
+class WatchlistIndicatorSnapshot(Base):
+    """Dedicated hard-rule input fields for watchlist traffic lights."""
+
+    __tablename__ = 'watchlist_indicator_snapshot'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    watchlist_item_id = Column(Integer, ForeignKey('watchlist_items.id'), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    price = Column(Float)
+    eps_ttm = Column(Float)
+    ni_ttm = Column(Float)
+    bvps = Column(Float)
+    ocf_ttm = Column(Float)
+    fcf_ttm = Column(Float)
+    mktcap = Column(Float)
+    net_debt = Column(Float)
+    ebitda_ttm = Column(Float)
+    div_paid_ttm = Column(Float)
+    roe_ttm = Column(Float)
+    ma10w = Column(Float)
+    ma30w = Column(Float)
+    prev_ma10w = Column(Float)
+    prev_ma30w = Column(Float)
+    sector_tag = Column(String(16), nullable=False, default='stable')
+    source = Column(String(64), nullable=False, default='watchlist_refresh')
+    raw_payload = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('watchlist_item_id', 'as_of_date', name='uix_watchlist_indicator_item_date'),
+        Index('ix_watchlist_indicator_symbol_date', 'symbol', 'as_of_date'),
+    )
+
+
+class WatchlistSignalSnapshot(Base):
+    """Computed watchlist hard-rule traffic light result."""
+
+    __tablename__ = 'watchlist_signal_snapshot'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    watchlist_item_id = Column(Integer, ForeignKey('watchlist_items.id'), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    verdict_code = Column(String(16), nullable=False, default='WATCH')
+    reason = Column(Text)
+    lights_json = Column(Text, nullable=False)
+    data_quality_flags = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('watchlist_item_id', 'as_of_date', name='uix_watchlist_signal_item_date'),
+        Index('ix_watchlist_signal_symbol_date', 'symbol', 'as_of_date'),
+    )
 
 
 class AnalysisHistory(Base):
@@ -1184,6 +1269,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             Base.metadata.create_all(self._engine)
             self._ensure_portfolio_asset_metadata_columns()
             self._init_asset_risk_definitions()
+            self._init_sector_etfs()
 
             self._initialized = True
             logger.info(f"数据库初始化完成: {db_url}")
@@ -1363,6 +1449,70 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 logger.debug("初始化资产风险等级定义跳过（类加载顺序问题，可忽略）")
             else:
                 logger.warning("初始化资产风险等级定义失败：%s", exc)
+
+    def _init_sector_etfs(self) -> None:
+        """Initialize fixed sector rows with editable representative ETFs."""
+        try:
+            with self.get_session() as session:
+                existing = {row.sector: row for row in session.query(SectorEtf).all()}
+                default_etfs = [
+                    ("煤炭", "515220.SH", "煤炭ETF", 1.0, True),
+                    ("有色金属", "512400.SH", "有色ETF", 1.0, True),
+                    ("钢铁", "516150.SH", "钢铁ETF", 1.0, True),
+                    ("银行", "512800.SH", "银行ETF", 1.0, True),
+                    ("证券", "512900.SH", "证券ETF", 1.0, True),
+                    ("保险", "512070.SH", "非银ETF", 1.0, True),
+                    ("地产", "512200.SH", "地产ETF", 1.0, True),
+                    ("医药", "512010.SH", "医药ETF", 1.0, True),
+                    ("医疗", "159828.SZ", "医疗ETF", 0.8, True),
+                    ("半导体", "512480.SH", "半导体ETF", 1.0, True),
+                    ("芯片", "159995.SZ", "芯片ETF", 1.0, True),
+                    ("光伏", "516160.SH", "光伏ETF", 1.0, True),
+                    ("新能源车", "515030.SH", "新能源车ETF", 1.0, True),
+                    ("电池", "159755.SZ", "电池ETF", 0.8, True),
+                    ("军工", "512660.SH", "军工ETF", 1.0, True),
+                    ("消费", "159928.SZ", "消费ETF", 1.0, True),
+                    ("食品饮料", "515710.SH", "食品饮料ETF", 1.0, True),
+                    ("酒", "512690.SH", "酒ETF", 1.0, True),
+                    ("家电", "159996.SZ", "家电ETF", 0.8, True),
+                    ("农业", "159825.SZ", "农业ETF", 0.8, True),
+                    ("传媒", "512980.SH", "传媒ETF", 0.8, True),
+                    ("计算机", "512720.SH", "计算机ETF", 0.8, True),
+                    ("通信", "515880.SH", "通信ETF", 0.8, True),
+                    ("化工", "516020.SH", "化工ETF", 0.8, True),
+                    ("建材", "159745.SZ", "建材ETF", 0.8, True),
+                    ("环保", "512580.SH", "环保ETF", 0.6, False),
+                    ("旅游", "159766.SZ", "旅游ETF", 0.6, False),
+                    ("稀土", "516780.SH", "稀土ETF", 0.6, False),
+                    ("黄金", "518880.SH", "黄金ETF", 0.6, False),
+                    ("国债", "511260.SH", "十年国债ETF", 0.6, False),
+                ]
+
+                changed = False
+                for sort_order, (sector, ts_code, name, weight, is_core) in enumerate(default_etfs, start=1):
+                    row = existing.get(sector)
+                    if row is None:
+                        session.add(SectorEtf(
+                            sector=sector,
+                            ts_code=ts_code,
+                            name=name,
+                            weight=weight,
+                            is_core=is_core,
+                            sort_order=sort_order,
+                        ))
+                        changed = True
+                        continue
+                    if row.sort_order != sort_order:
+                        row.sort_order = sort_order
+                        changed = True
+                if changed:
+                    session.commit()
+                    logger.info("已初始化行业 ETF 配置")
+        except Exception as exc:
+            if "未正确初始化" in str(exc) or "not properly initialized" in str(exc):
+                logger.debug("初始化行业 ETF 配置跳过（类加载顺序问题，可忽略）")
+            else:
+                logger.warning("初始化行业 ETF 配置失败：%s", exc)
 
     def _run_write_transaction(
         self,

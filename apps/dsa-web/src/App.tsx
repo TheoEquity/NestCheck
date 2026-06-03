@@ -11,20 +11,17 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgentChatStore } from './stores/agentChatStore';
 import './App.css';
 
-const HomePage = lazy(() => import('./pages/HomePage'));
 const AssetDashboardPage = lazy(() => import('./pages/AssetDashboardPage'));
 const AssetManagementPage = lazy(() => import('./pages/AssetManagementPage'));
+const AssetDiagnosisPage = lazy(() => import('./pages/AssetDiagnosisPage'));
 const AssetAllocationPage = lazy(() => import('./pages/AssetAllocationPage'));
 const AssetInitializationPage = lazy(() => import('./pages/AssetInitializationPage'));
 const AssetEventsPage = lazy(() => import('./pages/AssetEventsPage'));
-const BacktestPage = lazy(() => import('./pages/BacktestPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
-const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage'));
-const FundAnalysisPage = lazy(() => import('./pages/FundAnalysisPage'));
 const AgentManagementPage = lazy(() => import('./pages/AgentManagementPage'));
 
 const AppContent: React.FC = () => {
@@ -83,17 +80,18 @@ const AppContent: React.FC = () => {
       >
         <Route path="/" element={<AssetDashboardPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
-        <Route path="/analysis" element={<HomePage />} />
+        <Route path="/analysis" element={<Navigate to="/watchlist" replace />} />
         <Route path="/assets/manage" element={<AssetManagementPage />} />
+        <Route path="/assets/diagnosis" element={<AssetDiagnosisPage />} />
         <Route path="/assets/allocation" element={<AssetAllocationPage />} />
         <Route path="/assets/init" element={<AssetInitializationPage />} />
         <Route path="/assets/events" element={<AssetEventsPage />} />
         <Route path="/chat" element={<ChatPage />} />
-        <Route path="/funds" element={<FundAnalysisPage />} />
+        <Route path="/funds" element={<Navigate to="/chat" replace />} />
         <Route path="/agents" element={<AgentManagementPage />} />
         <Route path="/portfolio" element={<AssetInitializationPage />} />
-        <Route path="/backtest" element={<BacktestPage />} />
-        <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/backtest" element={<Navigate to="/assets/diagnosis" replace />} />
+        <Route path="/alerts" element={<Navigate to="/watchlist" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

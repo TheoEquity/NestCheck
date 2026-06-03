@@ -28,12 +28,12 @@ import { getReportText } from '../utils/reportLanguage';
 
 // Quick question examples shown on empty state
 const QUICK_QUESTIONS = [
-  { label: '用缠论分析茅台', skill: 'chan_theory' },
-  { label: '波浪理论看宁德时代', skill: 'wave_theory' },
-  { label: '分析比亚迪趋势', skill: 'bull_trend' },
-  { label: '箱体震荡技能看中芯国际', skill: 'box_oscillation' },
-  { label: '分析腾讯 hk00700', skill: 'bull_trend' },
-  { label: '用情绪周期分析东方财富', skill: 'emotion_cycle' },
+  { label: 'A股 股票 600519：解释当前风险和估值位置', skill: 'bull_trend' },
+  { label: '基金 指数基金 510300：适合作为长期底仓吗', skill: 'bull_trend' },
+  { label: '港股 股票 hk00700：说明主要风险点', skill: 'bull_trend' },
+  { label: '基金 固收+：怎么看回撤和持有周期', skill: 'box_oscillation' },
+  { label: 'A股 股票 601689：解释关注标的红绿灯', skill: 'bull_trend' },
+  { label: '指数 沪深300：当前更适合定投还是观望', skill: 'emotion_cycle' },
 ];
 
 const MAX_SELECTED_SKILLS = 3;
@@ -102,7 +102,7 @@ const ChatPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '问股 - NestCheck';
+    document.title = '资产问答 - NestCheck';
   }, []);
 
   useEffect(() => () => {
@@ -729,7 +729,7 @@ const ChatPage: React.FC = () => {
                   d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                 />
               </svg>
-              问股
+              资产问答
             </h1>
             {messages.length > 0 && (
               <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
@@ -827,7 +827,7 @@ const ChatPage: React.FC = () => {
             )}
           </div>
           <p className="text-secondary-text text-sm">
-            向 AI 询问个股分析，获取基于技能视角的交易建议与实时决策报告。
+            先明确市场和资产类型，再让 AI 基于数据做知识解释和风险参考。
           </p>
           {sendToast ? (
             <InlineAlert
@@ -851,8 +851,8 @@ const ChatPage: React.FC = () => {
             {messages.length === 0 && !loading ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
-                  title="开始问股"
-                  description="输入「分析 600519」或「茅台现在能买吗」，AI 将调用实时数据工具为您生成决策报告。"
+                  title="开始资产问答"
+                  description="输入时先写清市场、资产类型和代码，例如「A股 股票 600519」或「基金 指数基金 510300」。"
                   className="max-w-2xl border-dashed bg-card/55"
                   icon={(
                     <svg
@@ -1134,7 +1134,7 @@ const ChatPage: React.FC = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
+                  placeholder="例如：A股 股票 600519 估值和风险怎么看？ (Enter 发送, Shift+Enter 换行)"
                   disabled={loading}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"

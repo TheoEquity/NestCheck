@@ -180,7 +180,6 @@ const WatchlistPage: React.FC = () => {
   const refreshSignals = async () => {
     setSignalRefreshing(true);
     try {
-      await watchlistApi.refreshSignals();
       await loadItems();
     } catch (err) {
       setError(getParsedApiError(err));

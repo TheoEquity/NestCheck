@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from data_provider.base import DataFetcherManager, normalize_stock_code
@@ -36,6 +36,8 @@ LIGHT_LABELS = {
 SECTOR_TAGS = {"stable", "cyclical", "financial"}
 CYCLICAL_HINTS = ("煤", "钢", "有色", "矿", "化工", "石油", "油", "航运", "资源")
 FINANCIAL_HINTS = ("银行", "保险", "证券", "券商", "金融", "信托")
+MIN_DAILY_ROWS_FOR_TECH = 155
+TARGET_DAILY_ROWS_FOR_INIT = 520
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -183,11 +185,13 @@ class WatchlistSignalService:
     def _backfill_daily_data(self, symbol: str) -> None:
         code = normalize_stock_code(symbol)
         with self.db.get_session() as session:
-            count = session.execute(select(StockDaily.id).where(StockDaily.code == code).limit(1)).scalar_one_or_none()
-        if count is not None:
+            existing_count = session.execute(
+                select(func.count(StockDaily.id)).where(StockDaily.code == code)
+            ).scalar() or 0
+        if int(existing_count) >= MIN_DAILY_ROWS_FOR_TECH:
             return
         manager = DataFetcherManager()
-        df, source = manager.get_daily_data(code, days=520)
+        df, source = manager.get_daily_data(code, days=TARGET_DAILY_ROWS_FOR_INIT)
         if df is not None and not df.empty:
             self.db.save_daily_data(df, code, f"watchlist_{source}")
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,7 @@ VALID_MARKETS = {"cn", "hk", "us"}
 VALID_ASSET_CATEGORIES = {"fund", "stock"}
 VALID_PRIORITIES = {"low", "medium", "high"}
 VALID_FREQUENCIES = {"daily", "weekly", "manual"}
+logger = logging.getLogger(__name__)
 
 
 class WatchlistNotFoundError(ValueError):
@@ -28,7 +30,14 @@ class WatchlistService:
 
     def create_item(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         row = self.repo.create_item(self._normalize_payload(payload))
-        return self._serialize_item(row)
+        signal_summary = None
+        if row.asset_category == "stock" and row.watch_enabled:
+            try:
+                WatchlistSignalService().refresh_item(row)
+                signal_summary = WatchlistSignalService().latest_signals_for_items([row.id]).get(row.id)
+            except Exception as exc:
+                logger.warning("Watchlist initial signal refresh failed for %s: %s", row.symbol, exc, exc_info=True)
+        return self._serialize_item(row, signal_summary=signal_summary)
 
     def list_items(
         self,

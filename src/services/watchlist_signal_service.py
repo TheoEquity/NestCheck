@@ -36,7 +36,7 @@ LIGHT_LABELS = {
 SECTOR_TAGS = {"stable", "cyclical", "financial"}
 CYCLICAL_HINTS = ("煤", "钢", "有色", "矿", "化工", "石油", "油", "航运", "资源")
 FINANCIAL_HINTS = ("银行", "保险", "证券", "券商", "金融", "信托")
-MIN_DAILY_ROWS_FOR_TECH = 155
+MIN_DAILY_ROWS_FOR_TECH = 55
 TARGET_DAILY_ROWS_FOR_INIT = 520
 
 
@@ -92,15 +92,17 @@ def _ts_code(symbol: str) -> str:
     return code
 
 
-def _sector_tag(item: WatchlistItem) -> str:
-    source = " ".join(
-        str(part or "") for part in (item.asset_subcategory, item.asset_risk_class, item.watch_tags, item.watch_reason, item.notes, item.name)
-    )
+def _sector_tag_from_text(*parts: Any) -> str:
+    source = " ".join(str(part or "") for part in parts)
     if any(token in source for token in FINANCIAL_HINTS):
         return "financial"
     if any(token in source for token in CYCLICAL_HINTS):
         return "cyclical"
     return "stable"
+
+
+def _sector_tag(item: WatchlistItem) -> str:
+    return _sector_tag_from_text(item.asset_subcategory, item.asset_risk_class, item.watch_tags, item.watch_reason, item.notes, item.name)
 
 
 class WatchlistSignalService:
@@ -204,6 +206,8 @@ class WatchlistSignalService:
         payload.update(self._latest_price(symbol, flags))
         payload.update(self._weekly_metrics(symbol, flags))
         payload.update(self._tushare_fundamentals(ts_code, flags))
+        if payload.get("industry"):
+            payload["sector_tag"] = _sector_tag_from_text(payload.get("industry"), item.asset_subcategory, item.name)
         return payload, flags
 
     def _latest_price(self, symbol: str, flags: List[str]) -> Dict[str, Any]:
@@ -221,7 +225,7 @@ class WatchlistSignalService:
             rows = session.execute(
                 select(StockDaily).where(StockDaily.code == symbol).order_by(StockDaily.date.asc())
             ).scalars().all()
-        if len(rows) < 30 * 5:
+        if len(rows) < 10 * 5:
             flags.append("weekly_history_short")
         if not rows:
             return {"ma10w": None, "ma30w": None, "prev_ma10w": None, "prev_ma30w": None}
@@ -230,8 +234,8 @@ class WatchlistSignalService:
             return {"ma10w": None, "ma30w": None, "prev_ma10w": None, "prev_ma30w": None}
         df["date"] = pd.to_datetime(df["date"])
         weekly = df.set_index("date").resample("W-FRI").last().dropna().reset_index()
-        weekly["ma10w"] = weekly["close"].rolling(10, min_periods=10).mean()
-        weekly["ma30w"] = weekly["close"].rolling(30, min_periods=30).mean()
+        weekly["ma10w"] = weekly["close"].rolling(5, min_periods=5).mean()
+        weekly["ma30w"] = weekly["close"].rolling(10, min_periods=10).mean()
         latest = weekly.iloc[-1] if len(weekly) else None
         prev = weekly.iloc[-2] if len(weekly) >= 2 else None
         return {
@@ -249,6 +253,11 @@ class WatchlistSignalService:
             return {}
         result: Dict[str, Any] = {}
         raw: Dict[str, Any] = {}
+        stock_basic = self._ts_query(api, "stock_basic", flags, ts_code=ts_code, fields="ts_code,name,industry,area,market")
+        if stock_basic is not None and not stock_basic.empty:
+            basic_info = stock_basic.iloc[0]
+            raw["stock_basic"] = basic_info.to_dict()
+            result["industry"] = str(basic_info.get("industry") or "").strip() or None
         end = date.today().strftime("%Y%m%d")
         start = (date.today() - timedelta(days=540)).strftime("%Y%m%d")
         basic = self._ts_query(api, "daily_basic", flags, ts_code=ts_code, start_date=start, end_date=end)
@@ -272,8 +281,11 @@ class WatchlistSignalService:
             raw["fina_indicator"] = indicator.to_dict()
             result["eps_ttm"] = _first_float(indicator, ["eps", "basic_eps", "dt_eps"])
             result["bvps"] = _first_float(indicator, ["bps", "bvps"])
-            result["roe_ttm"] = _first_float(indicator, ["roe", "roe_dt", "roe_yearly"])
+            result["roe_ttm"] = _first_float(indicator, ["roe_yearly", "roe_waa", "roe_dt", "roe"])
             result["ebitda_ttm"] = _first_float(indicator, ["ebitda"])
+            result["netprofit_yoy"] = _first_float(indicator, ["netprofit_yoy", "dt_netprofit_yoy"])
+            result["debt_to_assets"] = _first_float(indicator, ["debt_to_assets"])
+            result["assets_to_eqt"] = _first_float(indicator, ["assets_to_eqt"])
         else:
             flags.append("missing_fina_indicator")
 
@@ -363,6 +375,16 @@ class WatchlistSignalService:
         return _light("L_VAL", "R", "估值处于历史高位", percentile)
 
     def _calc_quality_light(self, indicator: Dict[str, Any]) -> Dict[str, Any]:
+        if indicator.get("sector_tag") == "financial":
+            roe = _safe_float(indicator.get("roe_ttm"))
+            profit_yoy = _safe_float(indicator.get("netprofit_yoy"))
+            if roe is None or profit_yoy is None:
+                return _light("L_QUAL", "Y", "金融利润质量数据缺失")
+            if roe >= 10 and profit_yoy >= 0:
+                return _light("L_QUAL", "G", "金融利润质量健康", profit_yoy)
+            if roe >= 7 and profit_yoy >= -10:
+                return _light("L_QUAL", "Y", "金融利润质量可观察", profit_yoy)
+            return _light("L_QUAL", "R", "金融利润质量偏弱", profit_yoy)
         ocf = _safe_float(indicator.get("ocf_ttm"))
         ni = _safe_float(indicator.get("ni_ttm"))
         fcf = _safe_float(indicator.get("fcf_ttm"))
@@ -376,6 +398,16 @@ class WatchlistSignalService:
         return _light("L_QUAL", "R", "利润现金含量偏弱", cash_conv)
 
     def _calc_solvency_light(self, indicator: Dict[str, Any]) -> Dict[str, Any]:
+        if indicator.get("sector_tag") == "financial":
+            debt_to_assets = _safe_float(indicator.get("debt_to_assets"))
+            assets_to_eqt = _safe_float(indicator.get("assets_to_eqt"))
+            if debt_to_assets is None and assets_to_eqt is None:
+                return _light("L_SOLV", "Y", "金融杠杆数据缺失")
+            if (debt_to_assets is not None and debt_to_assets <= 92) and (assets_to_eqt is None or assets_to_eqt <= 13):
+                return _light("L_SOLV", "G", "金融杠杆韧性健康", debt_to_assets)
+            if (debt_to_assets is None or debt_to_assets <= 94) and (assets_to_eqt is None or assets_to_eqt <= 16):
+                return _light("L_SOLV", "Y", "金融杠杆韧性可观察", debt_to_assets)
+            return _light("L_SOLV", "R", "金融杠杆压力高", debt_to_assets)
         net_debt = _safe_float(indicator.get("net_debt"))
         ebitda = _safe_float(indicator.get("ebitda_ttm"))
         if net_debt is None or ebitda is None:
@@ -408,11 +440,11 @@ class WatchlistSignalService:
         if None in (ma10, ma30, prev10, prev30):
             flags.append("weekly_ma_missing")
             return _light("L_TECH", "Y", "周线均线数据不足")
-        if prev10 <= prev30 and ma10 > ma30:
-            return _light("L_TECH", "G", "周线 MA10 上穿 MA30")
-        if prev10 >= prev30 and ma10 < ma30:
-            return _light("L_TECH", "R", "周线 MA10 下穿 MA30")
-        return _light("L_TECH", "Y", "周线节奏中性")
+        if ma10 >= ma30:
+            reason = "周线 MA5 在 MA10 上方" if prev10 > prev30 else "周线 MA5 上穿 MA10"
+            return _light("L_TECH", "G", reason)
+        reason = "周线 MA5 在 MA10 下方" if prev10 < prev30 else "周线 MA5 下穿 MA10"
+        return _light("L_TECH", "R", reason)
 
     def _save_indicator_and_signal(self, item: WatchlistItem, indicator: Dict[str, Any], signal: Dict[str, Any]) -> None:
         as_of_date = indicator.get("as_of_date") or date.today()

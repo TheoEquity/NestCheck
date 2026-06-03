@@ -46,10 +46,15 @@ class WatchlistItemUpdateRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class WatchlistItemMoveRequest(BaseModel):
+    direction: str = Field(..., pattern="^(up|down)$")
+
+
 class WatchlistItem(BaseModel):
     id: int
     market: str
     symbol: str
+    display_symbol: Optional[str] = None
     name: Optional[str] = None
     currency: str
     asset_category: str
@@ -63,6 +68,7 @@ class WatchlistItem(BaseModel):
     analysis_frequency: str
     alert_enabled: bool
     source: str
+    sort_order: int = 0
     notes: Optional[str] = None
     alert_rule_count: int = 0
     alert_trigger_count: int = 0

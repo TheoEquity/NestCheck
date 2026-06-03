@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from src.storage import AlertRuleRecord, AlertTriggerRecord, AnalysisHistory, DatabaseManager, MarketQuote, WatchlistItem
+from src.storage import AlertRuleRecord, AlertTriggerRecord, AnalysisHistory, DatabaseManager, MarketQuote, StockDaily, WatchlistItem
 
 
 class WatchlistConflictError(ValueError):
@@ -22,6 +22,9 @@ class WatchlistRepository:
 
     def create_item(self, fields: Dict[str, Any]) -> WatchlistItem:
         with self.db.get_session() as session:
+            if "sort_order" not in fields:
+                max_order = session.execute(select(func.max(WatchlistItem.sort_order))).scalar()
+                fields["sort_order"] = int(max_order or 0) + 1
             row = WatchlistItem(**fields)
             session.add(row)
             try:
@@ -57,9 +60,32 @@ class WatchlistRepository:
             rows = session.execute(
                 select(WatchlistItem)
                 .where(where_clause)
-                .order_by(WatchlistItem.asset_category.asc(), WatchlistItem.market.asc(), WatchlistItem.symbol.asc())
+                .order_by(WatchlistItem.sort_order.asc(), WatchlistItem.id.asc())
             ).scalars().all()
             return list(rows), int(total)
+
+    def move_item(self, item_id: int, direction: str) -> Optional[WatchlistItem]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(WatchlistItem).order_by(WatchlistItem.sort_order.asc(), WatchlistItem.id.asc())
+            ).scalars().all()
+            items = list(rows)
+            index = next((idx for idx, item in enumerate(items) if item.id == item_id), None)
+            if index is None:
+                return None
+            target_index = index - 1 if direction == "up" else index + 1
+            if target_index < 0 or target_index >= len(items):
+                return items[index]
+
+            items[index], items[target_index] = items[target_index], items[index]
+            now = datetime.now()
+            for sort_order, item in enumerate(items, start=1):
+                item.sort_order = sort_order
+                item.updated_at = now
+            session.commit()
+            moved = items[target_index]
+            session.refresh(moved)
+            return moved
 
     def list_analysis_targets(self, frequency: str = "daily") -> List[WatchlistItem]:
         """获取需进行分析的标的列表。
@@ -153,6 +179,18 @@ class WatchlistRepository:
                     .limit(1)
                 ).scalar_one_or_none()
                 if row is None:
+                    daily = session.execute(
+                        select(StockDaily)
+                        .where(StockDaily.code == item.symbol)
+                        .order_by(desc(StockDaily.date), desc(StockDaily.id))
+                        .limit(1)
+                    ).scalar_one_or_none()
+                    if daily is None:
+                        continue
+                    summary[item.id] = {
+                        "latest_price": daily.close,
+                        "latest_change_pct": daily.pct_chg,
+                    }
                     continue
                 summary[item.id] = {
                     "latest_price": row.latest_price,

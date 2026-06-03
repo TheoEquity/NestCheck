@@ -8,6 +8,7 @@ export interface WatchlistItem {
   id: number;
   market: WatchlistMarket | string;
   symbol: string;
+  displaySymbol?: string | null;
   name?: string | null;
   currency: string;
   assetCategory: WatchlistAssetCategory | string;
@@ -21,6 +22,7 @@ export interface WatchlistItem {
   analysisFrequency: WatchlistAnalysisFrequency | string;
   alertEnabled: boolean;
   source: string;
+  sortOrder: number;
   notes?: string | null;
   alertRuleCount: number;
   alertTriggerCount: number;

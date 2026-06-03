@@ -87,6 +87,15 @@ class WatchlistService:
     def delete_item(self, item_id: int) -> bool:
         return self.repo.delete_item(item_id)
 
+    def move_item(self, item_id: int, direction: str) -> Dict[str, Any]:
+        normalized = str(direction or "").strip().lower()
+        if normalized not in {"up", "down"}:
+            raise ValueError("direction must be one of ['up', 'down']")
+        row = self.repo.move_item(item_id, normalized)
+        if row is None:
+            raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
+        return self.get_item(row.id)
+
     def related_alerts(self, item_id: int) -> Dict[str, List[Dict[str, Any]]]:
         row = self.repo.get_item(item_id)
         if row is None:
@@ -202,6 +211,7 @@ class WatchlistService:
             "id": row.id,
             "market": row.market,
             "symbol": row.symbol,
+            "display_symbol": self._display_symbol(row),
             "name": row.name,
             "currency": row.currency,
             "asset_category": row.asset_category,
@@ -215,6 +225,7 @@ class WatchlistService:
             "analysis_frequency": row.analysis_frequency,
             "alert_enabled": row.alert_enabled,
             "source": row.source,
+            "sort_order": int(row.sort_order or 0),
             "notes": row.notes,
             "alert_rule_count": int(summary.get("alert_rule_count") or 0),
             "alert_trigger_count": int(summary.get("alert_trigger_count") or 0),
@@ -234,6 +245,24 @@ class WatchlistService:
             "created_at": self._dt(row.created_at),
             "updated_at": self._dt(row.updated_at),
         }
+
+    @staticmethod
+    def _display_symbol(row: WatchlistItem) -> str:
+        symbol = str(row.symbol or "").strip()
+        upper = symbol.upper()
+        if "." in upper:
+            return upper
+        market = str(row.market or "").lower()
+        if market == "cn" and len(symbol) == 6 and symbol.isdigit():
+            if symbol.startswith(("6", "9")):
+                return f"{symbol}.SH"
+            if symbol.startswith(("0", "2", "3")):
+                return f"{symbol}.SZ"
+            if symbol.startswith(("4", "8")):
+                return f"{symbol}.BJ"
+        if market == "hk" and symbol.isdigit():
+            return f"{symbol.zfill(5)}.HK"
+        return upper
 
     @staticmethod
     def _serialize_alert_rule(row: AlertRuleRecord) -> Dict[str, Any]:

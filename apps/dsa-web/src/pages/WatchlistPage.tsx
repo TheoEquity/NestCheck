@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { Settings, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Settings, Plus, Trash2, X } from 'lucide-react';
 import { watchlistApi } from '../api/watchlist';
 import { marketApi, type SectorEtfConfig, type SectorEtfDashboardResponse } from '../api/market';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
@@ -89,6 +89,7 @@ const WatchlistPage: React.FC = () => {
   const [sectorSaving, setSectorSaving] = useState(false);
   const [sectorDrafts, setSectorDrafts] = useState<Record<string, SectorEtfConfig>>({});
   const [signalRefreshing, setSignalRefreshing] = useState(false);
+  const [actionItemId, setActionItemId] = useState<number | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -188,6 +189,32 @@ const WatchlistPage: React.FC = () => {
     }
   };
 
+  const moveItem = async (item: WatchlistItem, direction: 'up' | 'down') => {
+    setActionItemId(item.id);
+    try {
+      await watchlistApi.moveItem(item.id, direction);
+      await loadItems();
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setActionItemId(null);
+    }
+  };
+
+  const deleteItem = async (item: WatchlistItem) => {
+    const label = item.name || item.displaySymbol || item.symbol;
+    if (!window.confirm(`确认取消关注 ${label}？`)) return;
+    setActionItemId(item.id);
+    try {
+      await watchlistApi.deleteItem(item.id);
+      await loadItems();
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setActionItemId(null);
+    }
+  };
+
   const indexItems = items.filter(isIndexItem);
   const targetItems = items.filter((item) => !isIndexItem(item));
   void indexItems;
@@ -255,7 +282,16 @@ const WatchlistPage: React.FC = () => {
                 onUpdateDraft={updateSectorDraft}
                 onSaveConfig={() => void saveSectorConfig()}
               />
-              <WatchSectionCard title="关注标的" items={targetItems} emptyText="还没有关注标的。" refreshing={signalRefreshing} onRefresh={() => void refreshSignals()} />
+              <WatchSectionCard
+                title="关注标的"
+                items={targetItems}
+                emptyText="还没有关注标的。"
+                refreshing={signalRefreshing}
+                actionItemId={actionItemId}
+                onRefresh={() => void refreshSignals()}
+                onMove={(item, direction) => void moveItem(item, direction)}
+                onDelete={(item) => void deleteItem(item)}
+              />
             </div>
           )}
         </section>
@@ -378,7 +414,27 @@ function SectorRankingBlock({ title, items, metric, showRs = false }: { title: s
   );
 }
 
-function WatchSectionCard({ title, items, emptyText, compact = false, refreshing = false, onRefresh }: { title: string; items: WatchlistItem[]; emptyText: string; compact?: boolean; refreshing?: boolean; onRefresh?: () => void }) {
+function WatchSectionCard({
+  title,
+  items,
+  emptyText,
+  compact = false,
+  refreshing = false,
+  actionItemId = null,
+  onRefresh,
+  onMove,
+  onDelete,
+}: {
+  title: string;
+  items: WatchlistItem[];
+  emptyText: string;
+  compact?: boolean;
+  refreshing?: boolean;
+  actionItemId?: number | null;
+  onRefresh?: () => void;
+  onMove?: (item: WatchlistItem, direction: 'up' | 'down') => void;
+  onDelete?: (item: WatchlistItem) => void;
+}) {
   return (
     <Card className="flex min-h-[18rem] flex-col rounded-xl p-4 lg:min-h-full">
       <div className="mb-3 flex items-center justify-between">
@@ -392,7 +448,18 @@ function WatchSectionCard({ title, items, emptyText, compact = false, refreshing
         <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-subtle p-5 text-sm text-muted-text">{emptyText}</div>
       ) : (
         <div className="grid gap-3 overflow-y-auto pr-1">
-          {items.map((item) => <WatchCard key={item.id} item={item} compact={compact} />)}
+          {items.map((item, index) => (
+            <WatchCard
+              key={item.id}
+              item={item}
+              compact={compact}
+              actionLoading={actionItemId === item.id}
+              canMoveUp={index > 0}
+              canMoveDown={index < items.length - 1}
+              onMove={onMove}
+              onDelete={onDelete}
+            />
+          ))}
         </div>
       )}
     </Card>
@@ -408,9 +475,36 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
-function WatchCard({ item, compact = false }: { item: WatchlistItem; compact?: boolean }) {
+function WatchCard({
+  item,
+  compact = false,
+  actionLoading = false,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMove,
+  onDelete,
+}: {
+  item: WatchlistItem;
+  compact?: boolean;
+  actionLoading?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMove?: (item: WatchlistItem, direction: 'up' | 'down') => void;
+  onDelete?: (item: WatchlistItem) => void;
+}) {
   return (
     <div className="rounded-xl border border-subtle bg-surface/60 p-3.5 transition-colors hover:border-subtle-hover">
+      <div className="mb-2 flex justify-end gap-1">
+        <CardActionButton label="上移" disabled={!canMoveUp || actionLoading} onClick={() => onMove?.(item, 'up')}>
+          <ArrowUp className="h-3.5 w-3.5" />
+        </CardActionButton>
+        <CardActionButton label="下移" disabled={!canMoveDown || actionLoading} onClick={() => onMove?.(item, 'down')}>
+          <ArrowDown className="h-3.5 w-3.5" />
+        </CardActionButton>
+        <CardActionButton label="取消关注" disabled={actionLoading} danger onClick={() => onDelete?.(item)}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </CardActionButton>
+      </div>
       <div className={compact ? 'grid gap-3' : 'grid gap-3 xl:grid-cols-[minmax(7rem,0.55fr)_minmax(0,1.85fr)]'}>
         <InstrumentBlock item={item} />
         <TrafficLights item={item} />
@@ -419,12 +513,28 @@ function WatchCard({ item, compact = false }: { item: WatchlistItem; compact?: b
   );
 }
 
+function CardActionButton({ label, disabled = false, danger = false, onClick, children }: { label: string; disabled?: boolean; danger?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border border-subtle bg-background/70 text-muted-text transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 ${danger ? 'hover:border-danger/50 hover:text-danger' : ''}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function InstrumentBlock({ item }: { item: WatchlistItem }) {
   const changeTone = getChangeTone(item.latestChangePct);
+  const displaySymbol = item.displaySymbol || item.symbol;
   return (
     <div className="min-w-0">
       <div className="truncate text-sm font-semibold text-foreground">{item.name || item.symbol}</div>
-      <div className="mt-0.5 text-[11px] text-muted-text">{item.symbol}</div>
+      <div className="mt-0.5 text-[11px] text-muted-text">{displaySymbol}</div>
       <div className="mt-2 flex items-baseline gap-2 text-[11px]">
         <span className="font-mono text-base font-semibold text-foreground">{formatPrice(item.latestPrice)}</span>
         <span className={`font-mono font-semibold ${changeTone.className}`}>{formatChangePct(item.latestChangePct)}</span>
@@ -436,7 +546,7 @@ function InstrumentBlock({ item }: { item: WatchlistItem }) {
 function TrafficLights({ item }: { item: WatchlistItem }) {
   const lights = item.signalLights || [];
   return (
-    <div className="rounded-lg border border-subtle bg-background/50 px-2.5 py-2 text-[11px] text-secondary-text">
+    <div className="rounded-lg border border-subtle bg-background/50 px-3 py-2 text-[11px] text-secondary-text">
       {lights.length === 0 ? (
         <div className="text-xs text-muted-text">红绿灯待刷新</div>
       ) : (
@@ -445,11 +555,12 @@ function TrafficLights({ item }: { item: WatchlistItem }) {
             <span className="text-xs font-semibold text-foreground">{item.signalVerdictCode || 'WATCH'}</span>
             <span className="truncate text-[10px] text-muted-text">{item.signalAsOfDate || '--'}</span>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-5 gap-1.5">
             {lights.map((light) => (
-              <div key={light.code} title={light.reason} className="flex min-w-0 items-center gap-1.5 rounded-full border border-subtle bg-surface/55 px-2 py-1">
-                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ring-1 ${getLightClass(light.status)}`} />
-                <span className="truncate text-[11px] text-secondary-text">{light.label}</span>
+              <div key={light.code} title={light.reason} className="flex min-w-0 flex-col items-center gap-1 rounded-lg border border-subtle bg-surface/70 px-1.5 py-1.5">
+                <span className="h-4 w-4 shrink-0 rounded-full ring-2" style={getLightStyle(light.status)} />
+                <span className="text-[9px] font-bold leading-none text-foreground">{light.status}</span>
+                <span className="max-w-full truncate text-[10px] font-medium text-secondary-text">{light.label}</span>
               </div>
             ))}
           </div>
@@ -460,10 +571,10 @@ function TrafficLights({ item }: { item: WatchlistItem }) {
   );
 }
 
-function getLightClass(status: string): string {
-  if (status === 'G') return 'bg-emerald-400 ring-emerald-400/25';
-  if (status === 'R') return 'bg-rose-400 ring-rose-400/25';
-  return 'bg-amber-300 ring-amber-300/25';
+function getLightStyle(status: string): React.CSSProperties {
+  if (status === 'G') return { backgroundColor: 'hsl(var(--success))', boxShadow: '0 0 0 2px hsl(var(--success) / 0.22)' };
+  if (status === 'R') return { backgroundColor: 'hsl(var(--danger))', boxShadow: '0 0 0 2px hsl(var(--danger) / 0.22)' };
+  return { backgroundColor: 'hsl(var(--warning))', boxShadow: '0 0 0 2px hsl(var(--warning) / 0.22)' };
 }
 
 export default WatchlistPage;

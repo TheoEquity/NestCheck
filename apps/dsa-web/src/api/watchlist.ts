@@ -49,6 +49,11 @@ export const watchlistApi = {
     await apiClient.delete(`/api/v1/watchlist/items/${itemId}`);
   },
 
+  async moveItem(itemId: number, direction: 'up' | 'down'): Promise<WatchlistItem> {
+    const response = await apiClient.post<Record<string, unknown>>(`/api/v1/watchlist/items/${itemId}/move`, { direction });
+    return toCamelCase<WatchlistItem>(response.data);
+  },
+
   async refreshSignals(): Promise<WatchlistRefreshResponse> {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/watchlist/signals/refresh');
     return toCamelCase<WatchlistRefreshResponse>(response.data);

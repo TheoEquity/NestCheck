@@ -665,6 +665,7 @@ class WatchlistItem(Base):
     analysis_frequency = Column(String(16), nullable=False, default='daily')
     alert_enabled = Column(Boolean, nullable=False, default=True, index=True)
     source = Column(String(32), nullable=False, default='manual', index=True)
+    sort_order = Column(Integer, nullable=False, default=0, index=True)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
@@ -1369,6 +1370,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "asset_risk_class": "VARCHAR(8)",
                 "price_change_pct": "FLOAT",
                 "realized_pnl_base": "FLOAT DEFAULT 0",
+            },
+            "watchlist_items": {
+                "sort_order": "INTEGER DEFAULT 0",
             },
         }
 

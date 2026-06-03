@@ -14,6 +14,7 @@ from api.v1.schemas.watchlist import (
     WatchlistItem,
     WatchlistItemCreateRequest,
     WatchlistItemListResponse,
+    WatchlistItemMoveRequest,
     WatchlistItemUpdateRequest,
     WatchlistRelatedAlertsResponse,
     WatchlistRefreshResponse,
@@ -107,6 +108,19 @@ def update_item(item_id: int, request: WatchlistItemUpdateRequest) -> WatchlistI
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Update watchlist item failed", exc)
+
+
+@router.post("/items/{item_id}/move", response_model=WatchlistItem, responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+def move_item(item_id: int, request: WatchlistItemMoveRequest) -> WatchlistItem:
+    service = WatchlistService()
+    try:
+        return WatchlistItem(**service.move_item(item_id, request.direction))
+    except WatchlistNotFoundError as exc:
+        raise _not_found(exc)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Move watchlist item failed", exc)
 
 
 @router.delete("/items/{item_id}", response_model=WatchlistDeleteResponse, responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})

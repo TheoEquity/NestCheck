@@ -140,6 +140,14 @@ async def app_lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to seed scheduled task definitions")
 
+    try:
+        from src.storage import get_db
+        removed = get_db().cleanup_agent_data_cache()
+        if removed:
+            logger.info("Cleaned up expired agent data cache rows: %s", removed)
+    except Exception:
+        logger.exception("Failed to clean up expired agent data cache")
+
     # Start background price refresh task (daily at 20:30)
     refresh_task = asyncio.create_task(_daily_portfolio_price_refresh())
     app.state._price_refresh_task = refresh_task

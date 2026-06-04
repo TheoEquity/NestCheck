@@ -44,6 +44,7 @@ type StreamFailureEvent = {
   content?: string;
   error?: unknown;
   message?: unknown;
+  session_id?: string;
 };
 
 function getFirstMeaningfulStreamError(...candidates: Array<unknown>): unknown {
@@ -269,6 +270,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       const decoder = new TextDecoder();
       let buf = '';
       let finalContent: string | null = null;
+      let resolvedSessionId = streamSessionId;
       const currentProgressSteps: ProgressStep[] = [];
         const processLine = (line: string) => {
           if (!line.startsWith('data: ')) return;
@@ -280,6 +282,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
               throw getStreamFailureError(doneEvent, '大模型调用出错，请检查 API Key 配置');
             }
             finalContent = doneEvent.content ?? '';
+            resolvedSessionId = doneEvent.session_id || streamSessionId;
             return;
           }
 
@@ -325,6 +328,14 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
 
       if (shouldAppend) {
         set((s) => ({
+          sessionId: resolvedSessionId,
+          sessions: s.sessions.some((x) => x.session_id === resolvedSessionId)
+            ? s.sessions.filter((x) => x.session_id !== streamSessionId || x.session_id === resolvedSessionId)
+            : s.sessions.map((x) => (
+                x.session_id === streamSessionId
+                  ? { ...x, session_id: resolvedSessionId }
+                  : x
+              )),
           messages: [
             ...s.messages,
             {
@@ -339,6 +350,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
             },
           ],
         }));
+        localStorage.setItem(STORAGE_KEY_SESSION, resolvedSessionId);
       }
 
       if (currentRoute !== '/chat') {

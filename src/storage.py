@@ -894,6 +894,49 @@ class AgentProviderTurn(Base):
     )
 
 
+class AgentChatTopic(Base):
+    """Topic binding for AI chat sessions."""
+
+    __tablename__ = 'agent_chat_topics'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    topic_key = Column(String(128), nullable=False, unique=True, index=True)
+    session_id = Column(String(100), nullable=False, unique=True, index=True)
+    market = Column(String(16), nullable=False, default='unknown', index=True)
+    asset_type = Column(String(32), nullable=False, default='unknown', index=True)
+    code = Column(String(32), nullable=False, index=True)
+    name = Column(String(64), nullable=True)
+    title = Column(String(128), nullable=True)
+    message_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    last_active_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+
+class AgentDataCache(Base):
+    """Short-lived data cache for AI chat tool calls."""
+
+    __tablename__ = 'agent_data_cache'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key = Column(String(160), nullable=False, unique=True, index=True)
+    topic_key = Column(String(128), nullable=True, index=True)
+    data_type = Column(String(32), nullable=False, index=True)
+    symbol = Column(String(32), nullable=True, index=True)
+    params_json = Column(Text, nullable=False, default='{}')
+    payload_json = Column(Text, nullable=False)
+    source = Column(String(64), nullable=True)
+    as_of = Column(String(32), nullable=True, index=True)
+    fetched_at = Column(DateTime, default=datetime.now, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index('ix_agent_data_cache_topic_type', 'topic_key', 'data_type'),
+    )
+
+
 class LLMUsage(Base):
     """One row per litellm.completion() call — token-usage audit log."""
 
@@ -2993,6 +3036,176 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 )
             )
 
+    def upsert_agent_chat_topic(
+        self,
+        *,
+        topic_key: str,
+        session_id: str,
+        market: str,
+        asset_type: str,
+        code: str,
+        name: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create or update the topic binding for an AI chat session."""
+        now = datetime.now()
+        topic_key = (topic_key or "").strip()
+        session_id = (session_id or "").strip()
+        if not topic_key or not session_id:
+            raise ValueError("topic_key and session_id are required")
+
+        values = {
+            "topic_key": topic_key,
+            "session_id": session_id,
+            "market": (market or "unknown").strip() or "unknown",
+            "asset_type": (asset_type or "unknown").strip() or "unknown",
+            "code": (code or "").strip(),
+            "name": (name or None),
+            "title": (title or None),
+            "last_active_at": now,
+            "updated_at": now,
+        }
+        with self.session_scope() as session:
+            existing = session.execute(
+                select(AgentChatTopic).where(AgentChatTopic.topic_key == topic_key)
+            ).scalar_one_or_none()
+            if existing is None:
+                row = AgentChatTopic(**values, created_at=now, message_count=0)
+                session.add(row)
+            else:
+                for key, value in values.items():
+                    if key == "name" and value is None and existing.name:
+                        continue
+                    setattr(existing, key, value)
+                row = existing
+            session.flush()
+            return {
+                "topic_key": row.topic_key,
+                "session_id": row.session_id,
+                "market": row.market,
+                "asset_type": row.asset_type,
+                "code": row.code,
+                "name": row.name,
+                "title": row.title,
+            }
+
+    def get_agent_chat_topic(self, topic_key: str) -> Optional[Dict[str, Any]]:
+        """Return an AI chat topic by normalized topic key."""
+        with self.session_scope() as session:
+            row = session.execute(
+                select(AgentChatTopic).where(AgentChatTopic.topic_key == topic_key)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "topic_key": row.topic_key,
+                "session_id": row.session_id,
+                "market": row.market,
+                "asset_type": row.asset_type,
+                "code": row.code,
+                "name": row.name,
+                "title": row.title,
+                "created_at": row.created_at,
+                "last_active_at": row.last_active_at,
+            }
+
+    def get_agent_chat_topic_by_session_id(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return an AI chat topic bound to a conversation session."""
+        with self.session_scope() as session:
+            row = session.execute(
+                select(AgentChatTopic).where(AgentChatTopic.session_id == session_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "topic_key": row.topic_key,
+                "session_id": row.session_id,
+                "market": row.market,
+                "asset_type": row.asset_type,
+                "code": row.code,
+                "name": row.name,
+                "title": row.title,
+                "created_at": row.created_at,
+                "last_active_at": row.last_active_at,
+            }
+
+    def save_agent_data_cache(
+        self,
+        *,
+        cache_key: str,
+        data_type: str,
+        payload: Any,
+        topic_key: Optional[str] = None,
+        symbol: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
+        as_of: Optional[str] = None,
+        ttl_seconds: int = 86400,
+    ) -> None:
+        """Upsert one short-lived Agent data cache payload."""
+        now = datetime.now()
+        expires_at = now + timedelta(seconds=max(1, int(ttl_seconds or 86400)))
+        values = {
+            "cache_key": cache_key,
+            "topic_key": topic_key,
+            "data_type": data_type,
+            "symbol": symbol,
+            "params_json": json.dumps(params or {}, ensure_ascii=False, sort_keys=True, default=str),
+            "payload_json": json.dumps(payload, ensure_ascii=False, default=str),
+            "source": source,
+            "as_of": as_of,
+            "fetched_at": now,
+            "expires_at": expires_at,
+            "updated_at": now,
+        }
+        with self.session_scope() as session:
+            stmt = sqlite_insert(AgentDataCache).values(**values)
+            session.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["cache_key"],
+                    set_=values,
+                )
+            )
+
+    def get_agent_data_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Return a non-expired Agent data cache payload."""
+        now = datetime.now()
+        with self.session_scope() as session:
+            row = session.execute(
+                select(AgentDataCache).where(
+                    and_(
+                        AgentDataCache.cache_key == cache_key,
+                        or_(AgentDataCache.expires_at.is_(None), AgentDataCache.expires_at > now),
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            try:
+                payload = json.loads(row.payload_json or "null")
+            except json.JSONDecodeError:
+                payload = None
+            return {
+                "cache_key": row.cache_key,
+                "topic_key": row.topic_key,
+                "data_type": row.data_type,
+                "symbol": row.symbol,
+                "payload": payload,
+                "source": row.source,
+                "as_of": row.as_of,
+                "fetched_at": row.fetched_at,
+                "expires_at": row.expires_at,
+            }
+
+    def cleanup_agent_data_cache(self, before: Optional[datetime] = None) -> int:
+        """Delete expired Agent data cache rows."""
+        cutoff = before or datetime.now()
+        with self.session_scope() as session:
+            result = session.execute(
+                delete(AgentDataCache).where(AgentDataCache.expires_at <= cutoff)
+            )
+            return int(result.rowcount or 0)
+
     def conversation_session_exists(self, session_id: str) -> bool:
         """Return True when at least one message exists for the given session."""
         with self.session_scope() as session:
@@ -3056,8 +3269,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             rows = session.execute(stmt).all()
 
             results = []
+            seen_session_ids = set()
             for row in rows:
                 sid = row.session_id
+                seen_session_ids.add(sid)
                 # 取该会话第一条 user 消息作为标题
                 first_user_msg = session.execute(
                     select(ConversationMessage.content)
@@ -3070,16 +3285,53 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     .order_by(ConversationMessage.created_at)
                     .limit(1)
                 ).scalar()
-                title = (first_user_msg or "新对话")[:60]
+                topic = session.execute(
+                    select(AgentChatTopic)
+                    .where(AgentChatTopic.session_id == sid)
+                    .limit(1)
+                ).scalar_one_or_none()
+                if topic is not None:
+                    title = f"{topic.code}{f' {topic.name}' if topic.name else ''}"[:60]
+                else:
+                    title = (first_user_msg or "新对话")[:60]
+
+                last_active = row.last_active
+                if topic is not None and topic.last_active_at and (last_active is None or topic.last_active_at > last_active):
+                    last_active = topic.last_active_at
 
                 results.append({
                     "session_id": sid,
                     "title": title,
                     "message_count": row.message_count,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "last_active": row.last_active.isoformat() if row.last_active else None,
+                    "last_active": last_active.isoformat() if last_active else None,
+                    "topic_key": topic.topic_key if topic else None,
+                    "market": topic.market if topic else None,
+                    "asset_type": topic.asset_type if topic else None,
+                    "code": topic.code if topic else None,
+                    "name": topic.name if topic else None,
                 })
-            return results
+            topic_rows = session.execute(
+                select(AgentChatTopic)
+                .where(AgentChatTopic.session_id.notin_(seen_session_ids or [""]))
+                .order_by(desc(AgentChatTopic.last_active_at))
+                .limit(max(0, limit - len(results)))
+            ).scalars().all()
+            for topic in topic_rows:
+                results.append({
+                    "session_id": topic.session_id,
+                    "title": f"{topic.code}{f' {topic.name}' if topic.name else ''}"[:60],
+                    "message_count": 0,
+                    "created_at": topic.created_at.isoformat() if topic.created_at else None,
+                    "last_active": topic.last_active_at.isoformat() if topic.last_active_at else None,
+                    "topic_key": topic.topic_key,
+                    "market": topic.market,
+                    "asset_type": topic.asset_type,
+                    "code": topic.code,
+                    "name": topic.name,
+                })
+            results.sort(key=lambda item: item.get("last_active") or "", reverse=True)
+            return results[:limit]
 
     def get_conversation_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """
@@ -3111,6 +3363,24 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             删除的消息数
         """
         with self.session_scope() as session:
+            topic_keys = list(
+                session.execute(
+                    select(AgentChatTopic.topic_key).where(
+                        AgentChatTopic.session_id == session_id
+                    )
+                ).scalars().all()
+            )
+            if topic_keys:
+                session.execute(
+                    delete(AgentDataCache).where(
+                        AgentDataCache.topic_key.in_(topic_keys)
+                    )
+                )
+                session.execute(
+                    delete(AgentChatTopic).where(
+                        AgentChatTopic.session_id == session_id
+                    )
+                )
             session.execute(
                 delete(AgentProviderTurn).where(
                     AgentProviderTurn.session_id == session_id

@@ -31,7 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'asset-allocation', label: '资产配置', to: '/assets/allocation', icon: BarChart3 },
   { key: 'asset-events', label: '资产事件', to: '/assets/events', icon: Database },
   { key: 'asset-diagnosis', label: '资产诊断', to: '/assets/diagnosis', icon: HeartPulse },
-  { key: 'chat', label: '资产问答', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
+  { key: 'chat', label: 'AI问答', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
   { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
 ];
 
@@ -96,7 +96,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
                       isHorizontal ? 'right-1.5 top-1.5' : 'right-3',
                       collapsed ? 'right-2 top-2' : ''
                     )}
-                    aria-label="问股有新消息"
+                    aria-label="AI问答有新消息"
                   />
                 ) : null}
               </>

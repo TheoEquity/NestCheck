@@ -10,11 +10,14 @@ Tools:
 """
 
 import logging
+import hashlib
+import json
 from datetime import date
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.agent.tools.registry import ToolParameter, ToolDefinition
+from src.agent.runtime_context import get_agent_topic_key, is_agent_chat_mode
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +107,53 @@ def _append_history_metadata(response: dict, metadata: Dict[str, Any]) -> dict:
     if metadata:
         response.update(metadata)
     return response
+
+
+def _agent_cache_key(data_type: str, symbol: str, params: Dict[str, Any]) -> str:
+    payload = json.dumps(params or {}, ensure_ascii=False, sort_keys=True, default=str)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+    topic_key = get_agent_topic_key() or "adhoc"
+    return f"{topic_key}:{data_type}:{symbol}:{digest}"
+
+
+def _save_agent_cache(
+    *,
+    data_type: str,
+    symbol: str,
+    payload: Any,
+    params: Optional[Dict[str, Any]] = None,
+    source: Optional[str] = None,
+    ttl_seconds: int = 86400,
+) -> None:
+    try:
+        _get_db().save_agent_data_cache(
+            cache_key=_agent_cache_key(data_type, symbol, params or {}),
+            topic_key=get_agent_topic_key(),
+            data_type=data_type,
+            symbol=symbol,
+            params=params or {},
+            payload=payload,
+            source=source,
+            as_of=str(date.today()),
+            ttl_seconds=ttl_seconds,
+        )
+    except Exception as exc:
+        logger.warning("Agent data cache save failed for %s/%s: %s", data_type, symbol, exc)
+
+
+def _get_agent_cache(
+    *,
+    data_type: str,
+    symbol: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    try:
+        return _get_db().get_agent_data_cache(
+            _agent_cache_key(data_type, symbol, params or {})
+        )
+    except Exception as exc:
+        logger.warning("Agent data cache read failed for %s/%s: %s", data_type, symbol, exc)
+        return None
 
 
 def _compact_fundamental_context(fundamental_context: dict) -> dict:
@@ -290,6 +340,28 @@ get_realtime_quote_tool = ToolDefinition(
 def _handle_get_daily_history(stock_code: str, days: int = 60) -> dict:
     """Get daily OHLCV history data."""
     effective_days, metadata = _normalize_history_days(days)
+    _, normalized_code = _history_code_candidates(stock_code)
+    cache_params = {"stock_code": stock_code, "days": effective_days}
+
+    if is_agent_chat_mode():
+        cached = _get_agent_cache(
+            data_type="daily_history",
+            symbol=normalized_code,
+            params=cache_params,
+        )
+        if cached is not None:
+            records = list(cached.get("payload") or [])
+            return _append_history_metadata({
+                "code": normalized_code,
+                "source": cached.get("source") or "agent_data_cache",
+                "cache_hit": True,
+                "requested_days": effective_days,
+                "effective_days": effective_days,
+                "actual_records": len(records),
+                "partial_cache": len(records) < effective_days,
+                "total_records": len(records),
+                "data": records,
+            }, metadata)
 
     from src.services.history_loader import load_history_df
     df, source = load_history_df(stock_code, days=effective_days)
@@ -301,21 +373,30 @@ def _handle_get_daily_history(stock_code: str, days: int = 60) -> dict:
         )
 
     if source != "db_cache":
-        _, normalized_code = _history_code_candidates(stock_code)
-        try:
-            saved_count = _get_db().save_daily_data(df, normalized_code, source)
-            logger.info(
-                "Agent daily history persisted for %s (source=%s, new_records=%s)",
-                normalized_code,
-                source,
-                saved_count,
+        if is_agent_chat_mode():
+            _save_agent_cache(
+                data_type="daily_history",
+                symbol=normalized_code,
+                payload=df.tail(min(effective_days, len(df))).to_dict(orient="records"),
+                params=cache_params,
+                source=source,
+                ttl_seconds=86400,
             )
-        except Exception as exc:
-            logger.warning(
-                "Agent daily history persistence failed for %s: %s",
-                normalized_code,
-                exc,
-            )
+        else:
+            try:
+                saved_count = _get_db().save_daily_data(df, normalized_code, source)
+                logger.info(
+                    "Agent daily history persisted for %s (source=%s, new_records=%s)",
+                    normalized_code,
+                    source,
+                    saved_count,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Agent daily history persistence failed for %s: %s",
+                    normalized_code,
+                    exc,
+                )
 
     # Convert DataFrame to list of dicts (last N records)
     records = df.tail(min(effective_days, len(df))).to_dict(orient="records")

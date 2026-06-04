@@ -41,6 +41,11 @@ export interface ChatSessionItem {
   message_count: number;
   created_at: string | null;
   last_active: string | null;
+  topic_key?: string | null;
+  market?: string | null;
+  asset_type?: string | null;
+  code?: string | null;
+  name?: string | null;
 }
 
 export interface ChatSessionMessage {
@@ -48,6 +53,18 @@ export interface ChatSessionMessage {
   role: 'user' | 'assistant';
   content: string;
   created_at: string | null;
+}
+
+export interface ChatTopicResolveResponse {
+  found: boolean;
+  session_id?: string | null;
+  topic_key?: string | null;
+  title?: string | null;
+  market?: string | null;
+  asset_type?: string | null;
+  code?: string | null;
+  name?: string | null;
+  has_messages: boolean;
 }
 
 export const agentApi = {
@@ -68,6 +85,21 @@ export const agentApi = {
   async getChatSessionMessages(sessionId: string): Promise<ChatSessionMessage[]> {
     const response = await apiClient.get<{ messages: ChatSessionMessage[] }>(`/api/v1/agent/chat/sessions/${sessionId}`);
     return response.data.messages;
+  },
+  async resolveChatTopic(
+    stockCode: string,
+    stockName?: string,
+    options?: { market?: string; assetType?: string },
+  ): Promise<ChatTopicResolveResponse> {
+    const response = await apiClient.get<ChatTopicResolveResponse>('/api/v1/agent/chat/topics/resolve', {
+      params: {
+        stock_code: stockCode,
+        ...(stockName ? { stock_name: stockName } : {}),
+        ...(options?.market ? { market: options.market } : {}),
+        ...(options?.assetType ? { asset_type: options.assetType } : {}),
+      },
+    });
+    return response.data;
   },
   async deleteChatSession(sessionId: string): Promise<void> {
     await apiClient.delete(`/api/v1/agent/chat/sessions/${sessionId}`);

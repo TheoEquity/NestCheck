@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ScrollArea, Tooltip } from '../components/common';
+import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ScrollArea } from '../components/common';
 import { getParsedApiError } from '../api/error';
 import type { SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
@@ -14,7 +14,6 @@ import {
   type Message,
   type ProgressStep,
 } from '../stores/agentChatStore';
-import { downloadSession, formatSessionAsMarkdown } from '../utils/chatExport';
 import type { ChatFollowUpContext } from '../utils/chatFollowUp';
 import {
   buildFollowUpPrompt,
@@ -28,16 +27,29 @@ import { getReportText } from '../utils/reportLanguage';
 
 // Quick question examples shown on empty state
 const QUICK_QUESTIONS = [
-  { label: 'A股 股票 600519：解释当前风险和估值位置', skill: 'bull_trend' },
-  { label: '基金 指数基金 510300：适合作为长期底仓吗', skill: 'bull_trend' },
-  { label: '港股 股票 hk00700：说明主要风险点', skill: 'bull_trend' },
-  { label: '基金 固收+：怎么看回撤和持有周期', skill: 'box_oscillation' },
-  { label: 'A股 股票 601689：解释关注标的红绿灯', skill: 'bull_trend' },
-  { label: '指数 沪深300：当前更适合定投还是观望', skill: 'emotion_cycle' },
+  { label: '解释当前风险和估值位置', skill: 'bull_trend' },
+  { label: '最近新闻有什么影响', skill: 'bull_trend' },
+  { label: '当前适合加仓还是等待', skill: 'box_oscillation' },
+  { label: '说明主要风险点', skill: 'bull_trend' },
+  { label: '结合技术面看支撑位', skill: 'emotion_cycle' },
+  { label: '给出下一步观察清单', skill: 'bull_trend' },
 ];
 
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
+
+const MARKET_OPTIONS = [
+  { value: 'cn', label: 'A股' },
+  { value: 'hk', label: '港股' },
+  { value: 'us', label: '美股' },
+];
+
+const ASSET_TYPE_OPTIONS = [
+  { value: 'stock', label: '股票' },
+  { value: 'fund', label: '基金' },
+  { value: 'index', label: '指数' },
+  { value: 'bond', label: '债券' },
+];
 
 const getMessageSkillNames = (msg: Message): string[] => {
   if (msg.skillNames?.length) return msg.skillNames;
@@ -58,25 +70,22 @@ const ChatPage: React.FC = () => {
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sending, setSending] = useState(false);
   const [isFollowUpContextLoading, setIsFollowUpContextLoading] = useState(false);
-  const [sendToast, setSendToast] = useState<{
-    type: 'success' | 'error';
-    message: string;
-  } | null>(null);
   const [contextCompressionEnabled, setContextCompressionEnabled] = useState(false);
   const [contextCompressionLoaded, setContextCompressionLoaded] = useState(false);
   const [contextCompressionSaving, setContextCompressionSaving] = useState(false);
   const [contextCompressionConfigVersion, setContextCompressionConfigVersion] = useState('');
   const [contextCompressionMaskToken, setContextCompressionMaskToken] = useState('******');
-  const [contextCompressionError, setContextCompressionError] = useState<string | null>(null);
   const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [topicForm, setTopicForm] = useState({ market: 'cn', assetType: 'stock', code: '', name: '' });
+  const [activeTopic, setActiveTopic] = useState<{ market: string; assetType: string; code: string; name: string; sessionId: string } | null>(null);
+  const [topicError, setTopicError] = useState<string | null>(null);
+  const [topicResolving, setTopicResolving] = useState(false);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
-  const sendToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
   const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -89,9 +98,6 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const timers = copyResetTimerRef.current;
     return () => {
-      if (sendToastTimerRef.current !== null) {
-        window.clearTimeout(sendToastTimerRef.current);
-      }
       Object.values(timers).forEach((timerId) => {
         if (timerId !== undefined) {
           window.clearTimeout(timerId);
@@ -102,11 +108,7 @@ const ChatPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '资产问答 - NestCheck';
-  }, []);
-
-  useEffect(() => () => {
-    isMountedRef.current = false;
+    document.title = 'AI问答 - NestCheck';
   }, []);
 
   const {
@@ -214,15 +216,12 @@ const ChatPage: React.FC = () => {
         setContextCompressionConfigVersion(config.configVersion);
         setContextCompressionMaskToken(config.maskToken || '******');
         setContextCompressionLoaded(true);
-        setContextCompressionError(null);
       })
       .catch((error) => {
         if (!active) {
           return;
         }
-        const parsed = getParsedApiError(error);
         setContextCompressionLoaded(false);
-        setContextCompressionError(parsed.message || '无法读取上下文压缩配置');
         console.error('Failed to load context compression setting:', error);
       });
 
@@ -240,7 +239,6 @@ const ChatPage: React.FC = () => {
       const previousEnabled = contextCompressionEnabled;
       setContextCompressionEnabled(nextEnabled);
       setContextCompressionSaving(true);
-      setContextCompressionError(null);
 
       try {
         const result = await systemConfigApi.update({
@@ -255,10 +253,8 @@ const ChatPage: React.FC = () => {
           ],
         });
         setContextCompressionConfigVersion(result.configVersion || contextCompressionConfigVersion);
-      } catch (error) {
-        const parsed = getParsedApiError(error);
+      } catch {
         setContextCompressionEnabled(previousEnabled);
-        setContextCompressionError(parsed.message || '上下文压缩设置保存失败');
       } finally {
         setContextCompressionSaving(false);
       }
@@ -274,6 +270,54 @@ const ChatPage: React.FC = () => {
 
   const availableSkillIds = new Set(skills.map((skill) => skill.id));
   const quickQuestions = QUICK_QUESTIONS.filter((question) => availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
+
+  const canStartTopic = Boolean(topicForm.market && topicForm.assetType && topicForm.code.trim());
+  const canSendMessage = Boolean(activeTopic && input.trim() && !loading);
+
+  const applyTopicSelection = useCallback((topic: { market?: string | null; asset_type?: string | null; code?: string | null; name?: string | null; session_id?: string | null }) => {
+    if (!topic.session_id || !topic.market || !topic.asset_type || !topic.code) return;
+    const nextTopic = {
+      market: topic.market,
+      assetType: topic.asset_type,
+      code: topic.code,
+      name: topic.name || '',
+      sessionId: topic.session_id,
+    };
+    setTopicForm({
+      market: nextTopic.market,
+      assetType: nextTopic.assetType,
+      code: nextTopic.code,
+      name: nextTopic.name,
+    });
+    setActiveTopic(nextTopic);
+    setTopicError(null);
+  }, []);
+
+  const handleStartTopicChat = useCallback(async () => {
+    if (!canStartTopic || topicResolving) return;
+    setTopicResolving(true);
+    setTopicError(null);
+    const code = topicForm.code.trim();
+    const name = topicForm.name.trim();
+    try {
+      const topic = await agentApi.resolveChatTopic(code, name || undefined, {
+        market: topicForm.market,
+        assetType: topicForm.assetType,
+      });
+      if (!topic.found || !topic.session_id || !topic.market || !topic.asset_type || !topic.code) {
+        setTopicError('无法识别该标的，请检查市场、大类和代码。');
+        return;
+      }
+      applyTopicSelection(topic);
+      await switchSession(topic.session_id);
+      await loadSessions();
+    } catch (error) {
+      console.error('Failed to start topic chat:', error);
+      setTopicError(getParsedApiError(error).message || '开始问答失败');
+    } finally {
+      setTopicResolving(false);
+    }
+  }, [applyTopicSelection, canStartTopic, loadSessions, switchSession, topicForm, topicResolving]);
   const selectedSkillIdSet = new Set(selectedSkillIds);
   const skillLimitReached = selectedSkillIds.length >= MAX_SELECTED_SKILLS;
 
@@ -312,12 +356,6 @@ const ChatPage: React.FC = () => {
     setSidebarOpen(false);
   }, [requestScrollToBottom]);
 
-  const handleSwitchSession = useCallback((targetSessionId: string) => {
-    requestScrollToBottom('auto');
-    switchSession(targetSessionId);
-    setSidebarOpen(false);
-  }, [requestScrollToBottom, switchSession]);
-
   const confirmDelete = useCallback(() => {
     if (!deleteConfirmId) return;
     agentApi.deleteChatSession(deleteConfirmId)
@@ -345,7 +383,25 @@ const ChatPage: React.FC = () => {
     }
 
     const hydrationToken = ++followUpHydrationTokenRef.current;
-    setInput(buildFollowUpPrompt(stock, name));
+    void agentApi.resolveChatTopic(stock, name ?? undefined).then((topic) => {
+      if (!isMountedRef.current || followUpHydrationTokenRef.current !== hydrationToken) {
+        return;
+      }
+      if (topic.found && topic.session_id) {
+        applyTopicSelection(topic);
+        void switchSession(topic.session_id);
+        if (topic.has_messages) {
+          setInput('');
+          return;
+        }
+      }
+      setInput(buildFollowUpPrompt(stock, name));
+    }).catch((error) => {
+      console.error('Failed to resolve chat topic:', error);
+      if (isMountedRef.current && followUpHydrationTokenRef.current === hydrationToken) {
+        setInput(buildFollowUpPrompt(stock, name));
+      }
+    });
     followUpContextRef.current = {
       stock_code: stock,
       stock_name: name,
@@ -368,20 +424,27 @@ const ChatPage: React.FC = () => {
       }
     });
     setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [applyTopicSelection, searchParams, setSearchParams, switchSession]);
 
   const handleSend = useCallback(
     async (overrideMessage?: string, overrideSkillIds?: string[]) => {
       const msgText = (overrideMessage ?? input).trim();
-      if (!msgText || loading) return;
+      if (!msgText || loading || !activeTopic) return;
       const usedSkillIds = normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
       const usedSkillNames = usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
 
       const payload = {
         message: msgText,
-        session_id: sessionId,
+        session_id: activeTopic.sessionId,
         ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
-        context: followUpContextRef.current ?? undefined,
+        context: {
+          ...(followUpContextRef.current ?? {}),
+          agent_chat_mode: true,
+          stock_code: activeTopic.code,
+          stock_name: activeTopic.name || undefined,
+          market: activeTopic.market,
+          asset_type: activeTopic.assetType,
+        },
       };
       followUpHydrationTokenRef.current += 1;
       followUpContextRef.current = null;
@@ -394,7 +457,7 @@ const ChatPage: React.FC = () => {
         skillName: usedSkillNames.join('、'),
       });
     },
-    [getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
+    [activeTopic, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, startStream],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -404,21 +467,28 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  const handleSwitchSession = useCallback((targetSessionId: string) => {
+    const target = sessions.find((item) => item.session_id === targetSessionId);
+    if (target?.market && target.asset_type && target.code) {
+      applyTopicSelection({
+        session_id: target.session_id,
+        market: target.market,
+        asset_type: target.asset_type,
+        code: target.code,
+        name: target.name,
+      });
+    } else {
+      setActiveTopic(null);
+    }
+    requestScrollToBottom('auto');
+    void switchSession(targetSessionId);
+    setSidebarOpen(false);
+  }, [applyTopicSelection, requestScrollToBottom, sessions, switchSession]);
+
   const handleQuickQuestion = (q: (typeof QUICK_QUESTIONS)[0]) => {
     setSelectedSkillIds([q.skill]);
     handleSend(q.label, [q.skill]);
   };
-
-  const showSendFeedback = useCallback((nextToast: { type: 'success' | 'error'; message: string }, durationMs: number) => {
-    if (sendToastTimerRef.current !== null) {
-      window.clearTimeout(sendToastTimerRef.current);
-    }
-    setSendToast(nextToast);
-    sendToastTimerRef.current = window.setTimeout(() => {
-      setSendToast(null);
-      sendToastTimerRef.current = null;
-    }, durationMs);
-  }, []);
 
   const toggleThinking = (msgId: string) => {
     setExpandedThinking((prev) => {
@@ -560,25 +630,6 @@ const ChatPage: React.FC = () => {
           </svg>
           历史对话
         </h2>
-        <button
-          onClick={handleStartNewChat}
-          className="rounded-lg p-1.5 text-muted-text transition-all hover:bg-white/10 hover:text-foreground"
-          aria-label="开启新对话"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-        </button>
       </div>
       <ScrollArea testId="chat-session-list-scroll" viewportClassName="p-3">
         {sessionsLoading ? (
@@ -729,115 +780,100 @@ const ChatPage: React.FC = () => {
                   d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                 />
               </svg>
-              资产问答
+              AI问答
+              {activeTopic ? (
+                <span className="ml-3 inline-flex items-center gap-1 rounded-lg bg-white/5 px-2 py-0.5 text-xs text-secondary-text">
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {activeTopic.code} {activeTopic.name}
+                </span>
+              ) : null}
             </h1>
-            {messages.length > 0 && (
-              <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                <Tooltip content="导出会话为 Markdown 文件">
-                  <span className="inline-flex">
-                    <Button
-                      variant="action-primary"
-                      size="sm"
-                      onClick={() => downloadSession(messages)}
-                      aria-label="导出会话为 Markdown 文件"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                        />
-                      </svg>
-                      导出会话
-                    </Button>
-                  </span>
-                </Tooltip>
-                <Tooltip content="发送到已配置的通知机器人/邮箱">
-                  <span className="inline-flex">
-                    <Button
-                      variant="action-primary"
-                      size="sm"
-                      disabled={sending}
-                      onClick={async () => {
-                        if (sending) return;
-                        setSending(true);
-                        setSendToast(null);
-                        try {
-                          const content = formatSessionAsMarkdown(messages);
-                          await agentApi.sendChat(content);
-                          showSendFeedback({ type: 'success', message: '已发送到通知渠道' }, 3000);
-                        } catch (err) {
-                          const parsed = getParsedApiError(err);
-                          showSendFeedback({
-                            type: 'error',
-                            message: parsed.message || '发送失败',
-                          }, 5000);
-                        } finally {
-                          setSending(false);
-                        }
-                      }}
-                      aria-label="发送到已配置的通知机器人/邮箱"
-                    >
-                      {sending ? (
-                        <svg
-                          className="w-4 h-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                          />
-                        </svg>
-                      )}
-                      发送
-                    </Button>
-                  </span>
-                </Tooltip>
-              </div>
-            )}
           </div>
           <p className="text-secondary-text text-sm">
             先明确市场和资产类型，再让 AI 基于数据做知识解释和风险参考。
           </p>
-          {sendToast ? (
-            <InlineAlert
-              variant={sendToast.type === 'success' ? 'success' : 'danger'}
-              title={sendToast.type === 'success' ? '发送成功' : '发送失败'}
-              message={sendToast.message}
-              className="max-w-md rounded-xl px-3 py-2 text-xs shadow-none"
-            />
-          ) : null}
         </header>
+
+        <section className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-white/8 bg-card/82 px-3 py-2.5 shadow-soft-card">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
+            市场
+            <select
+              value={topicForm.market}
+              onChange={(event) => setTopicForm((prev) => ({ ...prev, market: event.target.value }))}
+              className="input-surface input-focus-glow h-8 rounded-lg border bg-transparent px-2 text-sm text-foreground"
+            >
+              {MARKET_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-elevated text-foreground">{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
+            大类
+            <select
+              value={topicForm.assetType}
+              onChange={(event) => setTopicForm((prev) => ({ ...prev, assetType: event.target.value }))}
+              className="input-surface input-focus-glow h-8 rounded-lg border bg-transparent px-2 text-sm text-foreground"
+            >
+              {ASSET_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-elevated text-foreground">{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
+            代码
+            <input
+              value={topicForm.code}
+              onChange={(event) => setTopicForm((prev) => ({ ...prev, code: event.target.value.trim() }))}
+              placeholder="600519 / 00700 / AAPL"
+              className="input-surface input-focus-glow h-8 w-[130px] rounded-lg border bg-transparent px-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
+            名称
+            <input
+              value={topicForm.name}
+              onChange={(event) => setTopicForm((prev) => ({ ...prev, name: event.target.value }))}
+              placeholder="可选"
+              className="input-surface input-focus-glow h-8 w-[110px] rounded-lg border bg-transparent px-2 text-sm text-foreground"
+            />
+          </label>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => void handleStartTopicChat()}
+            disabled={!canStartTopic || topicResolving}
+            isLoading={topicResolving}
+            className="h-8 whitespace-nowrap"
+          >
+            开始问答
+          </Button>
+          {topicError ? (
+            <p className="ml-auto text-xs text-danger">{topicError}</p>
+          ) : (
+            <label
+              className={cn(
+                'ml-auto inline-flex items-center gap-1.5 text-xs',
+                contextCompressionLoaded && !contextCompressionSaving
+                  ? 'cursor-pointer text-secondary-text'
+                  : 'cursor-not-allowed text-muted-text',
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={contextCompressionEnabled}
+                disabled={!contextCompressionLoaded || contextCompressionSaving}
+                onChange={(event) => void updateContextCompressionEnabled(event.target.checked)}
+                className="chat-skill-checkbox"
+              />
+              <span>上下文压缩</span>
+              <span className="text-[10px] text-muted-text">
+                {contextCompressionSaving ? '保存中…' : contextCompressionEnabled ? '已启用' : '未启用'}
+              </span>
+            </label>
+          )}
+        </section>
 
         <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
           {/* Messages */}
@@ -851,8 +887,8 @@ const ChatPage: React.FC = () => {
             {messages.length === 0 && !loading ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
-                  title="开始资产问答"
-                  description="输入时先写清市场、资产类型和代码，例如「A股 股票 600519」或「基金 指数基金 510300」。"
+                  title="选择标的后开始AI问答"
+                  description="先在上方填写市场、大类和代码并点击开始问答。系统会按代码和名称固定归集历史对话。"
                   className="max-w-2xl border-dashed bg-card/55"
                   icon={(
                     <svg
@@ -875,6 +911,7 @@ const ChatPage: React.FC = () => {
                         <button
                           key={i}
                           onClick={() => handleQuickQuestion(q)}
+                          disabled={!activeTopic}
                           className="quick-question-btn"
                         >
                           {q.label}
@@ -1038,42 +1075,7 @@ const ChatPage: React.FC = () => {
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
               ) : null}
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 py-2">
-                <label
-                  className={cn(
-                    'inline-flex items-center gap-2 text-sm',
-                    contextCompressionLoaded && !contextCompressionSaving
-                      ? 'cursor-pointer text-foreground'
-                      : 'cursor-not-allowed text-muted-text',
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={contextCompressionEnabled}
-                    disabled={!contextCompressionLoaded || contextCompressionSaving}
-                    onChange={(event) => void updateContextCompressionEnabled(event.target.checked)}
-                    className="chat-skill-checkbox"
-                  />
-                  <span className="font-medium">上下文压缩</span>
-                  <span className="text-xs text-muted-text">节省长会话 token</span>
-                </label>
-                <span className="text-xs text-muted-text">
-                  {contextCompressionSaving
-                    ? '保存中...'
-                    : contextCompressionEnabled
-                      ? '已启用'
-                      : '未启用'}
-                </span>
-              </div>
-              {contextCompressionError ? (
-                <InlineAlert
-                  variant="danger"
-                  title="上下文压缩设置未保存"
-                  message={contextCompressionError}
-                  className="rounded-xl px-3 py-2 text-xs shadow-none"
-                />
-              ) : null}
-            {skills.length > 0 && (
+              {skills.length > 0 && (
               <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
                 <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
                   策略
@@ -1134,8 +1136,8 @@ const ChatPage: React.FC = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="例如：A股 股票 600519 估值和风险怎么看？ (Enter 发送, Shift+Enter 换行)"
-                  disabled={loading}
+                  placeholder="围绕当前标的提问；如需询问其他标的，请从对应标的入口重新进入。 (Enter 发送, Shift+Enter 换行)"
+                  disabled={loading || !activeTopic}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
                   style={{ height: 'auto' }}
@@ -1148,7 +1150,7 @@ const ChatPage: React.FC = () => {
                 <Button
                   variant="primary"
                   onClick={() => handleSend()}
-                  disabled={!input.trim() || loading}
+                  disabled={!canSendMessage}
                   isLoading={loading}
                   className="btn-primary flex-shrink-0"
                 >

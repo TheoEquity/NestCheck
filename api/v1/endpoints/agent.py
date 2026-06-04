@@ -64,6 +64,12 @@ class ChatResponse(BaseModel):
     session_id: str
     error: Optional[str] = None
 
+
+class PreparedChatSession(BaseModel):
+    session_id: str
+    context: Dict[str, Any]
+    reject_message: Optional[str] = None
+
 class SkillInfo(BaseModel):
     id: str
     name: str
@@ -157,7 +163,15 @@ async def agent_chat(request: ChatRequest):
     if not config.is_agent_available():
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
         
-    session_id = request.session_id or str(uuid.uuid4())
+    prepared = _prepare_chat_session(request)
+    session_id = prepared.session_id
+    if prepared.reject_message:
+        return ChatResponse(
+            success=True,
+            content=prepared.reject_message,
+            session_id=session_id,
+            error=None,
+        )
     
     try:
         skills = request.effective_skills
@@ -166,7 +180,7 @@ async def agent_chat(request: ChatRequest):
         # Pass explicit skills into context for the orchestrator.
         # Direct assignment so caller-provided skills always take precedence
         # over any stale value carried in the context dict.
-        ctx = dict(request.context or {})
+        ctx = dict(prepared.context)
         if request.profile_id:
             ctx["profile_id"] = request.profile_id
         if skills is not None:
@@ -199,6 +213,11 @@ class SessionItem(BaseModel):
     message_count: int
     created_at: Optional[str] = None
     last_active: Optional[str] = None
+    topic_key: Optional[str] = None
+    market: Optional[str] = None
+    asset_type: Optional[str] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
 
 class SessionsResponse(BaseModel):
     sessions: List[SessionItem]
@@ -206,6 +225,67 @@ class SessionsResponse(BaseModel):
 class SessionMessagesResponse(BaseModel):
     session_id: str
     messages: List[Dict[str, Any]]
+
+
+class ChatTopicResolveResponse(BaseModel):
+    found: bool
+    session_id: Optional[str] = None
+    topic_key: Optional[str] = None
+    title: Optional[str] = None
+    market: Optional[str] = None
+    asset_type: Optional[str] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    has_messages: bool = False
+
+
+@router.get("/chat/topics/resolve", response_model=ChatTopicResolveResponse)
+async def resolve_chat_topic_session(
+    stock_code: str,
+    stock_name: Optional[str] = None,
+    market: Optional[str] = None,
+    asset_type: Optional[str] = None,
+):
+    """Resolve the stable AI chat session for a stock/fund topic."""
+    from src.agent.chat_topic import resolve_chat_topic
+    from src.storage import get_db
+
+    topic_hint = " ".join(part for part in (market, asset_type) if part)
+    topic = resolve_chat_topic(topic_hint, stock_code=stock_code, stock_name=stock_name)
+    if topic is None:
+        return ChatTopicResolveResponse(found=False)
+
+    db = get_db()
+    existing = db.get_agent_chat_topic(topic.topic_key)
+    resolved_name = stock_name or (existing.get("name") if existing else None)
+    if not resolved_name:
+        try:
+            from data_provider import DataFetcherManager
+            manager = DataFetcherManager()
+            resolved_name = manager.get_stock_name(stock_code)
+        except Exception:
+            pass
+
+    db.upsert_agent_chat_topic(
+        topic_key=topic.topic_key,
+        session_id=topic.session_id,
+        market=topic.market,
+        asset_type=topic.asset_type,
+        code=topic.code,
+        name=resolved_name,
+        title=topic.title,
+    )
+    return ChatTopicResolveResponse(
+        found=True,
+        session_id=topic.session_id,
+        topic_key=topic.topic_key,
+        title=f"{topic.code}{f' {resolved_name}' if resolved_name else ''}",
+        market=topic.market,
+        asset_type=topic.asset_type,
+        code=topic.code,
+        name=resolved_name,
+        has_messages=db.conversation_session_exists(topic.session_id),
+    )
 
 
 @router.get("/chat/sessions", response_model=SessionsResponse)
@@ -286,6 +366,85 @@ def _resolve_request_config(config, profile_id: Optional[str]):
         return resolve_profile_runtime_config(config, profile_id)
     except AgentProfileResolveError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
+    """Resolve AI chat topic routing and build request context."""
+    from src.agent.chat_topic import resolve_chat_topic
+    from src.storage import get_db
+
+    ctx = dict(request.context or {})
+    session_id = request.session_id or str(uuid.uuid4())
+    if ctx.get("agent_chat_mode") is not True:
+        return PreparedChatSession(session_id=session_id, context=ctx)
+
+    ctx["agent_chat_mode"] = True
+    db = get_db()
+    existing_topic = db.get_agent_chat_topic_by_session_id(session_id)
+    message_topic = resolve_chat_topic(
+        request.message,
+        allow_us_without_hint=existing_topic is not None,
+    )
+
+    if existing_topic is not None:
+        if message_topic is not None and message_topic.topic_key != existing_topic.get("topic_key"):
+            return PreparedChatSession(
+                session_id=session_id,
+                context=ctx,
+                reject_message=(
+                    "当前对话已绑定到 "
+                    f"{existing_topic.get('title') or existing_topic.get('topic_key')}。"
+                    "请从对应股票或基金入口重新进入后再提问。"
+                ),
+            )
+        resolved_name = ctx.get("stock_name") or existing_topic.get("name")
+        ctx.update({
+            "topic_key": existing_topic["topic_key"],
+            "topic_session_id": existing_topic["session_id"],
+            "market": existing_topic["market"],
+            "asset_type": existing_topic["asset_type"],
+            "stock_code": existing_topic["code"],
+            "stock_name": resolved_name,
+        })
+        return PreparedChatSession(session_id=session_id, context=ctx)
+
+    if not ctx.get("stock_code"):
+        return PreparedChatSession(
+            session_id=session_id,
+            context=ctx,
+            reject_message="请先从具体股票或基金入口进入 AI 问答，再围绕该标的提问。",
+        )
+
+    topic = resolve_chat_topic(
+        " ".join(str(ctx.get(key) or "") for key in ("market", "asset_type")),
+        stock_code=ctx.get("stock_code"),
+        stock_name=ctx.get("stock_name"),
+    )
+    if topic is None:
+        return PreparedChatSession(
+            session_id=session_id,
+            context=ctx,
+            reject_message="请先从具体股票或基金入口进入 AI 问答，再围绕该标的提问。",
+        )
+
+    db.upsert_agent_chat_topic(
+        topic_key=topic.topic_key,
+        session_id=topic.session_id,
+        market=topic.market,
+        asset_type=topic.asset_type,
+        code=topic.code,
+        name=ctx.get("stock_name"),
+        title=topic.title,
+    )
+    ctx.update({
+        "topic_key": topic.topic_key,
+        "topic_session_id": topic.session_id,
+        "market": topic.market,
+        "asset_type": topic.asset_type,
+        "stock_code": topic.code,
+        "stock_name": ctx.get("stock_name"),
+    })
+    return PreparedChatSession(session_id=topic.session_id, context=ctx)
 
 
 async def _run_research_in_background(
@@ -398,14 +557,28 @@ async def agent_chat_stream(request: ChatRequest):
     if not config.is_agent_available():
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
 
-    session_id = request.session_id or str(uuid.uuid4())
+    prepared = _prepare_chat_session(request)
+    session_id = prepared.session_id
+    stream_ctx = prepared.context
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
+
+    if prepared.reject_message:
+        async def reject_generator():
+            yield "data: " + json.dumps({
+                "type": "done",
+                "success": True,
+                "content": prepared.reject_message,
+                "error": None,
+                "total_steps": 0,
+                "session_id": session_id,
+            }, ensure_ascii=False) + "\n\n"
+
+        return StreamingResponse(reject_generator(), media_type="text/event-stream")
 
     # Pass explicit skills into context for the orchestrator.
     # Direct assignment so caller-provided skills always take precedence.
     skills = request.effective_skills
-    stream_ctx = dict(request.context or {})
     if request.profile_id:
         stream_ctx["profile_id"] = request.profile_id
     if skills is not None:

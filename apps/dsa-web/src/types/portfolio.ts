@@ -458,6 +458,8 @@ export interface AssetAllocationSolveRequest {
   maxDrawdownTolerance?: number;
   baseRatioMin?: number;
   baseRatioMax?: number;
+  opportunityRatioMin?: number;
+  opportunityRatioMax?: number;
 }
 
 export interface AssetAllocationSolveResponse {

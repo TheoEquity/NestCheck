@@ -394,6 +394,8 @@ export const portfolioApi = {
       max_drawdown_tolerance: payload.maxDrawdownTolerance,
       base_ratio_min: payload.baseRatioMin,
       base_ratio_max: payload.baseRatioMax,
+      opportunity_ratio_min: payload.opportunityRatioMin,
+      opportunity_ratio_max: payload.opportunityRatioMax,
     });
     const result = toCamelCase<AssetAllocationSolveResponse>(response.data);
     return {

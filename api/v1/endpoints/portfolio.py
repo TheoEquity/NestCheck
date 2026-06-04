@@ -720,6 +720,10 @@ def solve_asset_allocation(request: AssetAllocationSolveRequest) -> AssetAllocat
         raw_base_max = request.base_ratio_max if request.base_ratio_max is not None else 1.0
         base_min = min(raw_base_min, raw_base_max)
         base_max = max(raw_base_min, raw_base_max)
+        raw_opportunity_min = request.opportunity_ratio_min if request.opportunity_ratio_min is not None else 0.0
+        raw_opportunity_max = request.opportunity_ratio_max if request.opportunity_ratio_max is not None else 1.0
+        opportunity_min = min(raw_opportunity_min, raw_opportunity_max)
+        opportunity_max = max(raw_opportunity_min, raw_opportunity_max)
 
         alpha = 1000.0
         beta = 1.0
@@ -740,8 +744,10 @@ def solve_asset_allocation(request: AssetAllocationSolveRequest) -> AssetAllocat
 
         constraints = [
             {"type": "eq", "fun": lambda weights: np.sum(weights) - 1.0},
-            {"type": "ineq", "fun": lambda weights: weights[0] + weights[1] - base_min},
-            {"type": "ineq", "fun": lambda weights: base_max - (weights[0] + weights[1])},
+            {"type": "ineq", "fun": lambda weights: weights[0] - base_min},
+            {"type": "ineq", "fun": lambda weights: base_max - weights[0]},
+            {"type": "ineq", "fun": lambda weights: weights[3] + weights[4] - opportunity_min},
+            {"type": "ineq", "fun": lambda weights: opportunity_max - (weights[3] + weights[4])},
             {"type": "ineq", "fun": lambda weights: max_drawdown_tolerance - float(np.dot(weights, drawdowns))},
         ]
         bounds = [(0.0, 1.0) for _ in required_classes]

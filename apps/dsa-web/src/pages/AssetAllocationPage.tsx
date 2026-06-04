@@ -35,6 +35,8 @@ const AssetAllocationPage: React.FC = () => {
     maxDrawdownTolerance: '',
     baseRatioMin: '',
     baseRatioMax: '',
+    opportunityRatioMin: '',
+    opportunityRatioMax: '',
   });
   const [allocationDraft, setAllocationDraft] = useState<Record<string, string>>({});
   const [plans, setPlans] = useState<AssetAllocationPlanItem[]>([]);
@@ -169,7 +171,7 @@ const AssetAllocationPage: React.FC = () => {
         }),
       );
 
-      setAllocationDraft(Object.fromEntries(Object.entries(allocation).map(([key, value]) => [key, String(value)])));
+      applyAllocationDraft(allocation);
       calculatePortfolioResult(allocation, latestDefinitions);
     } catch (err) {
       setSolverError(err instanceof Error ? err.message : '实仓测算失败');
@@ -191,6 +193,54 @@ const AssetAllocationPage: React.FC = () => {
   const getDraftRatio = (riskClass: string) => {
     const parsed = Number(allocationDraft[riskClass] ?? '');
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const roundAllocationForDraft = (allocation: Record<string, number>, opportunityMax?: number) => {
+    const orderedClasses = ['R1', 'R2', 'R3', 'R4', 'R5'];
+    const roundedEntries = orderedClasses.map(code => [code, Math.round(allocation[code] ?? 0)] as [string, number]);
+    const total = roundedEntries.reduce((sum, [, value]) => sum + value, 0);
+
+    if (roundedEntries.length > 0 && total !== 100) {
+      const adjustIndex = roundedEntries.reduce((bestIndex, [code], index) => {
+        const value = allocation[code] ?? 0;
+        const currentFraction = Math.abs(value - Math.round(value));
+        const bestCode = roundedEntries[bestIndex][0];
+        const bestValue = allocation[bestCode] ?? 0;
+        const bestFraction = Math.abs(bestValue - Math.round(bestValue));
+        return currentFraction > bestFraction ? index : bestIndex;
+      }, 0);
+      roundedEntries[adjustIndex] = [roundedEntries[adjustIndex][0], Math.max(0, roundedEntries[adjustIndex][1] + 100 - total)];
+    }
+
+    if (opportunityMax != null) {
+      const opportunityLimit = Math.floor(opportunityMax * 100);
+      const r4Index = orderedClasses.indexOf('R4');
+      const r5Index = orderedClasses.indexOf('R5');
+      const opportunityTotal = roundedEntries[r4Index][1] + roundedEntries[r5Index][1];
+      let overflow = Math.max(0, opportunityTotal - opportunityLimit);
+
+      if (overflow > 0) {
+        const r5Reduction = Math.min(roundedEntries[r5Index][1], overflow);
+        roundedEntries[r5Index][1] -= r5Reduction;
+        overflow -= r5Reduction;
+        const r4Reduction = Math.min(roundedEntries[r4Index][1], overflow);
+        roundedEntries[r4Index][1] -= r4Reduction;
+
+        const reduced = r5Reduction + r4Reduction;
+        const receiverIndex = ['R1', 'R2', 'R3'].reduce((bestIndex, code) => {
+          const index = orderedClasses.indexOf(code);
+          return roundedEntries[index][1] >= roundedEntries[bestIndex][1] ? index : bestIndex;
+        }, 0);
+        roundedEntries[receiverIndex][1] += reduced;
+      }
+    }
+
+    return Object.fromEntries(roundedEntries);
+  };
+
+  const applyAllocationDraft = (allocation: Record<string, number>, opportunityMax?: number) => {
+    const roundedAllocation = roundAllocationForDraft(allocation, opportunityMax);
+    setAllocationDraft(Object.fromEntries(Object.entries(roundedAllocation).map(([key, value]) => [key, String(value)])));
   };
 
   const handleCreatePlan = async () => {
@@ -264,6 +314,8 @@ const AssetAllocationPage: React.FC = () => {
         maxDrawdownTolerance: parseOptionalPercentInput(solverInput.maxDrawdownTolerance),
         baseRatioMin: parseOptionalPercentInput(solverInput.baseRatioMin),
         baseRatioMax: parseOptionalPercentInput(solverInput.baseRatioMax),
+        opportunityRatioMin: parseOptionalPercentInput(solverInput.opportunityRatioMin),
+        opportunityRatioMax: parseOptionalPercentInput(solverInput.opportunityRatioMax),
       });
       await fetchLatestDefinitions();
       setSolverResult({
@@ -272,7 +324,7 @@ const AssetAllocationPage: React.FC = () => {
         allocation: result.allocation,
       });
       setSolverError(null);
-      setAllocationDraft(Object.fromEntries(Object.entries(result.allocation).map(([key, value]) => [key, String(value)])));
+      applyAllocationDraft(result.allocation, parseOptionalPercentInput(solverInput.opportunityRatioMax));
     } catch {
       await solveAllocationWithLatestDefinitions();
     }
@@ -305,60 +357,98 @@ const AssetAllocationPage: React.FC = () => {
     const rawBaseMax = parsePercentInput(solverInput.baseRatioMax, 1);
     const baseMin = Math.min(rawBaseMin, rawBaseMax);
     const baseMax = Math.max(rawBaseMin, rawBaseMax);
+    const rawOpportunityMin = parsePercentInput(solverInput.opportunityRatioMin, 0);
+    const rawOpportunityMax = parsePercentInput(solverInput.opportunityRatioMax, 1);
+    const opportunityMin = Math.min(rawOpportunityMin, rawOpportunityMax);
+    const opportunityMax = Math.max(rawOpportunityMin, rawOpportunityMax);
     const target = targetMax || targetMin;
     const alpha = 1000;
     const beta = 1;
 
-    let best: SolverResult | null = null;
-    let bestScore = Number.POSITIVE_INFINITY;
+    const searchState: { best: SolverResult | null; bestScore: number } = {
+      best: null,
+      bestScore: Number.POSITIVE_INFINITY,
+    };
 
-    for (let r1 = 0; r1 <= 100; r1 += 1) {
-      for (let r2 = 0; r2 <= 100 - r1; r2 += 1) {
-        const baseRatio = (r1 + r2) / 100;
-        if (baseRatio < baseMin || baseRatio > baseMax) continue;
+    const evaluateAllocation = (r1: number, r2: number, r3: number, r4: number) => {
+      const rounded = [r1, r2, r3, r4].map(value => Number(value.toFixed(2)));
+      const r5 = Number((100 - rounded[0] - rounded[1] - rounded[2] - rounded[3]).toFixed(2));
+      if (r5 < -0.001) return;
 
-        for (let r3 = 0; r3 <= 100 - r1 - r2; r3 += 1) {
-          for (let r4 = 0; r4 <= 100 - r1 - r2 - r3; r4 += 1) {
-            const r5 = 100 - r1 - r2 - r3 - r4;
-            const weights = [r1, r2, r3, r4, r5].map(value => value / 100);
-            const expectedReturn = weights.reduce((sum, weight, idx) => sum + weight * profiles[idx].expectedReturn, 0);
-            const maxDrawdown = weights.reduce((sum, weight, idx) => sum + weight * profiles[idx].maxDrawdown, 0);
-            if (maxDrawdown > maxDrawdownTolerance) continue;
+      const baseRatio = rounded[0] / 100;
+      if (baseRatio < baseMin || baseRatio > baseMax) return;
+      const opportunityRatio = (rounded[3] + r5) / 100;
+      if (opportunityRatio < opportunityMin || opportunityRatio > opportunityMax) return;
 
-            const targetDistance = expectedReturn < targetMin
-              ? targetMin - expectedReturn
-              : expectedReturn > targetMax
-                ? expectedReturn - targetMax
-                : Math.abs(expectedReturn - target);
-            const score = alpha * targetDistance ** 2 + beta * (maxDrawdown ** 2);
-            if (score < bestScore) {
-              bestScore = score;
-              best = {
-                expectedReturn,
-                maxDrawdown,
-                allocation: {
-                  R1: r1,
-                  R2: r2,
-                  R3: r3,
-                  R4: r4,
-                  R5: r5,
-                },
-              };
+      const weights = [...rounded, r5].map(value => value / 100);
+      const expectedReturn = weights.reduce((sum, weight, idx) => sum + weight * profiles[idx].expectedReturn, 0);
+      const maxDrawdown = weights.reduce((sum, weight, idx) => sum + weight * profiles[idx].maxDrawdown, 0);
+      if (maxDrawdown > maxDrawdownTolerance) return;
+
+      const targetDistance = expectedReturn < targetMin
+        ? targetMin - expectedReturn
+        : expectedReturn > targetMax
+          ? expectedReturn - targetMax
+          : Math.abs(expectedReturn - target);
+      const score = alpha * targetDistance ** 2 + beta * (maxDrawdown ** 2);
+      if (score < searchState.bestScore) {
+        searchState.bestScore = score;
+        searchState.best = {
+          expectedReturn,
+          maxDrawdown,
+          allocation: {
+            R1: rounded[0],
+            R2: rounded[1],
+            R3: rounded[2],
+            R4: rounded[3],
+            R5: r5,
+          },
+        };
+      }
+    };
+
+    const searchRange = (step: number, ranges?: Record<'R1' | 'R2' | 'R3' | 'R4', [number, number]>) => {
+      const r1Start = ranges ? ranges.R1[0] : 0;
+      const r1End = ranges ? ranges.R1[1] : 100;
+      const r2Start = ranges ? ranges.R2[0] : 0;
+      const r2End = ranges ? ranges.R2[1] : 100;
+      const r3Start = ranges ? ranges.R3[0] : 0;
+      const r3End = ranges ? ranges.R3[1] : 100;
+      const r4Start = ranges ? ranges.R4[0] : 0;
+      const r4End = ranges ? ranges.R4[1] : 100;
+
+      for (let r1 = r1Start; r1 <= r1End; r1 += step) {
+        for (let r2 = r2Start; r2 <= Math.min(r2End, 100 - r1); r2 += step) {
+          for (let r3 = r3Start; r3 <= Math.min(r3End, 100 - r1 - r2); r3 += step) {
+            for (let r4 = r4Start; r4 <= Math.min(r4End, 100 - r1 - r2 - r3); r4 += step) {
+              evaluateAllocation(r1, r2, r3, r4);
             }
           }
         }
       }
+    };
+
+    searchRange(1);
+    if (searchState.best) {
+      const allocation = searchState.best.allocation;
+      const refineRanges: Record<'R1' | 'R2' | 'R3' | 'R4', [number, number]> = {
+        R1: [Math.max(0, allocation.R1 - 1), Math.min(100, allocation.R1 + 1)],
+        R2: [Math.max(0, allocation.R2 - 1), Math.min(100, allocation.R2 + 1)],
+        R3: [Math.max(0, allocation.R3 - 1), Math.min(100, allocation.R3 + 1)],
+        R4: [Math.max(0, allocation.R4 - 1), Math.min(100, allocation.R4 + 1)],
+      };
+      searchRange(0.25, refineRanges);
     }
 
-    if (!best) {
+    if (!searchState.best) {
       setSolverResult(null);
       setSolverError('当前约束下无法求解出可行配置');
       return;
     }
 
-    setSolverResult(best);
+    setSolverResult(searchState.best);
     setSolverError(null);
-    setAllocationDraft(Object.fromEntries(Object.entries(best.allocation).map(([key, value]) => [key, String(value)])));
+    applyAllocationDraft(searchState.best.allocation, opportunityMax);
   };
 
   if (loading) {
@@ -422,7 +512,7 @@ const AssetAllocationPage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-[96px_20px_1fr_20px] items-center gap-2 text-sm">
-                <label className="text-secondary-text">最高回撤容忍度</label>
+                <label className="text-secondary-text">最大回撤</label>
                 <span className="text-secondary-text">&lt;</span>
                 <input
                   type="number"
@@ -453,7 +543,28 @@ const AssetAllocationPage: React.FC = () => {
                 />
                 <span className="text-secondary-text">%</span>
               </div>
-              <p className="pl-24 text-xs text-secondary-text">R1 + R2 最低要求</p>
+              <p className="pl-24 text-xs text-secondary-text">R1 范围约束；主题仓为 R2 + R3</p>
+
+              <div className="grid grid-cols-[96px_1fr_18px_1fr_20px] items-center gap-2 text-sm">
+                <label className="text-secondary-text">机会仓比例</label>
+                <input
+                  type="number"
+                  value={solverInput.opportunityRatioMin}
+                  onChange={(e) => updateSolverInput('opportunityRatioMin', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="下限"
+                />
+                <span className="text-center text-secondary-text">-</span>
+                <input
+                  type="number"
+                  value={solverInput.opportunityRatioMax}
+                  onChange={(e) => updateSolverInput('opportunityRatioMax', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="上限"
+                />
+                <span className="text-secondary-text">%</span>
+              </div>
+              <p className="pl-24 text-xs text-secondary-text">R4 + R5 范围约束</p>
 
               <div className="rounded-lg border border-border/60 p-4">
                 <div className={`${CARD_TITLE_CLASS} mb-3`}>最优方案</div>
@@ -582,11 +693,11 @@ const AssetAllocationPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-2 text-foreground">{formatPlanDate(plan.generatedAt)}</td>
-                    <td className="py-2 text-right text-foreground">{plan.r1Ratio.toFixed(2)}%</td>
-                    <td className="py-2 text-right text-foreground">{plan.r2Ratio.toFixed(2)}%</td>
-                    <td className="py-2 text-right text-foreground">{plan.r3Ratio.toFixed(2)}%</td>
-                    <td className="py-2 text-right text-foreground">{plan.r4Ratio.toFixed(2)}%</td>
-                    <td className="py-2 text-right text-foreground">{plan.r5Ratio.toFixed(2)}%</td>
+                    <td className="py-2 text-right text-foreground">{Math.round(plan.r1Ratio)}%</td>
+                    <td className="py-2 text-right text-foreground">{Math.round(plan.r2Ratio)}%</td>
+                    <td className="py-2 text-right text-foreground">{Math.round(plan.r3Ratio)}%</td>
+                    <td className="py-2 text-right text-foreground">{Math.round(plan.r4Ratio)}%</td>
+                    <td className="py-2 text-right text-foreground">{Math.round(plan.r5Ratio)}%</td>
                     <td className="py-2">
                       <div className="flex items-center justify-end gap-2">
                         <button

@@ -436,6 +436,8 @@ class AssetAllocationSolveRequest(BaseModel):
     max_drawdown_tolerance: Optional[float] = Field(None, ge=0, le=1)
     base_ratio_min: Optional[float] = Field(None, ge=0, le=1)
     base_ratio_max: Optional[float] = Field(None, ge=0, le=1)
+    opportunity_ratio_min: Optional[float] = Field(None, ge=0, le=1)
+    opportunity_ratio_max: Optional[float] = Field(None, ge=0, le=1)
 
 
 class AssetAllocationSolveResponse(BaseModel):

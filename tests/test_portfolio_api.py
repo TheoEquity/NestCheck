@@ -89,6 +89,31 @@ class PortfolioApiTestCase(unittest.TestCase):
         )
         self.db.save_daily_data(df, code=symbol, data_source="portfolio-api-test")
 
+    def _seed_risk_definitions(self) -> None:
+        from src.storage import AssetRiskDefinition
+
+        rows = [
+            ("R1", 0.02, 0.01, 0.01, 0.0),
+            ("R2", 0.03, 0.03, 0.03, 0.05),
+            ("R3", 0.06, 0.08, 0.10, 0.20),
+            ("R4", 0.08, 0.20, 0.30, 1.0),
+            ("R5", 0.12, 0.30, 0.50, 1.0),
+        ]
+        with self.db.get_session() as session:
+            for code, expected_return, volatility, max_drawdown, equity_weight in rows:
+                session.add(
+                    AssetRiskDefinition(
+                        asset_risk_class=code,
+                        name=code,
+                        expected_return=expected_return,
+                        volatility=volatility,
+                        max_drawdown=max_drawdown,
+                        equity_weight=equity_weight,
+                        is_active=True,
+                    )
+                )
+            session.commit()
+
     def test_account_event_snapshot_flow(self) -> None:
         create_resp = self.client.post(
             "/api/v1/portfolio/accounts",
@@ -417,6 +442,25 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(delete_trade.status_code, 405)
         self.assertEqual(delete_cash.status_code, 405)
         self.assertEqual(delete_corp.status_code, 405)
+
+    def test_allocation_solve_constrains_base_and_opportunity_ratios(self) -> None:
+        self._seed_risk_definitions()
+
+        resp = self.client.post(
+            "/api/v1/portfolio/allocation/solve",
+            json={
+                "max_drawdown_tolerance": 0.50,
+                "base_ratio_min": 0.20,
+                "base_ratio_max": 0.20,
+                "opportunity_ratio_min": 0.30,
+                "opportunity_ratio_max": 0.30,
+            },
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        allocation = resp.json()["allocation"]
+        self.assertAlmostEqual(allocation["R1"], 20.0, delta=0.2)
+        self.assertAlmostEqual(allocation["R4"] + allocation["R5"], 30.0, delta=0.2)
 
     def test_create_trade_busy_returns_409(self) -> None:
         with patch(

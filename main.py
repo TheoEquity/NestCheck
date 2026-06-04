@@ -736,16 +736,19 @@ def main() -> int:
 
     # === 仅 Web 服务模式：不自动执行分析 ===
     if args.serve_only:
-        logger.info("模式: 仅 Web 服务")
-        logger.info(f"Web 服务运行中: http://{args.host}:{args.port}")
+        logger.info("模式：仅 Web 服务")
+        logger.info(f"Web 服务运行中：http://{args.host}:{args.port}")
         logger.info("通过 /api/v1/analysis/analyze 接口触发分析")
-        logger.info(f"API 文档: http://{args.host}:{args.port}/docs")
+        logger.info(f"API 文档：http://{args.host}:{args.port}/docs")
         logger.info("按 Ctrl+C 退出...")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("\n用户中断，程序退出")
+        # 使用 uvicorn 启动 FastAPI，激活 lifespan 和后台任务（价格刷新、市场缓存刷新等）
+        import uvicorn
+        uvicorn.run(
+            "api.app:app",
+            host=args.host,
+            port=args.port,
+            log_level=(config.log_level or "INFO").lower(),
+        )
         return 0
 
     try:

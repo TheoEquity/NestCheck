@@ -5,8 +5,13 @@ import { schedulerApi, type SchedulerTask } from '../../api/scheduler';
 import { getParsedApiError, type ParsedApiError } from '../../api/error';
 import { CheckCircle, XCircle, AlertTriangle, RefreshCw, PlayCircle, Database } from 'lucide-react';
 
-/* ───── 内置只读任务列表（后台已托管，前端不允许改动） ───── */
-const READONLY_TASK_KEYS = new Set(['scheduled_task', 'seasonality_cache_refresh']);
+/* ───── 系统后台托管任务：页面只展示状态，执行时机由服务端代码或系统配置控制 ───── */
+const READONLY_CONFIG_TASK_KEYS = new Set([
+  'market_cache_refresh',
+  'seasonality_cache_refresh',
+  'agent_event_monitor',
+]);
+const MANUAL_TRIGGER_TASK_KEYS = new Set(['market_cache_refresh']);
 
 /* ───── 类型定义 ───── */
 
@@ -201,7 +206,7 @@ export const SchedulerTasksPanel: React.FC = () => {
       await schedulerApi.updateTaskSchedule(taskKey, { schedule_time: timeVal || null });
       setEditingKey(null);
       setEditSchedule('');
-      setTriggerMessage('定时配置已更新（需重启服务生效）');
+      setTriggerMessage('定时配置已更新');
       setTimeout(() => void loadData(), 500);
     } catch {
       setTriggerMessage('更新失败');
@@ -320,7 +325,7 @@ export const SchedulerTasksPanel: React.FC = () => {
               ) : (
                 <div className="flex items-center gap-1">
                   <span>{displayTime}</span>
-                  {task.scheduleType === 'daily' && !READONLY_TASK_KEYS.has(task.taskKey) && (
+                  {task.scheduleType === 'daily' && !READONLY_CONFIG_TASK_KEYS.has(task.taskKey) && (
                     <button
                       className="text-muted-text hover:text-foreground transition-colors"
                       onClick={() => { setEditingKey(task.taskKey); setEditSchedule(task.scheduleTime || ''); }}
@@ -361,8 +366,8 @@ export const SchedulerTasksPanel: React.FC = () => {
                 size="sm"
                 variant="outline"
                 onClick={() => handleTrigger(task.taskKey)}
-                disabled={triggerLoading === task.taskKey || task.taskKey === 'agent_event_monitor' || READONLY_TASK_KEYS.has(task.taskKey)}
-                className={`gap-1 text-xs ${READONLY_TASK_KEYS.has(task.taskKey) ? 'opacity-40 cursor-not-allowed' : ''}`}
+                disabled={triggerLoading === task.taskKey || !MANUAL_TRIGGER_TASK_KEYS.has(task.taskKey)}
+                className={`gap-1 text-xs ${!MANUAL_TRIGGER_TASK_KEYS.has(task.taskKey) ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 <PlayCircle className="w-3.5 h-3.5" />
                 {triggerLoading === task.taskKey ? '执行中' : '触发'}
@@ -373,10 +378,10 @@ export const SchedulerTasksPanel: React.FC = () => {
             <div className="col-span-1 flex justify-center">
               <button
                 onClick={() => handleToggle(task.taskKey, task.enabled)}
-                disabled={toggleLoading === task.taskKey || READONLY_TASK_KEYS.has(task.taskKey)}
+                disabled={toggleLoading === task.taskKey || READONLY_CONFIG_TASK_KEYS.has(task.taskKey)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   task.enabled ? 'bg-primary' : 'bg-muted'
-                } ${READONLY_TASK_KEYS.has(task.taskKey) ? 'cursor-not-allowed opacity-40' : ''}`}
+                } ${READONLY_CONFIG_TASK_KEYS.has(task.taskKey) ? 'cursor-not-allowed opacity-40' : ''}`}
               >
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -392,7 +397,7 @@ export const SchedulerTasksPanel: React.FC = () => {
       {/* 底部 */}
       <div className="flex items-center justify-between pt-2 border-t border-border/40">
         <p className="text-[11px] text-muted-text">
-          共 {tasks.length} 个定时任务 · 修改定时配置后需重启服务生效
+          共 {tasks.length} 个系统任务 · 执行时间由后台服务和系统配置控制，页面支持手动触发市场数据刷新
         </p>
         <Button size="sm" variant="outline" onClick={() => void loadData()}>
           <RefreshCw className="w-3.5 h-3.5 mr-1.5" />

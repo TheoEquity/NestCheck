@@ -3,8 +3,8 @@
 EventMonitor — lightweight event-driven alert system.
 
 Monitors a set of stocks for threshold events and triggers
-notifications when conditions are met.  Designed to run as a
-background task (e.g. via ``--schedule`` or a dedicated loop).
+notifications when conditions are met. Designed to run as a
+background task through system tasks or a dedicated loop.
 
 Currently supported runtime events:
 - Price crossing threshold (above / below)

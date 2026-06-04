@@ -73,7 +73,6 @@ Dockerfile 已采用多阶段构建，前端会在镜像构建时自动打包。
 
 | 模式 | 启动命令 | 描述 |
 |------|----------|------|
-| 定时任务模式（默认） | `python main.py --schedule` | 按计划执行股票分析 |
 | FastAPI 模式 | `python main.py --serve` | 启动 FastAPI 并执行分析 |
 | 仅 FastAPI 模式 | `python main.py --serve-only` | 仅启动 FastAPI，不执行分析 |
 | 仅大盘复盘 | `python main.py --market-review` | 仅执行大盘复盘分析 |
@@ -86,7 +85,6 @@ Dockerfile 已采用多阶段构建，前端会在镜像构建时自动打包。
 4. 输入你需要的启动命令，例如：
     - 启动 FastAPI：`python main.py --serve`
     - 仅启动 FastAPI：`python main.py --serve-only --host 0.0.0.0 --port 8000`
-    - 启动定时任务：`python main.py --schedule`
 5. 点击「保存」
 6. 重启服务
 
@@ -243,8 +241,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 你可以在 Zeabur 上部署多个实例，用于不同的功能：
 
 1. 一个实例用于 API 服务（`python main.py --serve-only`）
-2. 一个实例用于定时任务（`python main.py --schedule`）
-3. 一个实例用于机器人（`python main.py --discord-bot`）
+2. 一个实例用于机器人（`python main.py --discord-bot`）
 
 确保它们共享同一个 `/app/data` 存储卷，以共享数据库。
 

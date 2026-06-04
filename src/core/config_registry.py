@@ -2308,33 +2308,6 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": ["reserved_flag"],
     },
-    "SCHEDULE_TIME": {
-        "title": "Schedule Time",
-        "description": "Daily schedule time in HH:MM format.",
-        "category": "system",
-        "data_type": "time",
-        "ui_control": "time",
-        "is_sensitive": False,
-        "is_required": False,
-        "is_editable": True,
-        "default_value": "18:00",
-        "options": [],
-        "validation": {"pattern": r"^([01]\d|2[0-3]):[0-5]\d$"},
-        "display_order": 10,
-        "help_key": "settings.system.schedule",
-        "examples": [
-            "SCHEDULE_TIME=18:00",
-            "SCHEDULE_ENABLED=true",
-            "SCHEDULE_RUN_IMMEDIATELY=false",
-        ],
-        "docs": [
-            {
-                "label": "完整指南：其他配置",
-                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#其他配置",
-            },
-        ],
-        "warning_codes": ["local_timezone"],
-    },
     "HTTP_PROXY": {
         "title": "HTTP Proxy",
         "description": "Optional HTTP proxy endpoint.",
@@ -2449,7 +2422,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "RUN_IMMEDIATELY": {
         "title": "Run Immediately",
-        "description": "Whether to run analysis immediately on startup (non-schedule mode).",
+        "description": "Whether to run analysis immediately on one-shot startup.",
         "category": "system",
         "data_type": "boolean",
         "ui_control": "switch",
@@ -2464,33 +2437,6 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "examples": [
             "RUN_IMMEDIATELY=true",
             "RUN_IMMEDIATELY=false",
-        ],
-        "docs": [
-            {
-                "label": "完整指南：其他配置",
-                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#其他配置",
-            },
-        ],
-        "warning_codes": ["restart_required"],
-    },
-    "SCHEDULE_ENABLED": {
-        "title": "Schedule Enabled",
-        "description": "Enable daily scheduled analysis run.",
-        "category": "system",
-        "data_type": "boolean",
-        "ui_control": "switch",
-        "is_sensitive": False,
-        "is_required": False,
-        "is_editable": True,
-        "default_value": "false",
-        "options": [],
-        "validation": {},
-        "display_order": 8,
-        "help_key": "settings.system.schedule",
-        "examples": [
-            "SCHEDULE_ENABLED=true",
-            "SCHEDULE_TIME=18:00",
-            "SCHEDULE_RUN_IMMEDIATELY=false",
         ],
         "docs": [
             {
@@ -2559,32 +2505,6 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             },
         ],
         "warning_codes": ["trusted_proxy_only"],
-    },
-    "SCHEDULE_RUN_IMMEDIATELY": {
-        "title": "Schedule Run Immediately",
-        "description": "Whether to run one analysis immediately on startup in schedule mode.",
-        "category": "system",
-        "data_type": "boolean",
-        "ui_control": "switch",
-        "is_sensitive": False,
-        "is_required": False,
-        "is_editable": True,
-        "default_value": "true",
-        "options": [],
-        "validation": {},
-        "display_order": 11,
-        "help_key": "settings.system.schedule",
-        "examples": [
-            "SCHEDULE_RUN_IMMEDIATELY=true",
-            "SCHEDULE_RUN_IMMEDIATELY=false",
-        ],
-        "docs": [
-            {
-                "label": "完整指南：其他配置",
-                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#其他配置",
-            },
-        ],
-        "warning_codes": ["restart_required"],
     },
     "TRADING_DAY_CHECK_ENABLED": {
         "title": "Trading Day Check",
@@ -3404,7 +3324,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "AGENT_EVENT_MONITOR_ENABLED": {
         "title": "Event Monitor",
-        "description": "Enable background Event Monitor polling in schedule mode.",
+        "description": "Enable background Event Monitor polling for system tasks.",
         "category": "agent",
         "data_type": "boolean",
         "ui_control": "switch",
@@ -3457,7 +3377,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "AGENT_EVENT_ALERT_RULES_JSON": {
         "title": "Event Alert Rules",
         "description": (
-            "JSON array of Event Monitor rules loaded by schedule mode. "
+            "JSON array of Event Monitor rules loaded by system tasks. "
             "Legacy JSON supports only price_cross, price_change_percent, and volume_spike. "
             "Technical indicator, watchlist, portfolio, and market light alert rules "
             "are available through the Alert API/Web center."

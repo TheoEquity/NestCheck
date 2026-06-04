@@ -721,7 +721,7 @@ class Config:
     agent_context_compression_profile: str = AGENT_CONTEXT_COMPRESSION_DEFAULT_PROFILE
     agent_context_compression_trigger_tokens: int = 12000
     agent_context_protected_turns: int = 4
-    agent_event_monitor_enabled: bool = False  # Enable periodic event-driven alert checks in schedule mode
+    agent_event_monitor_enabled: bool = False  # Enable periodic event-driven alert checks in system tasks
     agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
     agent_event_alert_rules_json: str = ""  # JSON array of serialized EventMonitor rules
 
@@ -869,12 +869,12 @@ class Config:
     http_proxy: Optional[str] = None  # HTTP 代理 (例如: http://127.0.0.1:10809)
     https_proxy: Optional[str] = None # HTTPS 代理
     
-    # === 定时任务配置 ===
-    schedule_enabled: bool = False            # 是否启用定时任务
-    schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
-    schedule_cron: str = ""                   # CRON 表达式（优先级高于 schedule_time）
-    schedule_run_immediately: bool = True     # 启动时是否立即执行一次
-    run_immediately: bool = True              # 启动时是否立即执行一次（非定时模式）
+    # === 启动配置 ===
+    schedule_enabled: bool = False            # legacy compatibility, scheduler mode has been removed
+    schedule_time: str = "18:00"              # legacy compatibility
+    schedule_cron: str = ""                   # legacy compatibility
+    schedule_run_immediately: bool = True     # legacy compatibility
+    run_immediately: bool = True              # 启动时是否立即执行一次
     market_review_enabled: bool = True        # 是否启用大盘复盘
     # 大盘复盘市场区域：cn(A股)、hk(港股)、us(美股)、both(三市场)，us 适合仅关注美股的用户
     market_review_region: str = "cn"
@@ -985,9 +985,6 @@ class Config:
         {
             "STOCK_LIST",
             "RUN_IMMEDIATELY",
-            "SCHEDULE_ENABLED",
-            "SCHEDULE_TIME",
-            "SCHEDULE_RUN_IMMEDIATELY",
         }
     )
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES_CAPTURED = False
@@ -1375,37 +1372,6 @@ class Config:
             else True
         )
 
-        schedule_run_immediately_env = cls._resolve_env_value(
-            'SCHEDULE_RUN_IMMEDIATELY',
-            prefer_env_file=True,
-        )
-        # Keep backward compatibility for container/process overrides:
-        # when RUN_IMMEDIATELY is explicitly provided by the runtime but the
-        # schedule-specific alias is absent, schedule mode should inherit the
-        # legacy process value instead of being pulled back to the persisted
-        # `.env` copy of SCHEDULE_RUN_IMMEDIATELY.
-        if (
-            not cls._had_bootstrap_runtime_env_key('SCHEDULE_RUN_IMMEDIATELY')
-            and cls._has_bootstrap_runtime_env_override('RUN_IMMEDIATELY')
-        ):
-            schedule_run_immediately = legacy_run_immediately
-        else:
-            schedule_run_immediately = (
-                schedule_run_immediately_env.lower() == 'true'
-                if schedule_run_immediately_env is not None
-                else legacy_run_immediately
-            )
-        schedule_time_value = cls._resolve_env_value(
-            'SCHEDULE_TIME',
-            default='18:00',
-            prefer_env_file=True,
-        )
-        schedule_cron_value = cls._resolve_env_value(
-            'SCHEDULE_CRON',
-            default='',
-            prefer_env_file=True,
-        )
-
         report_language_raw = cls._resolve_report_language_env_value(
             preexisting_report_language
         )
@@ -1670,14 +1636,10 @@ class Config:
             config_validate_mode=os.getenv('CONFIG_VALIDATE_MODE', 'warn').lower(),
             http_proxy=os.getenv('HTTP_PROXY'),
             https_proxy=os.getenv('HTTPS_PROXY'),
-            schedule_enabled=cls._resolve_env_value(
-                'SCHEDULE_ENABLED',
-                default='false',
-                prefer_env_file=True,
-            ).lower() == 'true',
-            schedule_time=(schedule_time_value or '18:00').strip() or '18:00',
-            schedule_cron=(schedule_cron_value or '').strip(),
-            schedule_run_immediately=schedule_run_immediately,
+            schedule_enabled=False,
+            schedule_time='18:00',
+            schedule_cron='',
+            schedule_run_immediately=legacy_run_immediately,
             run_immediately=legacy_run_immediately,
             market_review_enabled=os.getenv('MARKET_REVIEW_ENABLED', 'true').lower() == 'true',
             market_review_region=cls._parse_market_review_region(

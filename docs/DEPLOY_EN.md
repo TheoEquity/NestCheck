@@ -125,11 +125,8 @@ vim .env  # Fill in configuration
 # Single run
 python main.py
 
-# Scheduled task mode (foreground)
-python main.py --schedule
-
-# Background run (using nohup)
-nohup python main.py --schedule > /dev/null 2>&1 &
+# Web/API service
+python main.py --serve-only --host 0.0.0.0 --port 8000
 ```
 
 ---
@@ -155,7 +152,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/stock-analyzer
 Environment="PATH=/opt/stock-analyzer/venv/bin"
-ExecStart=/opt/stock-analyzer/venv/bin/python main.py --schedule
+ExecStart=/opt/stock-analyzer/venv/bin/python main.py --serve-only --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=30
 
@@ -198,8 +195,6 @@ journalctl -u stock-analyzer -f
 
 | Config Item | Default | Description |
 |--------|--------|------|
-| `SCHEDULE_ENABLED` | `false` | Enable scheduled tasks |
-| `SCHEDULE_TIME` | `18:00` | Daily execution time |
 | `MARKET_REVIEW_ENABLED` | `true` | Enable market review |
 | `ANSPIRE_API_KEYS` | - | Anspire LLM and news search (recommended) |
 | `AIHUBMIX_KEY` | - | AIHubMix one-key multi-model access (recommended) |

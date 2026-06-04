@@ -362,30 +362,15 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响登录限流、审计和真实 IP 识别。'],
     notes: ['不可信代理链上开启会允许客户端伪造来源 IP。'],
   },
-  'settings.system.schedule': {
-    title: '定时任务',
-    summary: '控制是否启用每日定时分析以及启动时是否立即执行一次。',
-    usage: 'SCHEDULE_TIME 使用 HH:MM 24 小时格式；SCHEDULE_ENABLED 和 SCHEDULE_RUN_IMMEDIATELY 控制定时模式启动行为。',
-    valueNotes: [
-      '已运行的 schedule 模式会在下一轮调度检查中读取新的 SCHEDULE_TIME 并重建 daily job。',
-      'SCHEDULE_ENABLED 和 SCHEDULE_RUN_IMMEDIATELY 属于启动期行为，保存后不会启动、停止或重建当前 scheduler。',
-      '定时任务触发时会读取当前保存的 STOCK_LIST。',
-    ],
-    impact: ['影响 schedule 模式下自动分析频率、启动行为和通知推送时间。'],
-    notes: [
-      '注意运行环境时区，容器和服务器时区可能与本地不同。',
-      '若当前进程未以 schedule 模式启动，保存这些字段不会自动创建调度器。',
-    ],
-  },
   'settings.system.RUN_IMMEDIATELY': {
     title: '启动后立即运行',
     summary: '控制非定时模式启动时是否立即执行一次分析。',
     usage: '需要只启动服务、不立即分析时设为 false。',
-    valueNotes: ['与 SCHEDULE_RUN_IMMEDIATELY 分别控制非定时和定时模式。'],
+    valueNotes: ['仅影响 main.py 的普通单次运行流程。'],
     impact: ['影响服务启动后的首次分析行为。'],
     notes: [
-      '这是非 schedule 模式的启动期单次运行配置，保存后不会让当前 WebUI/API 进程立即触发分析。',
-      'CLI 参数和运行模式也会影响最终行为；修改后需重启非 schedule 进程后生效。',
+      '这是启动期单次运行配置，保存后不会让当前 WebUI/API 进程立即触发分析。',
+      'CLI 参数和运行模式也会影响最终行为；修改后需重启进程后生效。',
     ],
   },
   'settings.system.TRADING_DAY_CHECK_ENABLED': {
@@ -1175,30 +1160,15 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects login rate limiting, auditing, and client IP detection.'],
     notes: ['Do not enable it on an untrusted proxy chain.'],
   },
-  'settings.system.schedule': {
-    title: 'Schedule',
-    summary: 'Controls daily scheduled analysis and whether startup runs immediately.',
-    usage: 'SCHEDULE_TIME uses HH:MM 24-hour format. SCHEDULE_ENABLED and SCHEDULE_RUN_IMMEDIATELY control schedule-mode startup behavior.',
-    valueNotes: [
-      'An already-running schedule mode reads a new SCHEDULE_TIME on the next scheduler check and rebuilds the daily job.',
-      'SCHEDULE_ENABLED and SCHEDULE_RUN_IMMEDIATELY are startup-time settings; saving them does not start, stop, or rebuild the current scheduler.',
-      'Scheduled runs read the currently saved STOCK_LIST.',
-    ],
-    impact: ['Affects automatic analysis frequency, startup behavior, and notification timing in schedule mode.'],
-    notes: [
-      'Check the runtime timezone, especially in containers and servers.',
-      'If the current process was not started in schedule mode, saving these fields will not create a scheduler.',
-    ],
-  },
   'settings.system.RUN_IMMEDIATELY': {
     title: 'Run Immediately',
     summary: 'Controls whether non-schedule startup runs one analysis immediately.',
     usage: 'Set false when you want to start the service without analysis.',
-    valueNotes: ['SCHEDULE_RUN_IMMEDIATELY controls schedule mode separately.'],
+    valueNotes: ['Only affects the normal one-shot main.py run flow.'],
     impact: ['Affects the first analysis after service startup.'],
     notes: [
-      'This is a startup-time setting for non-schedule mode; saving it will not trigger analysis in the running WebUI/API process.',
-      'CLI arguments and run mode can also affect final behavior. Restart a non-schedule process for changes to take effect.',
+      'This is a startup-time setting; saving it will not trigger analysis in the running WebUI/API process.',
+      'CLI arguments and run mode can also affect final behavior. Restart the process for changes to take effect.',
     ],
   },
   'settings.system.TRADING_DAY_CHECK_ENABLED': {
@@ -1449,10 +1419,10 @@ const settingsHelpEnUS: SettingsHelpMap = {
   },
   'settings.agent.event_monitor': {
     title: 'Event Monitor',
-    summary: 'Enables background event monitoring in schedule mode with periodic rule polling.',
+    summary: 'Enables background event monitoring with periodic rule polling.',
     usage: 'AGENT_EVENT_MONITOR_ENABLED turns on monitoring; AGENT_EVENT_MONITOR_INTERVAL_MINUTES sets the polling interval.',
     valueNotes: [
-      'Only effective in schedule mode.',
+      'Effective only when the runtime starts a dedicated event monitor loop.',
       'Very short intervals may increase API call frequency.',
     ],
     impact: ['Affects background alert detection frequency and notification timing.'],
@@ -1464,7 +1434,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
     usage: 'JSON array format. Each rule has alert_type, stock_code, and condition fields. Only price_cross, price_change_percent, and volume_spike are supported.',
     valueNotes: [
       'Technical indicator, watchlist, portfolio, and market light rules are managed through the Alert API or Web alert center, not this JSON.',
-      'Rules are evaluated periodically by the event monitor in schedule mode.',
+      'Rules are evaluated periodically by the event monitor loop.',
     ],
     impact: ['Affects background alert detection and notification delivery.'],
     notes: ['This is a legacy configuration method. For advanced rules, use the alert center.'],

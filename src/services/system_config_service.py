@@ -1433,30 +1433,7 @@ class SystemConfigService:
                 (
                     f"{', '.join(sorted(startup_only_run_keys))} 已写入 .env。"
                     "它属于启动期单次运行配置：当前已运行的 WebUI/API 进程不会因为本次保存立即触发分析；"
-                    "请重启当前进程后，在非 schedule 模式下按新值生效。"
-                )
-            )
-
-        startup_only_schedule_keys = submitted_keys & {
-            "SCHEDULE_ENABLED",
-            "SCHEDULE_RUN_IMMEDIATELY",
-        }
-        if startup_only_schedule_keys:
-            warnings.append(
-                (
-                    f"{', '.join(sorted(startup_only_schedule_keys))} 已写入 .env。"
-                    "这些属于启动期调度模式配置：当前已运行的 WebUI/API 进程不会因为本次保存启动、"
-                    "停止或重建 scheduler；请重启当前进程，并以 schedule 模式重新启动后生效。"
-                )
-            )
-
-        if "SCHEDULE_TIME" in submitted_keys:
-            schedule_time = (current_map.get("SCHEDULE_TIME", "") or "").strip() or "18:00"
-            warnings.append(
-                (
-                    f"SCHEDULE_TIME={schedule_time} 已写入 .env。"
-                    "如果当前进程已经以 schedule 模式运行，scheduler 会在下一轮检查中自动重建 daily job；"
-                    "如果当前进程未以 schedule 模式运行，本次保存不会启动 scheduler。"
+                    "请重启当前进程后按新值生效。"
                 )
             )
 

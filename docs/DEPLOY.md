@@ -129,16 +129,10 @@ vim .env  # 填入配置
 # 单次运行
 python main.py
 
-# 定时任务模式（前台运行）
-python main.py --schedule
-
-# 后台运行（使用 nohup）
-nohup python main.py --schedule > /dev/null 2>&1 &
-
 # 启动 Web 管理界面（云服务器需先在 .env 中设置 WEBUI_HOST=0.0.0.0）
 python main.py --webui-only
 
-# 启动 Web 界面（启动时执行一次分析；需每日定时请加 --schedule 或设 SCHEDULE_ENABLED=true）
+# 启动 Web 界面（启动时执行一次分析）
 python main.py --webui
 ```
 
@@ -167,7 +161,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/stock-analyzer
 Environment="PATH=/opt/stock-analyzer/venv/bin"
-ExecStart=/opt/stock-analyzer/venv/bin/python main.py --schedule
+ExecStart=/opt/stock-analyzer/venv/bin/python main.py --serve-only --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=30
 
@@ -210,8 +204,6 @@ journalctl -u stock-analyzer -f
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `SCHEDULE_ENABLED` | `false` | 是否启用定时任务 |
-| `SCHEDULE_TIME` | `18:00` | 每日执行时间 |
 | `MARKET_REVIEW_ENABLED` | `true` | 是否启用大盘复盘 |
 | `ANSPIRE_API_KEYS` | - | Anspire 大模型与新闻搜索（推荐） |
 | `AIHUBMIX_KEY` | - | AIHubMix 一 Key 多模型（推荐） |

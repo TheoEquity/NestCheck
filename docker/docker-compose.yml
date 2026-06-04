@@ -3,9 +3,7 @@
 # ===================================
 # 
 # 使用方式:
-#   定时模式: docker-compose -f ./docker/docker-compose.yml up -d
-#   FastAPI模式: docker-compose -f ./docker/docker-compose.yml up -d server
-#   同时启动: docker-compose -f ./docker/docker-compose.yml up -d analyzer server
+#   Web/API模式: docker-compose -f ./docker/docker-compose.yml up -d server
 
 name: daily-stock-analysis
 version: '3.8'
@@ -53,11 +51,6 @@ x-common: &common
         memory: 256M
 
 services:
-  # 定时任务模式
-  analyzer:
-    <<: *common
-    container_name: stock-analyzer
-
   # FastAPI 模式
   server:
     <<: *common

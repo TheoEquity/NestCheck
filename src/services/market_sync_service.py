@@ -4,6 +4,8 @@
 - 统一落库到 stock_daily 表
 """
 
+import gc
+import os
 import akshare as ak
 import pandas as pd
 import logging
@@ -231,4 +233,5 @@ def sync_market_data(days=30):
             logger.error(f"Sync failed for {name}({code}): {e}")
 
     logger.info(f"同步完成: {stats['success']}/{stats['total']}")
+    gc.collect()
     return stats

@@ -84,4 +84,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # 默认命令（可被覆盖）
-CMD ["python", "main.py", "--schedule"]
+CMD ["python", "main.py", "--serve-only", "--host", "0.0.0.0", "--port", "8000"]

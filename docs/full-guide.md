@@ -407,8 +407,6 @@ daily_stock_analysis/
 | `MARKET_REVIEW_REGION` | 大盘复盘市场区域：cn(A股)、hk(港股)、us(美股)、both(三市场)，us 适合仅关注美股的用户 | `cn` |
 | `MARKET_REVIEW_COLOR_SCHEME` | 大盘复盘指数涨跌颜色：`green_up`=绿涨红跌（默认），`red_up`=红涨绿跌 | `green_up` |
 | `TRADING_DAY_CHECK_ENABLED` | 交易日检查：默认 `true`，非交易日跳过执行；设为 `false` 或使用 `--force-run` 可强制执行（Issue #373） | `true` |
-| `SCHEDULE_ENABLED` | 启用定时任务 | `false` |
-| `SCHEDULE_TIME` | 定时执行时间 | `18:00` |
 | `LOG_DIR` | 日志目录 | `./logs` |
 
 ---
@@ -436,9 +434,7 @@ cp .env.example .env
 vim .env  # 填入 API Key 和配置
 
 # 3. 启动容器
-docker-compose -f ./docker/docker-compose.yml up -d server     # Web 服务模式（推荐，提供 API 与 WebUI）
-docker-compose -f ./docker/docker-compose.yml up -d analyzer   # 定时任务模式
-docker-compose -f ./docker/docker-compose.yml up -d            # 同时启动两种模式
+docker-compose -f ./docker/docker-compose.yml up -d server
 
 # 4. 访问 WebUI
 # http://localhost:8000
@@ -481,8 +477,7 @@ docker run -d \
 | 命令 | 说明 | 端口 |
 |------|------|------|
 | `docker-compose -f ./docker/docker-compose.yml up -d server` | Web 服务模式，提供 API 与 WebUI | 8000 |
-| `docker-compose -f ./docker/docker-compose.yml up -d analyzer` | 定时任务模式，每日自动执行 | - |
-| `docker-compose -f ./docker/docker-compose.yml up -d` | 同时启动两种模式 | 8000 |
+| `docker-compose -f ./docker/docker-compose.yml up -d` | 启动默认 Web 服务 | 8000 |
 
 ### Docker Compose 配置
 
@@ -507,11 +502,6 @@ x-common: &common
     - ../strategies:/app/strategies:ro
 
 services:
-  # 定时任务模式
-  analyzer:
-    <<: *common
-    container_name: stock-analyzer
-
   # FastAPI 模式
   server:
     <<: *common
@@ -605,7 +595,6 @@ python main.py --no-market-review     # 仅个股分析
 python main.py --stocks 600519,300750 # 指定股票
 python main.py --dry-run              # 仅获取数据，不 AI 分析
 python main.py --no-notify            # 不发送推送
-python main.py --schedule             # 定时任务模式
 python main.py --force-run            # 非交易日也强制执行（Issue #373）
 python main.py --debug                # 调试模式（详细日志）
 python main.py --workers 5            # 指定并发数
@@ -658,44 +647,16 @@ schedule:
 3. 若当天是非交易日且希望仍执行，将 `force_run` 设为 `true`
 4. 点击 `Run workflow`
 
-### 本地定时任务
+### 系统任务
 
-内建的定时任务调度器支持每天在指定时间（默认 18:00）运行分析。
+Web 服务启动后会注册系统任务。市场缓存刷新与关注标的红绿灯刷新由 20:30 的 `market_cache_refresh` 承担；“大盘与情绪数据初始化”入口用于首次建库、空库修复或手动全量补数据。
 
-#### 命令行方式
-
-```bash
-# 启动定时模式（启动时立即执行一次，随后每天 18:00 执行）
-python main.py --schedule
-
-# 启动定时模式（启动时不执行，仅等待下次定时触发）
-python main.py --schedule --no-run-immediately
-```
-
-> 说明：定时模式每次触发前都会重新读取当前保存的 `STOCK_LIST`。如果同时传入 `--stocks`，该参数不会锁定后续计划执行的股票列表；需要临时只跑指定股票时，请使用非定时的单次运行命令。
->
-> 从 `python main.py --schedule`、`python main.py --serve --schedule` 或等价内置调度模式启动后，WebUI 保存新的 `SCHEDULE_TIME` 会在下一轮调度检查内自动重绑 daily job，无需重启进程；旧的执行时间不会继续保留。
-
-#### 环境变量方式
-
-你也可以通过环境变量配置定时行为（适用于 Docker 或 .env）：
+#### 启动行为环境变量
 
 | 变量名 | 说明 | 默认值 | 示例 |
 |--------|------|:-------:|:-----:|
-| `SCHEDULE_ENABLED` | 是否启用定时任务 | `false` | `true` |
-| `SCHEDULE_TIME` | 每日执行时间 (HH:MM) | `18:00` | `09:30` |
-| `SCHEDULE_RUN_IMMEDIATELY` | 定时模式启动时是否立即运行一次；未显式设置时沿用 `RUN_IMMEDIATELY` 的运行时覆盖语义 | `true` | `false` |
-| `RUN_IMMEDIATELY` | 非定时模式启动时是否立即运行一次；同时作为未显式设置 `SCHEDULE_RUN_IMMEDIATELY` 时的 legacy 回退 | `true` | `false` |
+| `RUN_IMMEDIATELY` | `main.py` 单次启动时是否立即运行一次 | `true` | `false` |
 | `TRADING_DAY_CHECK_ENABLED` | 交易日检查：非交易日跳过执行；设为 `false` 可强制执行 | `true` | `false` |
-
-例如在 Docker 中配置：
-
-```bash
-# 设置启动时不立即分析
-docker run -e SCHEDULE_ENABLED=true -e SCHEDULE_RUN_IMMEDIATELY=false ...
-```
-
-> 兼容说明：如果运行时显式传入 `RUN_IMMEDIATELY`，但没有单独传 `SCHEDULE_RUN_IMMEDIATELY`，内置调度模式会继续继承前者，避免被 `.env` 中持久化的 `SCHEDULE_RUN_IMMEDIATELY` 旧值反向覆盖。
 
 #### 交易日判断（Issue #373）
 
@@ -1366,7 +1327,7 @@ A: 检查是否启用了 Actions，以及 cron 表达式是否正确（注意是
 
 ## Agent 事件告警监控
 
-`AGENT_EVENT_MONITOR_ENABLED=true` 后，schedule 模式会按 `AGENT_EVENT_MONITOR_INTERVAL_MINUTES` 运行告警 worker。worker 每轮读取 Alert API 创建并启用的持久化规则，同时继续兼容 `AGENT_EVENT_ALERT_RULES_JSON` 中的 legacy 规则；触发后仍发送到现有通知渠道。Alert API / Web 持久化规则支持实时价、涨跌幅、成交量、日线技术指标、`watchlist`、`portfolio_holdings`、`portfolio_account`，以及 `market` 大盘红绿灯目标；legacy JSON 仍仅支持三类基础规则。
+`AGENT_EVENT_MONITOR_ENABLED=true` 后，系统任务会按 `AGENT_EVENT_MONITOR_INTERVAL_MINUTES` 运行告警 worker。worker 每轮读取 Alert API 创建并启用的持久化规则，同时继续兼容 `AGENT_EVENT_ALERT_RULES_JSON` 中的 legacy 规则；触发后仍发送到现有通知渠道。Alert API / Web 持久化规则支持实时价、涨跌幅、成交量、日线技术指标、`watchlist`、`portfolio_holdings`、`portfolio_account`，以及 `market` 大盘红绿灯目标；legacy JSON 仍仅支持三类基础规则。
 
 > 兼容与迁移说明：本节记录当前事件告警规则（含 `price_change_percent`）运行时行为，未变更模型名、provider、Base URL、LiteLLM、`OPENAI_*`、`DEEPSEEK_*`、`GEMINI_*` 等外部模型/API 配置语义。legacy JSON 不会被自动迁移、删除或改写；若需回退，删除或关闭 `AGENT_EVENT_MONITOR_ENABLED` 即可停止后台告警 worker。
 

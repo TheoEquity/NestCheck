@@ -160,7 +160,6 @@ python main.py --debug
 python main.py --dry-run
 python main.py --stocks 600519,hk00700,AAPL
 python main.py --market-review
-python main.py --schedule
 python main.py --serve-only
 ```
 

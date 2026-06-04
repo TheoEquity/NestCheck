@@ -196,7 +196,6 @@ class TestSettingsHelpMetadata(unittest.TestCase):
         "NEWS_STRATEGY_PROFILE",
         "WECHAT_WEBHOOK_URL",
         "EMAIL_RECEIVERS",
-        "SCHEDULE_TIME",
         "ADMIN_AUTH_ENABLED",
         # PR3 Phase 1: Agent + Event Alert
         "AGENT_MODE",
@@ -288,8 +287,6 @@ class TestSettingsHelpMetadata(unittest.TestCase):
     def test_restart_warning_codes_match_runtime_behavior(self):
         restart_required_keys = (
             "RUN_IMMEDIATELY",
-            "SCHEDULE_ENABLED",
-            "SCHEDULE_RUN_IMMEDIATELY",
             "WEBUI_HOST",
             "WEBUI_PORT",
             "LOG_LEVEL",
@@ -297,9 +294,6 @@ class TestSettingsHelpMetadata(unittest.TestCase):
         for key in restart_required_keys:
             field = get_field_definition(key)
             self.assertIn("restart_required", field.get("warning_codes", []))
-
-        schedule_time = get_field_definition("SCHEDULE_TIME")
-        self.assertNotIn("restart_required", schedule_time.get("warning_codes", []))
 
     def test_schema_response_includes_help_metadata(self):
         schema = build_schema_response()

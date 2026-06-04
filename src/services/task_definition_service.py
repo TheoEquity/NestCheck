@@ -16,27 +16,18 @@ logger = logging.getLogger(__name__)
 # ─── 种子任务列表 ───
 SEED_TASKS: List[Dict] = [
     {
-        "task_key": "scheduled_task",
-        "name": "大盘复盘",
-        "description": "每日定时执行大盘分析，包括个股技术面、新闻面、资金面综合研判，生成研报并通过通知渠道推送。",
-        "schedule_type": "daily",
-        "schedule_time": None,  # 跟随 .env SCHEDULE_TIME
-        "interval_seconds": None,
-        "enabled": False,
-    },
-    {
         "task_key": "market_cache_refresh",
         "name": "市场数据刷新",
-        "description": "市场相关指标及标的资产数据更新及首页市场缓存刷新（趋势、情绪、雷达、相关性等），全年择时由低频任务单独维护。",
+        "description": "Web 服务后台托管的市场数据刷新入口：每日 20:30 刷新组合价格、风险指标、板块 ETF、自选信号和首页市场缓存；交易时段另有 5 分钟市场缓存刷新循环。",
         "schedule_type": "daily",
         "schedule_time": "20:30",
         "interval_seconds": None,
-        "enabled": False,
+        "enabled": True,
     },
     {
         "task_key": "seasonality_cache_refresh",
         "name": "全年择时缓存刷新",
-        "description": "低频刷新沪深300近5年月度季节性统计，写入 market_cache.seasonality 供首页读取。",
+        "description": "全年择时缓存维护入口，当前随市场缓存刷新链路维护，无独立手动触发操作。",
         "schedule_type": "daily",
         "schedule_time": "20:30",
         "interval_seconds": None,
@@ -45,13 +36,14 @@ SEED_TASKS: List[Dict] = [
     {
         "task_key": "agent_event_monitor",
         "name": "Agent 事件监控",
-        "description": "后台常驻任务，周期性轮询 Agent 运行状态和事件队列，处理异步任务进度更新与结果回调。",
+        "description": "告警 worker 展示项；实际开关和间隔由系统配置 AGENT_EVENT_MONITOR_ENABLED / AGENT_EVENT_MONITOR_INTERVAL_MINUTES 控制。",
         "schedule_type": "interval",
         "schedule_time": None,
         "interval_seconds": 300,
         "enabled": True,
     },
 ]
+SUPPORTED_TASK_KEYS = tuple(task["task_key"] for task in SEED_TASKS)
 
 
 def ensure_seed_tasks() -> None:
@@ -81,12 +73,21 @@ def list_tasks() -> List[Dict]:
     """列出所有任务定义"""
     db = DatabaseManager.get_instance()
     with db.session_scope() as session:
-        rows = session.execute(select(ScheduledTask).order_by(ScheduledTask.id)).fetchall()
-        return [_task_to_dict(r[0]) for r in rows]
+        rows = session.execute(
+            select(ScheduledTask).where(ScheduledTask.task_key.in_(SUPPORTED_TASK_KEYS))
+        ).fetchall()
+        task_by_key = {r[0].task_key: r[0] for r in rows}
+        return [
+            _task_to_dict(task_by_key[key])
+            for key in SUPPORTED_TASK_KEYS
+            if key in task_by_key
+        ]
 
 
 def get_task(task_key: str) -> Optional[Dict]:
     """获取单个任务定义"""
+    if task_key not in SUPPORTED_TASK_KEYS:
+        return None
     db = DatabaseManager.get_instance()
     with db.session_scope() as session:
         row = session.execute(
@@ -99,6 +100,8 @@ def get_task(task_key: str) -> Optional[Dict]:
 
 def update_task(task_key: str, **kwargs) -> Optional[Dict]:
     """更新任务定义，返回更新后的记录；任务不存在时返回 None"""
+    if task_key not in SUPPORTED_TASK_KEYS:
+        return None
     allowed = {"name", "description", "schedule_type", "schedule_time",
                "interval_seconds", "enabled"}
     filtered = {k: v for k, v in kwargs.items() if k in allowed}

@@ -62,7 +62,7 @@ def list_scheduler_tasks() -> List[Dict[str, Any]]:
             next_run = "-"
             if task_def["enabled"]:
                 if task_def["schedule_type"] == "daily":
-                    t = task_def.get("schedule_time") or getattr(_get_config(), 'SCHEDULE_TIME', '18:00')
+                    t = task_def.get("schedule_time") or getattr(_get_config(), 'schedule_time', '18:00')
                     next_run = f"每日 {t}"
                 elif task_def["schedule_type"] == "interval":
                     secs = task_def.get("interval_seconds") or 300
@@ -111,13 +111,12 @@ def get_task_history(task_name: str, limit: int = 50) -> List[Dict[str, Any]]:
     """获取任务执行历史"""
     try:
         from src.task_history import task_history
+        from src.services.task_definition_service import get_task
+
+        if not get_task(task_name):
+            raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在")
 
         history = task_history.get_history(task_name, limit=limit)
-        if not history:
-            all_tasks = task_history.get_all_tasks()
-            valid_tasks = ["scheduled_task", "market_cache_refresh", "agent_event_monitor"]
-            if task_name not in all_tasks and task_name not in valid_tasks:
-                raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在或无历史记录")
         return history
     except HTTPException:
         raise
@@ -141,6 +140,10 @@ def get_task_stats(task_name: str, days: int = 7) -> Dict[str, Any]:
     """获取任务执行统计信息"""
     try:
         from src.task_history import task_history
+        from src.services.task_definition_service import get_task
+
+        if not get_task(task_name):
+            raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在")
 
         stats = task_history.get_stats(task_name, days=days)
         if stats["total_runs"] == 0:
@@ -168,9 +171,14 @@ def get_all_task_history(limit: int = 100) -> List[Dict[str, Any]]:
     """获取所有任务执行历史"""
     try:
         from src.task_history import task_history
+        from src.services.task_definition_service import ensure_seed_tasks, list_tasks
 
+        ensure_seed_tasks()
+        active_task_keys = {task["task_key"] for task in list_tasks()}
         all_history = []
         for task_name in task_history.get_all_tasks():
+            if task_name not in active_task_keys:
+                continue
             history = task_history.get_history(task_name, limit=20)
             all_history.extend(history)
 
@@ -196,19 +204,15 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
     """手动触发定时任务"""
     try:
         from src.task_history import task_history
-        from main import run_daily_analysis
+        from src.services.task_definition_service import get_task
 
-        all_tasks = task_history.get_all_tasks()
-        valid_tasks = ["scheduled_task", "market_cache_refresh", "seasonality_cache_refresh", "agent_event_monitor"]
-        if task_name not in all_tasks and task_name not in valid_tasks:
+        if not get_task(task_name):
             raise HTTPException(status_code=404, detail=f"任务 '{task_name}' 不存在")
 
         def trigger_wrapper():
             start_time = time.time()
             try:
-                if task_name == "scheduled_task":
-                    run_daily_analysis()
-                elif task_name == "market_cache_refresh":
+                if task_name == "market_cache_refresh":
                     from src.services.portfolio_service import PortfolioService
                     from src.storage import get_db, PortfolioPosition, StockDaily
                     from src.services.portfolio_service import EPS
@@ -423,27 +427,9 @@ def update_scheduler_task_schedule(
 
         result = update_task(task_name, **updates)
 
-        # 同步更新 .env（针对 daily 类型的时间）
-        if "schedule_time" in updates and updates["schedule_time"]:
-            import os
-            from pathlib import Path
-            os.environ["SCHEDULE_TIME"] = updates["schedule_time"]
-            env_path = Path(".env")
-            if env_path.exists():
-                env_content = env_path.read_text(encoding="utf-8")
-                new_content = re.sub(
-                    r"^SCHEDULE_TIME=.*$",
-                    f"SCHEDULE_TIME={updates['schedule_time']}",
-                    env_content,
-                    flags=re.MULTILINE
-                )
-                env_path.write_text(new_content, encoding="utf-8")
-            else:
-                env_path.write_text(f"SCHEDULE_TIME={updates['schedule_time']}\n", encoding="utf-8")
-
         return {
             "success": True,
-            "message": "定时配置已更新（需重启服务生效）",
+            "message": "定时配置已更新",
             **result,
         }
     except HTTPException:
@@ -510,7 +496,7 @@ def get_all_next_run_times() -> Dict[str, Any]:
             key = task["task_key"]
             if task["enabled"]:
                 if task["schedule_type"] == "daily":
-                    t = task.get("schedule_time") or getattr(config, 'SCHEDULE_TIME', '18:00')
+                    t = task.get("schedule_time") or getattr(config, 'schedule_time', '18:00')
                     result[key] = {"next_run": f"每日 {t}", "schedule_time": t}
                 elif task["schedule_type"] == "interval":
                     secs = task.get("interval_seconds") or 300

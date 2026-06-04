@@ -24,10 +24,8 @@ A股自选股智能分析系统 - 主调度程序
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
-from dotenv import dotenv_values
 from src.config import setup_env
 
 _INITIAL_PROCESS_ENV = dict(os.environ)
@@ -57,39 +55,6 @@ from src.logging_config import setup_logging
 
 
 logger = logging.getLogger(__name__)
-_RUNTIME_ENV_FILE_KEYS = set()
-
-
-def _get_active_env_path() -> Path:
-    env_file = os.getenv("ENV_FILE")
-    if env_file:
-        return Path(env_file)
-    return Path(__file__).resolve().parent / ".env"
-
-
-def _read_active_env_values() -> Optional[Dict[str, str]]:
-    env_path = _get_active_env_path()
-    if not env_path.exists():
-        return {}
-
-    try:
-        values = dotenv_values(env_path)
-    except Exception as exc:  # pragma: no cover - defensive branch
-        logger.warning("读取配置文件 %s 失败，继续沿用当前环境变量: %s", env_path, exc)
-        return None
-
-    return {
-        str(key): "" if value is None else str(value)
-        for key, value in values.items()
-        if key is not None
-    }
-
-
-_ACTIVE_ENV_FILE_VALUES = _read_active_env_values() or {}
-_RUNTIME_ENV_FILE_KEYS = {
-    key for key in _ACTIVE_ENV_FILE_VALUES
-    if key not in _INITIAL_PROCESS_ENV
-}
 
 # setup_env() already ran at import time above.
 _env_bootstrapped = True
@@ -196,28 +161,6 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _reload_env_file_values_preserving_overrides() -> None:
-    """Refresh `.env`-managed env vars without clobbering process env overrides."""
-    global _RUNTIME_ENV_FILE_KEYS
-
-    latest_values = _read_active_env_values()
-    if latest_values is None:
-        return
-
-    managed_keys = {
-        key for key in latest_values
-        if key not in _INITIAL_PROCESS_ENV
-    }
-
-    for key in _RUNTIME_ENV_FILE_KEYS - managed_keys:
-        os.environ.pop(key, None)
-
-    for key in managed_keys:
-        os.environ[key] = latest_values[key]
-
-    _RUNTIME_ENV_FILE_KEYS = managed_keys
-
-
 def parse_arguments() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
@@ -232,7 +175,6 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --no-notify        # 不发送推送通知
   python main.py --check-notify     # 检查通知配置，不发送通知
   python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
-  python main.py --schedule         # 启用定时任务模式
   python main.py --market-review    # 仅运行大盘复盘
         '''
     )
@@ -278,18 +220,6 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=None,
         help='并发线程数（默认使用配置值）'
-    )
-
-    parser.add_argument(
-        '--schedule',
-        action='store_true',
-        help='启用定时任务模式，每日定时执行'
-    )
-
-    parser.add_argument(
-        '--no-run-immediately',
-        action='store_true',
-        help='定时任务启动时不立即执行一次'
     )
 
     parser.add_argument(
@@ -710,90 +640,6 @@ def start_bot_stream_clients(config: Config) -> None:
             logger.error(f"[Main] Failed to start Feishu Stream client: {exc}")
 
 
-def _resolve_scheduled_stock_codes(stock_codes: Optional[List[str]]) -> Optional[List[str]]:
-    """Scheduled runs should always read the latest persisted watchlist."""
-    if stock_codes is not None:
-        logger.warning(
-            "定时模式下检测到 --stocks 参数；计划执行将忽略启动时股票快照，并在每次运行前重新读取最新的 STOCK_LIST。"
-        )
-    return None
-
-
-def _reload_runtime_config() -> Config:
-    """Reload config from the latest persisted `.env` values for scheduled runs."""
-    _reload_env_file_values_preserving_overrides()
-    Config.reset_instance()
-    return get_config()
-
-
-def run_daily_analysis():
-    """每日定时任务入口：同步基础行情并刷新关注标的红绿灯。"""
-    try:
-        runtime_config = _reload_runtime_config()
-        args = parse_arguments()
-        
-        # Step 1: Sync Indices & Sentiment to DB (Task 1 Extension)
-        try:
-            from src.services.market_sync_service import sync_market_data
-            logger.info("[Task 1] 正在同步大盘指数与情绪指标...")
-            sync_market_data(days=30)
-            logger.info("[Task 1] 大盘与情绪指标同步完成。")
-        except Exception as e:
-            logger.warning(f"[Task 1] 大盘同步非致命失败，继续执行: {e}")
-
-        # Step 2: 从数据库加载关注标的并进行资产路由
-        try:
-            from src.repositories.watchlist_repo import WatchlistRepository
-            repo = WatchlistRepository()
-            targets = repo.list_analysis_targets(frequency="daily")
-            if targets:
-                logger.info("[红绿灯] 从数据库加载 %s 个关注标的，跳过个股/大盘深度研报", len(targets))
-                for t in targets:
-                    logger.info(
-                        "[红绿灯] 标的 %s (%s): market=%s, category=%s, 暂使用前端固定灯规则",
-                        t.symbol,
-                        t.name or "",
-                        t.market,
-                        t.asset_category,
-                    )
-            else:
-                logger.warning("[红绿灯] 数据库关注标的为空，本轮无需计算")
-        except Exception as e:
-            logger.error(f"[红绿灯] 数据库加载标的失败: {e}")
-
-        logger.info("[红绿灯] 轻量资产管理模式已启用，本轮不生成大盘复盘、个股定时报告或通知")
-    except Exception as e:
-        logger.exception(f"每日定时任务执行失败: {e}")
-        raise
-
-
-def _build_schedule_time_provider(default_schedule_time: str):
-    """Read the latest schedule time directly from the active config file.
-
-    Fallback order:
-    1. Process-level env override (set before launch) → honour it.
-    2. Persisted config file value (written by WebUI) → use it.
-    3. Documented system default ``"18:00"`` → always fall back here so
-       that clearing SCHEDULE_TIME in WebUI correctly resets the schedule.
-    """
-    from src.core.config_manager import ConfigManager
-
-    _SYSTEM_DEFAULT_SCHEDULE_TIME = "18:00"
-    manager = ConfigManager()
-
-    def _provider() -> str:
-        if "SCHEDULE_TIME" in _INITIAL_PROCESS_ENV:
-            return os.getenv("SCHEDULE_TIME", default_schedule_time)
-
-        config_map = manager.read_config_map()
-        schedule_time = (config_map.get("SCHEDULE_TIME", "") or "").strip()
-        if schedule_time:
-            return schedule_time
-        return _SYSTEM_DEFAULT_SCHEDULE_TIME
-
-    return _provider
-
-
 def main() -> int:
     """
     主入口函数
@@ -954,42 +800,7 @@ def main() -> int:
             )
             return 0
 
-        # 模式2: 定时任务模式
-        if args.schedule or config.schedule_enabled:
-            logger.info("模式: 定时任务")
-            logger.info(f"每日执行时间: {config.schedule_time}")
-
-            # Determine whether to run immediately:
-            # Command line arg --no-run-immediately overrides config if present.
-            # Otherwise use config (defaults to True).
-            should_run_immediately = config.schedule_run_immediately
-            if getattr(args, 'no_run_immediately', False):
-                should_run_immediately = False
-
-            logger.info(f"启动时立即执行: {should_run_immediately}")
-
-            from src.scheduler import run_with_schedule
-            scheduled_stock_codes = _resolve_scheduled_stock_codes(stock_codes)
-            schedule_time_provider = _build_schedule_time_provider(config.schedule_time)
-
-            def scheduled_task():
-                run_daily_analysis()
-
-            background_tasks = []
-            if getattr(config, 'agent_event_monitor_enabled', False):
-                logger.info("轻量资产管理模式已停用后台告警扫描；告警状态由关注标的红绿灯展示")
-
-            run_with_schedule(
-                task=scheduled_task,
-                schedule_time=config.schedule_time,
-                schedule_cron=getattr(config, 'schedule_cron', ''),
-                run_immediately=should_run_immediately,
-                background_tasks=background_tasks,
-                schedule_time_provider=schedule_time_provider,
-            )
-            return 0
-
-        # 模式3: 正常单次运行
+        # 模式2: 正常单次运行
         if config.run_immediately:
             run_full_analysis(config, args, stock_codes)
         else:
@@ -997,8 +808,8 @@ def main() -> int:
 
         logger.info("\n程序执行完成")
 
-        # 如果启用了服务且是非定时任务模式，保持程序运行
-        keep_running = start_serve and not (args.schedule or config.schedule_enabled)
+        # 如果启用了服务，保持程序运行
+        keep_running = start_serve
         if keep_running:
             logger.info("API 服务运行中 (按 Ctrl+C 退出)...")
             try:

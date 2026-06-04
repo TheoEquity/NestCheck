@@ -907,7 +907,6 @@ function startBackend({ port, envFile, dbPath, logDir }) {
     LOG_DIR: logDir,
     PYTHONUTF8: '1',
     PYTHONIOENCODING: 'utf-8',
-    SCHEDULE_ENABLED: 'false',
     WEBUI_ENABLED: 'false',
     BOT_ENABLED: 'false',
     DINGTALK_STREAM_ENABLED: 'false',

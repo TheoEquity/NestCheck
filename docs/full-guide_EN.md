@@ -341,10 +341,7 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `MARKET_REVIEW_ENABLED` | Enable market review | `true` |
 | `MARKET_REVIEW_REGION` | Market review region: cn (A-shares), hk (HK stocks), us (US stocks), both (all three markets) | `cn` |
 | `MARKET_REVIEW_COLOR_SCHEME` | Index change color style in market reviews: `green_up` = green gains/red losses (default), `red_up` = red gains/green losses | `green_up` |
-| `SCHEDULE_ENABLED` | Enable scheduled tasks | `false` |
-| `SCHEDULE_TIME` | Scheduled execution time | `18:00` |
-| `SCHEDULE_RUN_IMMEDIATELY` | Run once immediately when scheduler mode starts; when unset it keeps following the legacy `RUN_IMMEDIATELY` runtime override | `true` |
-| `RUN_IMMEDIATELY` | Run once immediately for non-scheduler startup; also acts as the legacy fallback when `SCHEDULE_RUN_IMMEDIATELY` is unset | `true` |
+| `RUN_IMMEDIATELY` | Run once immediately for one-shot `main.py` startup | `true` |
 | `LOG_DIR` | Log directory | `./logs` |
 
 > Behavior notes:
@@ -352,7 +349,6 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 > - TickFlow behavior is capability-based rather than just key-based: limited plans can still enhance main CN indices, while plans with `CN_Equity_A` universe query support also enhance market breadth.
 > - The official quickstart documents `quotes.get(universes=["CN_Equity_A"])`, but online smoke tests confirmed two additional real-world constraints: universe access depends on plan permissions, and `quotes.get(symbols=[...])` has a per-request symbol limit.
 > - TickFlow currently returns `change_pct` / `amplitude` as ratio values; this integration normalizes them to the project's percent convention so they match AkShare / Tushare / efinance semantics.
-> - In scheduler mode, if runtime env explicitly sets `RUN_IMMEDIATELY` but does not set `SCHEDULE_RUN_IMMEDIATELY`, the scheduler keeps inheriting the legacy runtime override instead of being pulled back to a persisted `.env` alias value.
 > - CN market review reports now use a post-market workstation layout with market signal, index detail, sector Top tables, news catalysts, next-session plan, and risk sections. The market signal uses a plain-text score such as `66/100 (constructive, risk-on)` instead of block bars so it renders consistently across terminals and notification clients. News catalysts list only headline, source, and link instead of search snippets to reduce mixed-language noise. Missing data sources degrade by omitting or simplifying only the affected block.
 > - Per-stock analysis, realtime quote priority, and sector rankings fallback remain unchanged.
 
@@ -379,9 +375,7 @@ cp .env.example .env
 vim .env  # Fill in API Keys and configuration
 
 # 3. Start container
-docker-compose -f ./docker/docker-compose.yml up -d server     # Web service mode (recommended, provides API & WebUI)
-docker-compose -f ./docker/docker-compose.yml up -d analyzer   # Scheduled task mode
-docker-compose -f ./docker/docker-compose.yml up -d            # Start both modes
+docker-compose -f ./docker/docker-compose.yml up -d server
 
 # 4. Access WebUI
 # http://localhost:8000
@@ -407,14 +401,6 @@ docker run -d \
   zhulinsen/daily_stock_analysis:latest \
   python main.py --serve-only --host 0.0.0.0 --port 8000
 
-# Scheduled-task mode
-docker run -d \
-  --name dsa-analyzer \
-  --env-file .env \
-  -v "$(pwd)/data:/app/data" \
-  -v "$(pwd)/logs:/app/logs" \
-  -v "$(pwd)/reports:/app/reports" \
-  zhulinsen/daily_stock_analysis:latest
 ```
 
 For pinned deployments or easier rollback, replace `latest` with a concrete version tag such as `v3.13.0`.
@@ -424,8 +410,7 @@ For pinned deployments or easier rollback, replace `latest` with a concrete vers
 | Command | Description | Port |
 |------|------|------|
 | `docker-compose -f ./docker/docker-compose.yml up -d server` | Web service mode, provides API & WebUI | 8000 |
-| `docker-compose -f ./docker/docker-compose.yml up -d analyzer` | Scheduled task mode, daily auto execution | - |
-| `docker-compose -f ./docker/docker-compose.yml up -d` | Start both modes simultaneously | 8000 |
+| `docker-compose -f ./docker/docker-compose.yml up -d` | Start the default Web service | 8000 |
 
 ### Docker Compose Configuration
 
@@ -450,11 +435,6 @@ x-common: &common
     - ../strategies:/app/strategies:ro
 
 services:
-  # Scheduled task mode
-  analyzer:
-    <<: *common
-    container_name: stock-analyzer
-
   # FastAPI mode
   server:
     <<: *common
@@ -546,7 +526,6 @@ python main.py --no-market-review     # Stock analysis only
 python main.py --stocks 600519,300750 # Specify stocks
 python main.py --dry-run              # Fetch data only, no AI analysis
 python main.py --no-notify            # Don't send notifications
-python main.py --schedule             # Scheduled task mode
 python main.py --debug                # Debug mode (verbose logging)
 python main.py --workers 5            # Specify concurrency
 ```
@@ -575,20 +554,9 @@ Common time reference:
 | 18:00 | `'0 10 * * 1-5'` |
 | 21:00 | `'0 13 * * 1-5'` |
 
-### Local Scheduled Tasks
+### System Tasks
 
-```bash
-# Start scheduled mode (default 18:00 execution)
-python main.py --schedule
-
-# Or use crontab
-crontab -e
-# Add: 0 18 * * 1-5 cd /path/to/project && python main.py
-```
-
-> Note: Scheduled mode reloads the saved `STOCK_LIST` before each run. If you also pass `--stocks`, it will not pin future scheduled executions to the startup snapshot; use a normal one-off run when you want to analyze a temporary stock list.
->
-> When the built-in scheduler is started via `python main.py --schedule`, `python main.py --serve --schedule`, or an equivalent local mode, saving a new `SCHEDULE_TIME` from the WebUI will rebind the daily job on the next scheduler poll without restarting the process. The previous trigger time is removed instead of being kept alongside the new one.
+After the Web service starts, system tasks are registered through the API service. Market cache refresh and watchlist lights are handled by the 20:30 `market_cache_refresh` task. Use the market and sentiment data initialization endpoint for first setup, empty database repair, or manual full backfill.
 
 ### Market Phase Baseline (Issue #1386 P0)
 
@@ -608,7 +576,7 @@ The phase labels describe regular-session state:
 
 Current entrypoint baseline:
 
-- Regular stock analysis, Agent analysis, Web manual analysis, Bot `/analyze` / `/ask`, schedule mode, and GitHub Actions still use the existing analysis path and post-market recap wording. P0 does not switch prompts or output schema automatically.
+- Regular stock analysis, Agent analysis, Web manual analysis, Bot `/analyze` / `/ask`, system tasks, and GitHub Actions still use the existing analysis path and post-market recap wording. P0 does not switch prompts or output schema automatically.
 - Market review still follows `MARKET_REVIEW_REGION` and trading-day filtering; it does not consume market phase labels.
 - Mixed-market watchlists should infer phase per symbol market. Displaying inconsistent phases in aggregate reports is left to P1+.
 
@@ -1205,7 +1173,7 @@ A: Check if Actions is enabled, and if cron expression is correct (note it's UTC
 
 ## Agent Event Monitor
 
-When `AGENT_EVENT_MONITOR_ENABLED=true`, schedule mode runs the alert worker every `AGENT_EVENT_MONITOR_INTERVAL_MINUTES` minutes. The worker reads enabled rules created through the Alert API and continues to support legacy rules in `AGENT_EVENT_ALERT_RULES_JSON`; triggered alerts still go through the existing notification channels. Alert API / Web persisted rules support price, change-percent, volume, daily technical indicators, `watchlist`, `portfolio_holdings`, `portfolio_account`, and `market` Market Light targets; legacy JSON still supports only the three basic rule types.
+When `AGENT_EVENT_MONITOR_ENABLED=true`, system tasks run the alert worker every `AGENT_EVENT_MONITOR_INTERVAL_MINUTES` minutes. The worker reads enabled rules created through the Alert API and continues to support legacy rules in `AGENT_EVENT_ALERT_RULES_JSON`; triggered alerts still go through the existing notification channels. Alert API / Web persisted rules support price, change-percent, volume, daily technical indicators, `watchlist`, `portfolio_holdings`, `portfolio_account`, and `market` Market Light targets; legacy JSON still supports only the three basic rule types.
 
 > Compatibility and rollback note: this section documents current Event Monitor rule behavior (including `price_change_percent`) and does not change external model/provider API semantics such as model names, providers, Base URL, LiteLLM, `OPENAI_*`, `DEEPSEEK_*`, or `GEMINI_*` configuration.
 > Legacy JSON is not automatically migrated, deleted, or rewritten. To roll back the background alert worker, clear or disable `AGENT_EVENT_MONITOR_ENABLED`/related rule config.

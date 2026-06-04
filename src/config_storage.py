@@ -115,10 +115,6 @@ class ConfigStorage:
     def _default_settings(self) -> Dict[str, Any]:
         """默认系统设置"""
         return {
-            "schedule_time": "18:00",
-            "schedule_cron": "",
-            "schedule_enabled": False,
-            "schedule_run_immediately": True,
             "market_review_enabled": True,
             "market_review_region": "cn",
             "agent_event_monitor_enabled": False,
@@ -217,9 +213,6 @@ class ConfigStorage:
 
         # 映射关系到环境变量
         env_mapping = {
-            "SCHEDULE_TIME": settings.get("schedule_time"),
-            "SCHEDULE_ENABLED": str(settings.get("schedule_enabled", False)).lower(),
-            "SCHEDULE_RUN_IMMEDIATELY": str(settings.get("schedule_run_immediately", True)).lower(),
             "MARKET_REVIEW_ENABLED": str(settings.get("market_review_enabled", True)).lower(),
             "MARKET_REVIEW_REGION": settings.get("market_review_region", "cn"),
             "AGENT_EVENT_MONITOR_ENABLED": str(settings.get("agent_event_monitor_enabled", False)).lower(),

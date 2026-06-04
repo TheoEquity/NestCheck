@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] Watchlist 周线节奏灯改为 MA5 位于 MA10 上方即绿灯、下方即红灯，交叉时保留上穿/下穿原因文案。
 - [新功能] 关注标的卡片新增取消关注、上移、下移按钮，并按用户调整顺序持久化展示。
 - [修复] 取消关注时同步清理 watchlist 红绿灯指标/信号快照并重排剩余标的顺序，股票日线缓存保留并在下次刷新时 upsert 补齐最近 520 天数据。
+- [改进] 清理历史 18:00 `scheduled_task`/APScheduler 调度入口，首页缓存与关注标的刷新统一由 20:30 `market_cache_refresh` 承担，并保留大盘与情绪数据手动初始化入口。
 
 ## [3.18.0] - 2026-05-21
 

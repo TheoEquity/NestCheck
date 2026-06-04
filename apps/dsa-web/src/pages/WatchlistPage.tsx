@@ -6,6 +6,7 @@ import { marketApi, type SectorEtfConfig, type SectorEtfDashboardResponse } from
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { ApiErrorAlert, Badge, Button, Card, Input, Select, Textarea } from '../components/common';
 import type { WatchlistAssetCategory, WatchlistItem, WatchlistItemInput } from '../types/watchlist';
+import { cn } from '../utils/cn';
 
 type FormState = WatchlistItemInput;
 
@@ -558,7 +559,10 @@ function TrafficLights({ item }: { item: WatchlistItem }) {
           <div className="grid grid-cols-5 gap-1.5">
             {lights.map((light) => (
               <div key={light.code} title={light.reason} className="flex min-w-0 flex-col items-center gap-1 rounded-lg border border-subtle bg-surface/70 px-1.5 py-1.5">
-                <span className="h-4 w-4 shrink-0 rounded-full ring-2" style={getLightStyle(light.status)} />
+                <div className={cn(
+                  'h-4 w-4 shrink-0 rounded-full shadow-sm',
+                  light.status === 'G' ? 'bg-green-500' : light.status === 'R' ? 'bg-red-500' : 'bg-yellow-500'
+                )} />
                 <span className="text-[9px] font-bold leading-none text-foreground">{light.status}</span>
                 <span className="max-w-full truncate text-[10px] font-medium text-secondary-text">{light.label}</span>
               </div>
@@ -569,12 +573,6 @@ function TrafficLights({ item }: { item: WatchlistItem }) {
       )}
     </div>
   );
-}
-
-function getLightStyle(status: string): React.CSSProperties {
-  if (status === 'G') return { backgroundColor: 'hsl(var(--success))', boxShadow: '0 0 0 2px hsl(var(--success) / 0.22)' };
-  if (status === 'R') return { backgroundColor: 'hsl(var(--danger))', boxShadow: '0 0 0 2px hsl(var(--danger) / 0.22)' };
-  return { backgroundColor: 'hsl(var(--warning))', boxShadow: '0 0 0 2px hsl(var(--warning) / 0.22)' };
 }
 
 export default WatchlistPage;

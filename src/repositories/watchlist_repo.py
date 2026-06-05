@@ -233,19 +233,21 @@ class WatchlistRepository:
                     }
 
         if fund_items:
+            # Watchlist 基金的净值从 WatchlistIndicatorSnapshot 取，独立于持仓资产的 FundDailyNav
+            from src.storage import WatchlistIndicatorSnapshot
             with self.db.get_session() as session:
                 for item in fund_items:
-                    nav = session.execute(
-                        select(FundDailyNav)
-                        .where(FundDailyNav.fund_code == item.symbol)
-                        .order_by(desc(FundDailyNav.nav_date), desc(FundDailyNav.id))
+                    indicator = session.execute(
+                        select(WatchlistIndicatorSnapshot)
+                        .where(WatchlistIndicatorSnapshot.watchlist_item_id == item.id)
+                        .order_by(desc(WatchlistIndicatorSnapshot.as_of_date))
                         .limit(1)
                     ).scalar_one_or_none()
-                    if nav is None:
+                    if indicator is None or indicator.price is None:
                         continue
                     summary[item.id] = {
-                        "latest_price": nav.unit_nav,
-                        "latest_change_pct": nav.daily_return,
+                        "latest_price": indicator.price,
+                        "latest_change_pct": indicator.price_change_pct,
                     }
 
         return summary

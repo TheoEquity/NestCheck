@@ -263,6 +263,8 @@ class WatchlistIndicatorSnapshot(Base):
     ma30w = Column(Float)
     prev_ma10w = Column(Float)
     prev_ma30w = Column(Float)
+    price_change_pct = Column(Float)  # 涨跌幅 (%)
+    change_amount = Column(Float)  # 涨跌额
     sector_tag = Column(String(16), nullable=False, default='stable')
     source = Column(String(64), nullable=False, default='watchlist_refresh')
     raw_payload = Column(Text)

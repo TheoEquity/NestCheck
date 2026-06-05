@@ -754,6 +754,8 @@ class WatchlistSignalService:
             "ma30w": indicator.get("ma30w"),
             "prev_ma10w": indicator.get("prev_ma10w"),
             "prev_ma30w": indicator.get("prev_ma30w"),
+            "price_change_pct": indicator.get("price_change_pct"),
+            "change_amount": indicator.get("change_amount"),
             "sector_tag": indicator.get("sector_tag") if indicator.get("sector_tag") in SECTOR_TAGS else "stable",
             "source": "watchlist_signal_service",
             "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),

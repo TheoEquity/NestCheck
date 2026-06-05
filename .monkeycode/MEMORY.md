@@ -27,8 +27,7 @@
 
 ### 数据库
 - 类型：SQLite，路径 `/workspace/NestCheck/data/stock_analysis.db`
-- 主要表：`portfolio_positions`（持仓主数据）、`portfolio_accounts`（账户）、`portfolio_trades`（交易记录）、`portfolio_cash_ledgers`（现金台账）、`stock_daily`（日线数据）、`market_quotes`（行情缓存）
-- `portfolio_positions` 关键字段：`id`, `account_id`, `symbol`, `name`, `market`, `currency`, `quantity`, `avg_cost`, `last_price`, `total_cost`, `market_value_base`, `asset_category`, `asset_subcategory`, `asset_risk_class`
+- 主要表：`portfolio_positions`（持仓主数据）、`portfolio_accounts`（账户）、`portfolio_trades`（交易记录）、`portfolio_cash_ledgers`（现金台账）、`stock_daily`（日线数据）、`market_quotes`（行情缓存）、`watchlist_indicator_snapshot`（关注列表指标快照）
 
 ### 关键字段：风险等级
 - `asset_risk_class` 字段（R1-R5）：资产初始化录入时的分类，存主数据，用于资产配置
@@ -38,6 +37,14 @@
 ### 关键方案
 - 价格缓存：`portfolio_positions.last_price` 字段，`refresh_all_prices()` 后台任务每 5 分钟更新
 - 名称字段：`portfolio_positions.name`，随价格刷新任务从行情源获取并持久化
+- 基金净值：`watchlist_indicator_snapshot.price` 字段，`_build_fund_indicator()` 从 akshare 获取并保存（使用前一天数据）
+
+## 运行时要求
+
+### 北京时间使用
+- 系统运行在 UTC 环境，但 A 股交易时间判断必须使用北京时间（UTC+8）
+- `api/app.py` 中 `_daily_portfolio_price_refresh()` 和 `_daily_market_cache_refresh_loop()` 都已改用北京时间
+- 启动补执行逻辑：启动时检查当前北京时间，如果已过 20:30 且今天未执行过，立即补执行（解决个人电脑不 24 小时运行的场景）
 
 ## 条目格式
 

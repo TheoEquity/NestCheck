@@ -83,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 个股专家分析在多 Agent 超时降级时改为中文用户态摘要，并减少聊天模式下 RiskAgent 对已获取情报的重复搜索。
 - [修复] Agent 模型路由在系统主模型已不属于当前 runtime model list 时自动切换到可用渠道模型，避免继续调用失效的 `openai/gpt-5.5`。
 - [修复] `/api/v1/agent/models` 移除不存在的 request 引用，恢复 Agent 模型列表接口可用性。
+- [改进] 设置页数据源配置新增 `FIRECRAWL_API_KEY`，用于后续对已发现新闻/公告 URL 执行正文抓取。
+- [改进] AI 问答新闻情报在搜索引擎失败时新增 AkShare A 股新闻/公告 fallback，并在配置 Firecrawl 后读取新闻正文作为证据摘要。
 
 ## [3.18.0] - 2026-05-21
 

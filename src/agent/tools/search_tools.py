@@ -279,9 +279,6 @@ def _handle_search_stock_news(stock_code: str, stock_name: str) -> dict:
 
     service = _get_search_service()
 
-    if not service.is_available:
-        return {"error": "No search engine available (no API keys configured)"}
-
     response = service.search_stock_news(stock_code, stock_name, max_results=5)
 
     if not response.success:
@@ -481,9 +478,6 @@ extract_page_content_tool = ToolDefinition(
 def _handle_search_comprehensive_intel(stock_code: str, stock_name: str) -> dict:
     """Multi-dimensional intelligence search."""
     service = _get_search_service()
-
-    if not service.is_available:
-        return {"error": "No search engine available (no API keys configured)"}
 
     intel_results = service.search_comprehensive_intel(
         stock_code=stock_code,

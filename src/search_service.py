@@ -12,6 +12,7 @@ A股自选股智能分析系统 - 搜索服务模块
 """
 
 import logging
+import importlib.util
 import re
 import threading
 import time
@@ -2160,6 +2161,9 @@ class SearchService:
         "cninfo", "sse.com", "szse.cn", "hkexnews", "sec.gov", "nasdaq.com",
         "nyse.com", "上交所", "深交所", "港交所", "证券交易所",
     )
+    _FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v1/scrape"
+    _FIRECRAWL_MAX_PAGES = 3
+    _FIRECRAWL_BODY_CHARS = 2200
 
     def __init__(
         self,
@@ -2251,7 +2255,10 @@ class SearchService:
             logger.info(f"已配置 Anspire Search 搜索，共 {len(anspire_keys)} 个 API Key")
             
         if not self._providers:
-            logger.warning("未配置任何搜索能力，新闻搜索功能将不可用")
+            if importlib.util.find_spec("akshare") is not None:
+                logger.info("未配置外部搜索引擎，A 股新闻将使用 AkShare fallback")
+            else:
+                logger.warning("未配置任何搜索能力，新闻搜索功能将不可用")
 
         # In-memory search result cache: {cache_key: (timestamp, SearchResponse)}
         self._cache: Dict[str, Tuple[float, 'SearchResponse']] = {}
@@ -2408,8 +2415,241 @@ class SearchService:
 
     @property
     def is_available(self) -> bool:
-        """检查是否有可用的搜索引擎"""
-        return any(p.is_available for p in self._providers)
+        """检查是否有可用的搜索能力。"""
+        return any(p.is_available for p in self._providers) or importlib.util.find_spec("akshare") is not None
+
+    @staticmethod
+    def _normalize_a_share_symbol(stock_code: str) -> Optional[str]:
+        """Return a plain 6-digit A-share symbol when applicable."""
+        raw = (stock_code or "").strip().upper()
+        if not raw:
+            return None
+        if "." in raw:
+            base, suffix = raw.rsplit(".", 1)
+            if suffix in {"SH", "SZ", "SS", "BJ"} and base.isdigit() and len(base) == 6:
+                return base
+        if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit() and len(raw[2:]) == 6:
+            return raw[2:]
+        if raw.isdigit() and len(raw) == 6:
+            return raw
+        return None
+
+    @staticmethod
+    def _clean_akshare_value(value: Any) -> str:
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if text.lower() in {"nan", "nat", "none"}:
+            return ""
+        return text
+
+    @classmethod
+    def _firecrawl_api_key(cls) -> str:
+        try:
+            from src.config import get_config
+
+            return str(getattr(get_config(), "firecrawl_api_key", "") or "").strip()
+        except Exception as exc:
+            logger.debug("读取 Firecrawl 配置失败: %s", exc)
+            return ""
+
+    @classmethod
+    def _scrape_with_firecrawl(cls, url: str) -> Optional[Dict[str, str]]:
+        api_key = cls._firecrawl_api_key()
+        if not api_key or not url:
+            return None
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "published_at": {"type": "string"},
+                "source": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["body"],
+        }
+        try:
+            response = requests.post(
+                cls._FIRECRAWL_SCRAPE_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "url": url,
+                    "formats": ["json"],
+                    "onlyMainContent": True,
+                    "jsonOptions": {"schema": schema},
+                },
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logger.debug("Firecrawl 正文抓取失败 url=%s: %s", url, exc)
+            return None
+
+        data = payload.get("data") if isinstance(payload, dict) else None
+        extracted = data.get("json") if isinstance(data, dict) else None
+        if not isinstance(extracted, dict):
+            return None
+        body = cls._clean_akshare_value(extracted.get("body"))
+        if not body:
+            return None
+        return {
+            "title": cls._clean_akshare_value(extracted.get("title")),
+            "published_at": cls._clean_akshare_value(extracted.get("published_at")),
+            "source": cls._clean_akshare_value(extracted.get("source")),
+            "body": body[: cls._FIRECRAWL_BODY_CHARS],
+        }
+
+    def _akshare_stock_news_response(
+        self,
+        *,
+        stock_code: str,
+        stock_name: str,
+        query: str,
+        max_results: int,
+        focus_keywords: Optional[List[str]] = None,
+        firecrawl_max_pages: Optional[int] = None,
+    ) -> Optional[SearchResponse]:
+        symbol = self._normalize_a_share_symbol(stock_code)
+        if not symbol:
+            return None
+
+        try:
+            import akshare as ak
+
+            frame = ak.stock_news_em(symbol=symbol)
+        except Exception as exc:
+            logger.warning("AkShare 股票新闻获取失败: %s(%s): %s", stock_name, stock_code, exc)
+            return None
+
+        focus_terms = [term for term in (focus_keywords or []) if str(term).strip()]
+        results: List[SearchResult] = []
+        firecrawl_count = 0
+        max_firecrawl = self._FIRECRAWL_MAX_PAGES if firecrawl_max_pages is None else max(0, int(firecrawl_max_pages))
+        rows = frame.to_dict("records") if hasattr(frame, "to_dict") else []
+        for row in rows:
+            title = self._clean_akshare_value(row.get("新闻标题") or row.get("标题"))
+            snippet = self._clean_akshare_value(row.get("新闻内容") or row.get("摘要"))
+            published = self._clean_akshare_value(row.get("发布时间") or row.get("日期"))
+            source = self._clean_akshare_value(row.get("文章来源") or row.get("来源")) or "东方财富"
+            url = self._clean_akshare_value(row.get("新闻链接") or row.get("网址"))
+            haystack = " ".join([title, snippet, source, url])
+            if focus_terms and not any(term in haystack for term in focus_terms):
+                continue
+
+            if url and firecrawl_count < max_firecrawl:
+                scraped = self._scrape_with_firecrawl(url)
+                if scraped:
+                    title = scraped.get("title") or title
+                    published = scraped.get("published_at") or published
+                    source = scraped.get("source") or source
+                    snippet = f"已读取正文：{scraped['body']}"
+                    firecrawl_count += 1
+
+            if title or snippet:
+                results.append(
+                    SearchResult(
+                        title=title or snippet[:80],
+                        snippet=snippet,
+                        url=url,
+                        source=source,
+                        published_date=published,
+                    )
+                )
+            if len(results) >= self._provider_request_size(max_results):
+                break
+
+        if not results:
+            return None
+        provider = "AkShare+Firecrawl" if firecrawl_count else "AkShare"
+        return SearchResponse(query=query, results=results, provider=provider, success=True)
+
+    def _akshare_notice_response(
+        self,
+        *,
+        stock_code: str,
+        stock_name: str,
+        query: str,
+        max_results: int,
+    ) -> Optional[SearchResponse]:
+        symbol = self._normalize_a_share_symbol(stock_code)
+        if not symbol:
+            return None
+
+        try:
+            import akshare as ak
+
+            frame = ak.stock_individual_notice_report(symbol=symbol)
+        except Exception as exc:
+            logger.warning("AkShare 公告获取失败: %s(%s): %s", stock_name, stock_code, exc)
+            return None
+
+        results: List[SearchResult] = []
+        rows = frame.to_dict("records") if hasattr(frame, "to_dict") else []
+        for row in rows:
+            title = self._clean_akshare_value(row.get("公告标题") or row.get("标题"))
+            published = self._clean_akshare_value(row.get("公告日期") or row.get("日期"))
+            url = self._clean_akshare_value(row.get("网址") or row.get("公告链接"))
+            if not title:
+                continue
+            results.append(
+                SearchResult(
+                    title=title,
+                    snippet=title,
+                    url=url,
+                    source="AkShare公告",
+                    published_date=published,
+                )
+            )
+            if len(results) >= self._provider_request_size(max_results):
+                break
+
+        if not results:
+            return None
+        return SearchResponse(query=query, results=results, provider="AkShare", success=True)
+
+    def _prepare_akshare_response(
+        self,
+        response: Optional[SearchResponse],
+        *,
+        stock_code: str,
+        stock_name: str,
+        search_days: int,
+        max_results: int,
+        prefer_chinese: bool,
+        log_scope: str,
+        strict_freshness: bool = True,
+    ) -> Optional[SearchResponse]:
+        if response is None:
+            return None
+        prepared = (
+            self._filter_news_response(
+                response,
+                search_days=search_days,
+                max_results=self._provider_request_size(max_results),
+                log_scope=log_scope,
+            )
+            if strict_freshness
+            else self._normalize_and_limit_response(
+                response,
+                max_results=self._provider_request_size(max_results),
+            )
+        )
+        if not prepared.success or not prepared.results:
+            return None
+        ranked = self._rank_news_response(
+            prepared,
+            stock_code=stock_code,
+            stock_name=stock_name,
+            prefer_chinese=prefer_chinese,
+            max_results=max_results,
+            log_scope=log_scope,
+        )
+        return ranked if ranked.results else None
 
     def _cache_key(self, query: str, max_results: int, days: int) -> str:
         """Build a cache key from query parameters."""
@@ -3343,6 +3583,26 @@ class SearchService:
                 self._put_cache(cache_key, best_ranked_response)
                 return best_ranked_response
 
+            akshare_response = self._prepare_akshare_response(
+                self._akshare_stock_news_response(
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    query=query,
+                    max_results=max_results,
+                    focus_keywords=focus_keywords,
+                ),
+                stock_code=stock_code,
+                stock_name=stock_name,
+                search_days=search_days,
+                max_results=max_results,
+                prefer_chinese=prefer_chinese,
+                log_scope=f"{stock_code}:AkShare:stock_news",
+            )
+            if akshare_response is not None:
+                logger.info("AkShare 新闻 fallback 生效: %s(%s), results=%s", stock_name, stock_code, len(akshare_response.results))
+                self._put_cache(cache_key, akshare_response)
+                return akshare_response
+
             if had_provider_success:
                 return SearchResponse(
                     query=query,
@@ -3566,40 +3826,53 @@ class SearchService:
         
         # 轮流使用不同的搜索引擎
         provider_index = 0
+        prefer_chinese = self._should_prefer_chinese_news(stock_code, stock_name)
         
         for dim in search_dimensions:
             if search_count >= max_searches:
                 break
-            
+
             # 选择搜索引擎（轮流使用）
             available_providers = [p for p in self._providers if p.is_available]
-            if not available_providers:
-                break
-            
-            provider = available_providers[provider_index % len(available_providers)]
-            provider_index += 1
-            
-            logger.info(f"[情报搜索] {dim['desc']}: 使用 {provider.name}")
+            provider = None
+            response = None
+            if available_providers:
+                provider = available_providers[provider_index % len(available_providers)]
+                provider_index += 1
 
-            if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=search_days,
-                    topic=dim['tavily_topic'],
-                )
+                logger.info(f"[情报搜索] {dim['desc']}: 使用 {provider.name}")
+
+                if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
+                    response = provider.search(
+                        dim['query'],
+                        max_results=provider_max_results,
+                        days=search_days,
+                        topic=dim['tavily_topic'],
+                    )
+                else:
+                    response = provider.search(
+                        dim['query'],
+                        max_results=provider_max_results,
+                        days=search_days,
+                    )
+                provider_name = provider.name
             else:
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=search_days,
+                logger.info(f"[情报搜索] {dim['desc']}: 无搜索引擎，尝试 AkShare fallback")
+                provider_name = "AkShare"
+                response = SearchResponse(
+                    query=dim['query'],
+                    results=[],
+                    provider="None",
+                    success=False,
+                    error_message="未配置搜索引擎",
                 )
+
             if dim['strict_freshness']:
                 filtered_response = self._filter_news_response(
                     response,
                     search_days=search_days,
                     max_results=provider_max_results,
-                    log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
+                    log_scope=f"{stock_code}:{provider_name}:{dim['name']}",
                 )
             else:
                 filtered_response = self._normalize_and_limit_response(
@@ -3610,14 +3883,56 @@ class SearchService:
                 filtered_response,
                 stock_code=stock_code,
                 stock_name=stock_name,
-                prefer_chinese=self._should_prefer_chinese_news(stock_code, stock_name),
+                prefer_chinese=prefer_chinese,
                 max_results=target_per_dimension,
-                log_scope=f"{stock_code}:{provider.name}:{dim['name']}:rank",
+                log_scope=f"{stock_code}:{provider_name}:{dim['name']}:rank",
             )
+            if not filtered_response.results and prefer_chinese and (not available_providers or not response.success):
+                fallback_raw = None
+                if dim['name'] == 'announcements':
+                    fallback_raw = self._akshare_notice_response(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        query=dim['query'],
+                        max_results=target_per_dimension,
+                    )
+                elif dim['name'] in {'latest_news', 'risk_check'}:
+                    focus_keywords = None
+                    if dim['name'] == 'risk_check' and not is_index_etf:
+                        focus_keywords = ["减持", "处罚", "违规", "诉讼", "利空", "风险"]
+                    fallback_raw = self._akshare_stock_news_response(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        query=dim['query'],
+                        max_results=target_per_dimension,
+                        focus_keywords=focus_keywords,
+                        firecrawl_max_pages=1,
+                    )
+                fallback_response = self._prepare_akshare_response(
+                    fallback_raw,
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    search_days=search_days,
+                    max_results=target_per_dimension,
+                    prefer_chinese=prefer_chinese,
+                    log_scope=f"{stock_code}:AkShare:{dim['name']}",
+                    strict_freshness=dim['strict_freshness'],
+                )
+                if fallback_response is not None:
+                    logger.info("[情报搜索] %s: AkShare fallback 返回 %s 条", dim['desc'], len(fallback_response.results))
+                    filtered_response = fallback_response
+
             results[dim['name']] = filtered_response
             search_count += 1
             
-            if response.success:
+            if filtered_response.success and filtered_response.results:
+                logger.info(
+                    "[情报搜索] %s: 来源=%s, 结果=%s条",
+                    dim['desc'],
+                    filtered_response.provider,
+                    len(filtered_response.results),
+                )
+            elif response.success:
                 logger.info(
                     "[情报搜索] %s: 原始=%s条, 过滤后=%s条",
                     dim['desc'],

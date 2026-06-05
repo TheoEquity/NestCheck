@@ -159,6 +159,73 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         p1.search.assert_called_once()
         p2.search.assert_called_once()
 
+    def test_search_stock_news_uses_akshare_fallback_after_provider_failure(self) -> None:
+        """A-share news should fall back to AkShare when web providers fail."""
+        today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        service = SearchService(
+            bocha_keys=["dummy_key"],
+            searxng_public_instances_enabled=False,
+            news_max_age_days=3,
+            news_strategy_profile="short",
+        )
+        service._providers = [
+            SimpleNamespace(
+                is_available=True,
+                name="P1",
+                search=MagicMock(return_value=SearchResponse("q", [], "P1", success=False, error_message="failed")),
+            )
+        ]
+        fake_frame = SimpleNamespace(
+            to_dict=MagicMock(
+                return_value=[
+                    {
+                        "新闻标题": "紫金矿业公告新进展",
+                        "新闻内容": "紫金矿业发布项目进展。",
+                        "发布时间": today,
+                        "文章来源": "东方财富",
+                        "新闻链接": "https://example.com/news/1",
+                    }
+                ]
+            )
+        )
+
+        with patch("akshare.stock_news_em", return_value=fake_frame), patch.object(
+            SearchService, "_scrape_with_firecrawl", return_value=None
+        ):
+            resp = service.search_stock_news("601899", "紫金矿业", max_results=3)
+
+        self.assertTrue(resp.success)
+        self.assertEqual(resp.provider, "AkShare")
+        self.assertEqual(resp.results[0].title, "紫金矿业公告新进展")
+
+    def test_search_comprehensive_intel_uses_akshare_without_providers(self) -> None:
+        """Comprehensive intel should use AkShare latest-news fallback without web providers."""
+        today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        service = SearchService(searxng_public_instances_enabled=False)
+        service._providers = []
+        fake_frame = SimpleNamespace(
+            to_dict=MagicMock(
+                return_value=[
+                    {
+                        "新闻标题": "紫金矿业最新新闻",
+                        "新闻内容": "紫金矿业最新经营消息。",
+                        "发布时间": today,
+                        "文章来源": "证券时报网",
+                        "新闻链接": "https://example.com/news/2",
+                    }
+                ]
+            )
+        )
+
+        with patch("akshare.stock_news_em", return_value=fake_frame), patch.object(
+            SearchService, "_scrape_with_firecrawl", return_value=None
+        ):
+            intel = service.search_comprehensive_intel("601899", "紫金矿业", max_searches=1)
+
+        self.assertIn("latest_news", intel)
+        self.assertEqual(intel["latest_news"].provider, "AkShare")
+        self.assertEqual(intel["latest_news"].results[0].title, "紫金矿业最新新闻")
+
     def test_search_stock_news_tries_next_provider_when_chinese_context_is_english_only(self) -> None:
         """Chinese-preferred queries should not stop on English-only provider results."""
         fresh = datetime.now().date().isoformat()

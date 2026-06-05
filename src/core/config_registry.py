@@ -597,6 +597,31 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {"multi_value": True, "delimiter": ","},
         "display_order": 53,
     },
+    "FIRECRAWL_API_KEY": {
+        "title": "Firecrawl API Key",
+        "description": "Firecrawl API key used to scrape article URLs after a news URL is discovered.",
+        "category": "data_source",
+        "data_type": "string",
+        "ui_control": "password",
+        "is_sensitive": True,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": None,
+        "options": [],
+        "validation": {},
+        "display_order": 54,
+        "help_key": "settings.data_source.search_api_keys",
+        "examples": [
+            "FIRECRAWL_API_KEY=fc-your_key_here",
+        ],
+        "docs": [
+            {
+                "label": "Firecrawl 文档",
+                "href": "https://docs.firecrawl.dev/",
+            },
+        ],
+        "warning_codes": ["secret_value"],
+    },
     "SEARXNG_BASE_URLS": {
         "title": "SearXNG Base URLs",
         "description": "Comma-separated SearXNG instance URLs (self-hosted, no quota). Enable format: json in settings.yml.",
@@ -3636,6 +3661,19 @@ _FIELD_HELP_METADATA: Dict[str, Dict[str, Any]] = {
         ],
         "docs": _DOC_FULL_GUIDE_SEARCH,
         "warning_codes": ["secret_value", "comma_separated_keys"],
+    },
+    "FIRECRAWL_API_KEY": {
+        "help_key": "settings.data_source.search_api_keys",
+        "examples": [
+            "FIRECRAWL_API_KEY=fc-your_key_here",
+        ],
+        "docs": [
+            {
+                "label": "Firecrawl 文档",
+                "href": "https://docs.firecrawl.dev/",
+            },
+        ],
+        "warning_codes": ["secret_value"],
     },
     "SEARXNG_PUBLIC_INSTANCES_ENABLED": {
         "help_key": "settings.data_source.SEARXNG_BASE_URLS",

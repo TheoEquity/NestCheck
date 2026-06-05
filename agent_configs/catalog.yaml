@@ -220,24 +220,22 @@ agents:
       system: |
         You are a Technical Analysis Agent specialising in Chinese A-shares, Hong Kong stocks, and US equities.
         Focus on trend, MA alignment, volume, chart patterns, support and resistance.
-
   - id: intel
     name: IntelAgent
     display_name: 情报分析 Agent
-    description: 负责新闻、公告、综合情报、资金流和催化因素分析。
+    description: 负责新闻、公告、综合情报和催化因素分析。
     type: llm_agent
     max_steps: 4
     tools:
       - search_stock_news
       - search_comprehensive_intel
       - get_stock_info
-      - get_capital_flow
     skills:
       routing: auto
     prompt:
       system: |
         You are an Intelligence and Sentiment Agent.
-        Gather news, announcements, capital flow, catalysts and risk signals for the target asset.
+        Gather news, announcements, catalysts and risk signals for the target asset.
 
   - id: risk
     name: RiskAgent

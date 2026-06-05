@@ -85,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] `/api/v1/agent/models` 移除不存在的 request 引用，恢复 Agent 模型列表接口可用性。
 - [改进] 设置页数据源配置新增 `FIRECRAWL_API_KEY`，用于后续对已发现新闻/公告 URL 执行正文抓取。
 - [改进] AI 问答新闻情报在搜索引擎失败时新增 AkShare A 股新闻/公告 fallback，并在配置 Firecrawl 后读取新闻正文作为证据摘要。
+- [新功能] AI 问答新增基金分析上下文工具与基金问答 profile，聚合基金档案、净值绩效、风险指标、持仓结构和持有体验数据。
+- [改进] AI 问答在选择基金大类后自动使用基金问答 profile，股票大类继续使用默认问股路由。
 
 ## [3.18.0] - 2026-05-21
 

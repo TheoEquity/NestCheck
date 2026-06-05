@@ -42,6 +42,59 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _resolve_fund_name_by_code(fund_code: str) -> Optional[str]:
+    """Resolve fund short name from local cache first, then AkShare fund list."""
+    normalized_code = str(fund_code or "").strip().zfill(6)
+    if not normalized_code:
+        return None
+
+    try:
+        from src.storage import FundInfo, get_db
+
+        db = get_db()
+        with db.get_session() as session:
+            info = session.query(FundInfo).filter_by(fund_code=normalized_code).first()
+            if info and info.fund_name:
+                return str(info.fund_name).strip() or None
+    except Exception:
+        pass
+
+    try:
+        import akshare as ak
+        from src.repositories.fund_repo import FundRepository
+
+        df = ak.fund_name_em()
+        if df is None or df.empty or "基金代码" not in df.columns:
+            return None
+        matched = df[df["基金代码"].astype(str).str.zfill(6) == normalized_code]
+        if matched.empty:
+            return None
+        row = matched.iloc[0]
+        name = str(row.get("基金简称", "")).strip()
+        if not name:
+            return None
+        FundRepository().upsert_fund_info({
+            "fund_code": normalized_code,
+            "fund_name": name,
+            "fund_type": str(row.get("基金类型", "")).strip() or None,
+        })
+        return name
+    except Exception:
+        return None
+
+
+def _resolve_asset_name_by_topic(asset_type: str, code: str) -> Optional[str]:
+    if asset_type == "fund":
+        return _resolve_fund_name_by_code(code)
+    try:
+        from data_provider import DataFetcherManager
+
+        manager = DataFetcherManager()
+        return manager.get_stock_name(code)
+    except Exception:
+        return None
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -183,7 +236,7 @@ async def agent_chat(request: ChatRequest):
     
     try:
         skills = request.effective_skills
-        executor = _build_executor(config, skills or None)
+        executor = _build_executor(config, skills if skills is not None else None)
 
         # Pass explicit skills into context for the orchestrator.
         # Direct assignment so caller-provided skills always take precedence
@@ -265,14 +318,14 @@ async def resolve_chat_topic_session(
 
     db = get_db()
     existing = db.get_agent_chat_topic(topic.topic_key)
-    resolved_name = stock_name or (existing.get("name") if existing else None)
-    if not resolved_name:
-        try:
-            from data_provider import DataFetcherManager
-            manager = DataFetcherManager()
-            resolved_name = manager.get_stock_name(stock_code)
-        except Exception:
-            pass
+    if topic.asset_type == "fund":
+        resolved_name = _resolve_fund_name_by_code(topic.code) or (existing.get("name") if existing else None) or stock_name
+    elif stock_name:
+        resolved_name = stock_name
+    else:
+        resolved_name = existing.get("name") if existing else None
+    if not resolved_name and topic.asset_type != "fund":
+        resolved_name = _resolve_asset_name_by_topic(topic.asset_type, topic.code)
 
     db.upsert_agent_chat_topic(
         topic_key=topic.topic_key,
@@ -388,6 +441,17 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
 
     ctx["agent_chat_mode"] = True
     db = get_db()
+    requested_asset_type = str(ctx.get("asset_type") or "").strip().lower()
+    requested_code = (
+        ctx.get("asset_code")
+        or ctx.get("fund_code")
+        or ctx.get("stock_code")
+    )
+    requested_name = (
+        ctx.get("asset_name")
+        or ctx.get("fund_name")
+        or ctx.get("stock_name")
+    )
     existing_topic = db.get_agent_chat_topic_by_session_id(session_id)
     message_topic = resolve_chat_topic(
         request.message,
@@ -405,18 +469,24 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
                     "请从对应股票或基金入口重新进入后再提问。"
                 ),
             )
-        resolved_name = ctx.get("stock_name") or existing_topic.get("name")
+        resolved_name = requested_name or existing_topic.get("name")
+        asset_type = existing_topic["asset_type"]
+        asset_code = existing_topic["code"]
         ctx.update({
             "topic_key": existing_topic["topic_key"],
             "topic_session_id": existing_topic["session_id"],
             "market": existing_topic["market"],
-            "asset_type": existing_topic["asset_type"],
-            "stock_code": existing_topic["code"],
-            "stock_name": resolved_name,
+            "asset_type": asset_type,
+            "asset_code": asset_code,
+            "asset_name": resolved_name,
         })
+        if asset_type == "fund":
+            ctx.update({"fund_code": asset_code, "fund_name": resolved_name})
+        else:
+            ctx.update({"stock_code": asset_code, "stock_name": resolved_name})
         return PreparedChatSession(session_id=session_id, context=ctx)
 
-    if not ctx.get("stock_code"):
+    if not requested_code:
         return PreparedChatSession(
             session_id=session_id,
             context=ctx,
@@ -425,8 +495,8 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
 
     topic = resolve_chat_topic(
         " ".join(str(ctx.get(key) or "") for key in ("market", "asset_type")),
-        stock_code=ctx.get("stock_code"),
-        stock_name=ctx.get("stock_name"),
+        stock_code=requested_code,
+        stock_name=requested_name,
     )
     if topic is None:
         return PreparedChatSession(
@@ -435,13 +505,17 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
             reject_message="请先从具体股票或基金入口进入 AI 问答，再围绕该标的提问。",
         )
 
+    resolved_name = requested_name
+    if topic.asset_type == "fund":
+        resolved_name = _resolve_fund_name_by_code(topic.code) or requested_name
+
     db.upsert_agent_chat_topic(
         topic_key=topic.topic_key,
         session_id=topic.session_id,
         market=topic.market,
         asset_type=topic.asset_type,
         code=topic.code,
-        name=ctx.get("stock_name"),
+        name=resolved_name,
         title=topic.title,
     )
     ctx.update({
@@ -449,9 +523,13 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
         "topic_session_id": topic.session_id,
         "market": topic.market,
         "asset_type": topic.asset_type,
-        "stock_code": topic.code,
-        "stock_name": ctx.get("stock_name"),
+        "asset_code": topic.code,
+        "asset_name": resolved_name,
     })
+    if topic.asset_type == "fund" or requested_asset_type == "fund":
+        ctx.update({"fund_code": topic.code, "fund_name": resolved_name})
+    else:
+        ctx.update({"stock_code": topic.code, "stock_name": resolved_name})
     return PreparedChatSession(session_id=topic.session_id, context=ctx)
 
 

@@ -150,6 +150,9 @@ def _resolve_selected_skill_ids(
     if selected_skill_ids:
         return selected_skill_ids, True
 
+    if selection_source == "request" and raw_skill_ids == []:
+        return [], True
+
     if raw_skill_ids:
         logger.warning(
             "[AgentFactory] No valid %s skills remain after validation; falling back to default skills: %s",

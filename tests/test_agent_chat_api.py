@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from api.v1.endpoints.agent import ChatRequest, _prepare_chat_session
 from src.config import Config
 from src.storage import DatabaseManager
 
@@ -60,3 +61,60 @@ def test_chat_session_messages_api_does_not_expose_provider_trace(tmp_path: Path
     assert "SECRET_REASONING" not in response.text
     assert "SECRET_TOOL_RESULT" not in response.text
     assert "tool_calls" not in response.text
+
+
+def test_resolve_chat_topic_overwrites_fund_name_from_code(tmp_path: Path) -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{tmp_path / 'fund-topic.db'}")
+
+    with (
+        patch("api.middlewares.auth.is_auth_enabled", return_value=False),
+        patch("api.v1.endpoints.agent._resolve_fund_name_by_code", return_value="华夏成长混合") as resolver,
+    ):
+        client = TestClient(create_app(static_dir=tmp_path / "static"))
+        response = client.get(
+            "/api/v1/agent/chat/topics/resolve",
+            params={
+                "stock_code": "000001",
+                "stock_name": "用户手填名称",
+                "market": "cn",
+                "asset_type": "fund",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["found"] is True
+    assert payload["asset_type"] == "fund"
+    assert payload["code"] == "000001"
+    assert payload["name"] == "华夏成长混合"
+    assert payload["title"] == "000001 华夏成长混合"
+    resolver.assert_called_once_with("000001")
+
+
+def test_prepare_chat_session_accepts_fund_context(tmp_path: Path) -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{tmp_path / 'prepare-fund.db'}")
+
+    with patch("api.v1.endpoints.agent._resolve_fund_name_by_code", return_value="兴业收益增强债券A"):
+        prepared = _prepare_chat_session(ChatRequest(
+            message="基金经理还有其他持仓吗、业绩如何？",
+            context={
+                "agent_chat_mode": True,
+                "market": "cn",
+                "asset_type": "fund",
+                "asset_code": "001258",
+                "fund_code": "001258",
+                "fund_name": "用户手填名称",
+            },
+        ))
+
+    assert prepared.reject_message is None
+    assert prepared.session_id.startswith("topic:")
+    assert prepared.context["asset_type"] == "fund"
+    assert prepared.context["asset_code"] == "001258"
+    assert prepared.context["asset_name"] == "兴业收益增强债券A"
+    assert prepared.context["fund_code"] == "001258"
+    assert prepared.context["fund_name"] == "兴业收益增强债券A"

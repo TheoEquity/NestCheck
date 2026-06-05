@@ -38,8 +38,31 @@ const QUICK_QUESTIONS = [
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
 const DEFAULT_CHAT_PROFILE_ID = 'stock_chat_auto';
+const FUND_CHAT_PROFILE_ID = 'fund_analysis';
 const STOCK_SPECIALIST_PROFILE_ID = 'stock_specialist';
 const STOCK_SPECIALIST_PROMPT = '请对当前个股进行专家分析，结合已选策略技能，覆盖行情位置、技术结构、情报风险、策略条件和操作建议。';
+
+export const getDefaultChatProfileId = (assetType?: string | null) => (
+  assetType === 'fund' ? FUND_CHAT_PROFILE_ID : DEFAULT_CHAT_PROFILE_ID
+);
+
+type ActiveChatTopic = { market: string; assetType: string; code: string; name: string; sessionId: string };
+
+export const buildChatTopicContext = (
+  topic: ActiveChatTopic,
+  followUpContext?: ChatFollowUpContext | null,
+) => ({
+  ...(followUpContext ?? {}),
+  agent_chat_mode: true,
+  stock_code: topic.assetType === 'stock' ? topic.code : undefined,
+  stock_name: topic.assetType === 'stock' ? topic.name || undefined : undefined,
+  fund_code: topic.assetType === 'fund' ? topic.code : undefined,
+  fund_name: topic.assetType === 'fund' ? topic.name || undefined : undefined,
+  asset_code: topic.code,
+  asset_name: topic.name || undefined,
+  market: topic.market,
+  asset_type: topic.assetType,
+});
 
 const MARKET_OPTIONS = [
   { value: 'cn', label: 'A股' },
@@ -82,7 +105,7 @@ const ChatPage: React.FC = () => {
   const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [topicForm, setTopicForm] = useState({ market: 'cn', assetType: 'stock', code: '', name: '' });
-  const [activeTopic, setActiveTopic] = useState<{ market: string; assetType: string; code: string; name: string; sessionId: string } | null>(null);
+  const [activeTopic, setActiveTopic] = useState<ActiveChatTopic | null>(null);
   const [topicError, setTopicError] = useState<string | null>(null);
   const [topicResolving, setTopicResolving] = useState(false);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
@@ -276,6 +299,9 @@ const ChatPage: React.FC = () => {
 
   const canStartTopic = Boolean(topicForm.market && topicForm.assetType && topicForm.code.trim());
   const canSendMessage = Boolean(activeTopic && input.trim() && !loading);
+  const buildTopicContext = useCallback((topic: ActiveChatTopic) => (
+    buildChatTopicContext(topic, followUpContextRef.current)
+  ), []);
 
   const applyTopicSelection = useCallback((topic: { market?: string | null; asset_type?: string | null; code?: string | null; name?: string | null; session_id?: string | null }) => {
     if (!topic.session_id || !topic.market || !topic.asset_type || !topic.code) return;
@@ -433,22 +459,19 @@ const ChatPage: React.FC = () => {
     async (overrideMessage?: string, overrideSkillIds?: string[], overrideProfileId?: string) => {
       const msgText = (overrideMessage ?? input).trim();
       if (!msgText || loading || !activeTopic) return;
-      const usedSkillIds = normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
-      const usedSkillNames = usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
+      const usedSkillIds = activeTopic.assetType === 'fund'
+        ? []
+        : normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
+      const usedSkillNames = activeTopic.assetType === 'fund'
+        ? ['基金问答']
+        : usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
 
       const payload = {
         message: msgText,
         session_id: activeTopic.sessionId,
-        profile_id: overrideProfileId ?? DEFAULT_CHAT_PROFILE_ID,
-        ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
-        context: {
-          ...(followUpContextRef.current ?? {}),
-          agent_chat_mode: true,
-          stock_code: activeTopic.code,
-          stock_name: activeTopic.name || undefined,
-          market: activeTopic.market,
-          asset_type: activeTopic.assetType,
-        },
+        profile_id: overrideProfileId ?? getDefaultChatProfileId(activeTopic.assetType),
+        ...(activeTopic.assetType === 'fund' || usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
+        context: buildTopicContext(activeTopic),
       };
       followUpHydrationTokenRef.current += 1;
       followUpContextRef.current = null;
@@ -461,7 +484,7 @@ const ChatPage: React.FC = () => {
         skillName: usedSkillNames.join('、'),
       });
     },
-    [activeTopic, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, startStream],
+    [activeTopic, buildTopicContext, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, startStream],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

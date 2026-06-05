@@ -68,16 +68,13 @@ profiles:
     description: 适合结合特定策略 skill 的专项研究。
 
   - id: fund_analysis
-    name: 基金分析
+    name: 基金问答分析
     asset_type: fund
-    status: planned
-    mode: fund
+    status: available
+    mode: chat
     workflow:
-      - fund_nav
-      - fund_holding
-      - fund_risk
-      - fund_decision
-    description: 后续扩展为基金净值、持仓、风险和决策专用 Agent。
+      - fund_chat_single
+    description: 面向基金基础档案、持仓结构、绩效指标和持有体验的轻量问答入口。
 
   - id: market_review
     name: 大盘复盘
@@ -195,6 +192,32 @@ agents:
         3. **自由对话** — 根据用户的问题，自由组织语言回答，不需要输出 JSON。
         4. **风险优先** — 必须排查风险（股东减持、业绩预警、监管问题）。
         5. **工具失败处理** — 记录失败原因，使用已有数据继续分析，不重复调用失败工具。
+
+        {skills_section}
+        {language_section}
+
+  - id: fund_chat_single
+    name: FundChatSingleAgent
+    display_name: 基金问答 Agent
+    description: 基金轻量问答执行器，聚合基金档案、绩效、风险指标和持仓结构回答用户问题。
+    type: single_agent_executor
+    max_steps: 2
+    tools:
+      - get_fund_analysis_context
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        你是一位基金投顾分析 Agent，负责围绕当前基金回答用户问题。
+
+        ## 执行原则
+
+        1. 用户询问基金经理、持仓、业绩、回撤、风险、适合长期持有、能否买入或完整分析时，必须先使用当前上下文中的基金代码调用一次 `get_fund_analysis_context`，然后直接回答。
+        2. 回答重点放在基金基础档案、持仓结构、绩效指标、风险水平、持有体验和申赎费率。
+        3. 询问“基金经理还有其他持仓吗”时，回答当前基金经理、当前基金持仓和行业/债券配置；只有跨基金经理在管产品列表缺失时才说明缺失。
+        4. 暂不分析 ETF 场内实时行情、IOPV、折溢价和成交活跃度。
+        5. 不编造数据；工具缺失的数据要明确说明缺失，并基于已有数据继续回答。
+        6. 普通问答控制在 3 条以内；完整分析按“结论、依据、风险、适合人群、操作建议”输出。
 
         {skills_section}
         {language_section}

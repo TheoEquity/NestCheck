@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createParsedApiError } from '../../api/error';
 import { historyApi } from '../../api/history';
 import type { Message } from '../../stores/agentChatStore';
-import ChatPage from '../ChatPage';
+import ChatPage, { buildChatTopicContext, getDefaultChatProfileId } from '../ChatPage';
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -24,6 +24,7 @@ const {
   mockUpdateSystemConfig,
   mockDownloadSession,
   mockFormatSessionAsMarkdown,
+  mockResolveChatTopic,
 } = vi.hoisted(() => ({
   mockGetSkills: vi.fn(),
   mockDeleteChatSession: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockUpdateSystemConfig: vi.fn(),
   mockDownloadSession: vi.fn(),
   mockFormatSessionAsMarkdown: vi.fn(),
+  mockResolveChatTopic: vi.fn(),
 }));
 
 const mockLoadSessions = vi.fn();
@@ -69,6 +71,7 @@ vi.mock('../../api/agent', () => ({
     getSkills: mockGetSkills,
     deleteChatSession: mockDeleteChatSession,
     sendChat: mockSendChat,
+    resolveChatTopic: mockResolveChatTopic,
   },
 }));
 
@@ -158,6 +161,17 @@ beforeEach(() => {
   });
   mockDeleteChatSession.mockResolvedValue(undefined);
   mockSendChat.mockResolvedValue({ success: true });
+  mockResolveChatTopic.mockResolvedValue({
+    found: true,
+    session_id: 'session-1',
+    topic_key: 'cn:stock:600519',
+    title: '600519',
+    market: 'cn',
+    asset_type: 'stock',
+    code: '600519',
+    name: '',
+    has_messages: false,
+  });
   mockGetSystemConfig.mockResolvedValue({
     configVersion: 'cfg-v1',
     maskToken: 'mask-token',
@@ -426,6 +440,82 @@ describe('ChatPage', () => {
         expect.objectContaining({
           skillNames: ['趋势分析', '均线金叉'],
           skillName: '趋势分析、均线金叉',
+        }),
+      );
+    });
+  });
+
+  it('uses the fund analysis profile for fund topics', () => {
+    expect(getDefaultChatProfileId('fund')).toBe('fund_analysis');
+    expect(getDefaultChatProfileId('stock')).toBe('stock_chat_auto');
+  });
+
+  it('builds fund-specific context from the fixed chat topic', () => {
+    expect(buildChatTopicContext({
+      market: 'cn',
+      assetType: 'fund',
+      code: '000001',
+      name: '华夏成长混合',
+      sessionId: 'session-fund',
+    })).toEqual(expect.objectContaining({
+      agent_chat_mode: true,
+      fund_code: '000001',
+      fund_name: '华夏成长混合',
+      asset_code: '000001',
+      asset_name: '华夏成长混合',
+      market: 'cn',
+      asset_type: 'fund',
+    }));
+  });
+
+  it('sends fund topics without stock strategy skills', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-fund',
+      topic_key: 'cn:fund:001258',
+      title: '001258 兴业收益增强债券A',
+      market: 'cn',
+      asset_type: 'fund',
+      code: '001258',
+      name: '兴业收益增强债券A',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'fund' } });
+    fireEvent.change(screen.getByLabelText('代码'), { target: { value: '001258' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+
+    await waitFor(() => {
+      expect(mockSwitchSession).toHaveBeenCalledWith('session-fund');
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/围绕当前标的提问/), {
+      target: { value: '基金经理还有其他持仓吗、业绩如何？' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '基金经理还有其他持仓吗、业绩如何？',
+          profile_id: 'fund_analysis',
+          skills: [],
+          context: expect.objectContaining({
+            fund_code: '001258',
+            fund_name: '兴业收益增强债券A',
+            asset_code: '001258',
+            asset_name: '兴业收益增强债券A',
+            asset_type: 'fund',
+          }),
+        }),
+        expect.objectContaining({
+          skillName: '基金问答',
         }),
       );
     });

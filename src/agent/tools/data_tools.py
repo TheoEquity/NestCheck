@@ -12,7 +12,8 @@ Tools:
 import logging
 import hashlib
 import json
-from datetime import date
+import math
+from datetime import date, datetime, timedelta
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -275,6 +276,170 @@ def _compact_portfolio_risk(risk: dict, top_n: int = 10) -> dict:
             "near_count": stop_loss.get("near_count", 0),
             "items": stop_items,
         },
+    }
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            cleaned = value.strip().replace("%", "").replace(",", "")
+            if not cleaned or cleaned.lower() in {"nan", "nat", "none", "--", "---"}:
+                return None
+            return float(cleaned)
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _clean_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat", "none", "--", "---"}:
+        return None
+    return text
+
+
+def _normalize_fund_code(fund_code: str) -> str:
+    raw = str(fund_code or "").strip().upper()
+    if raw.endswith(".OF"):
+        raw = raw[:-3]
+    return raw.zfill(6) if raw.isdigit() and len(raw) <= 6 else raw
+
+
+def _df_records(df: Any, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    if df is None or not hasattr(df, "empty") or df.empty:
+        return []
+    records = df.head(limit).to_dict("records") if limit else df.to_dict("records")
+    return [{str(k): v for k, v in row.items()} for row in records]
+
+
+def _compact_records(
+    records: List[Dict[str, Any]],
+    columns: List[str],
+    *,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    compact: List[Dict[str, Any]] = []
+    for row in records[:limit]:
+        item = {}
+        for column in columns:
+            value = row.get(column)
+            cleaned = _clean_text(value)
+            if cleaned is not None:
+                item[column] = cleaned
+        if item:
+            compact.append(item)
+    return compact
+
+
+def _nav_rows(nav_df: Any) -> List[Dict[str, Any]]:
+    rows = _df_records(nav_df)
+    parsed_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        nav_date_raw = row.get("净值日期")
+        nav_value = _safe_float(row.get("单位净值"))
+        if nav_date_raw is None or nav_value is None:
+            continue
+        try:
+            nav_date = datetime.fromisoformat(str(nav_date_raw)[:10]).date()
+        except ValueError:
+            continue
+        parsed_rows.append({"date": nav_date, "nav": nav_value, "daily_return_pct": _safe_float(row.get("日增长率"))})
+    return sorted(parsed_rows, key=lambda item: item["date"])
+
+
+def _nearest_nav_before(rows: List[Dict[str, Any]], target: date) -> Optional[Dict[str, Any]]:
+    candidate = None
+    for row in rows:
+        if row["date"] <= target:
+            candidate = row
+        else:
+            break
+    return candidate
+
+
+def _period_return(rows: List[Dict[str, Any]], days: int) -> Optional[float]:
+    if len(rows) < 2:
+        return None
+    latest = rows[-1]
+    start = _nearest_nav_before(rows, latest["date"] - timedelta(days=days))
+    if not start or not start.get("nav"):
+        return None
+    return round((latest["nav"] / start["nav"] - 1) * 100, 2)
+
+
+def _max_drawdown(rows: List[Dict[str, Any]], days: Optional[int] = None) -> Optional[float]:
+    if len(rows) < 2:
+        return None
+    sample = rows
+    if days is not None:
+        start_date = rows[-1]["date"] - timedelta(days=days)
+        sample = [row for row in rows if row["date"] >= start_date]
+    peak = None
+    max_dd = 0.0
+    for row in sample:
+        nav = row["nav"]
+        peak = nav if peak is None else max(peak, nav)
+        if peak:
+            max_dd = min(max_dd, nav / peak - 1)
+    return round(abs(max_dd) * 100, 2)
+
+
+def _monthly_win_rate(rows: List[Dict[str, Any]], months: int = 12) -> Optional[float]:
+    if len(rows) < 2:
+        return None
+    start_date = rows[-1]["date"] - timedelta(days=months * 31)
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        if row["date"] < start_date:
+            continue
+        key = row["date"].strftime("%Y-%m")
+        buckets.setdefault(key, []).append(row)
+    wins = 0
+    total = 0
+    for bucket_rows in buckets.values():
+        if len(bucket_rows) < 2:
+            continue
+        total += 1
+        if bucket_rows[-1]["nav"] > bucket_rows[0]["nav"]:
+            wins += 1
+    if total == 0:
+        return None
+    return round(wins / total * 100, 2)
+
+
+def _fund_performance_from_nav(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not rows:
+        return {"status": "empty"}
+    latest = rows[-1]
+    one_year_return = _period_return(rows, 365)
+    one_year_dd = _max_drawdown(rows, 365)
+    calmar = None
+    if one_year_return is not None and one_year_dd and one_year_dd > 0:
+        calmar = round(one_year_return / one_year_dd, 3)
+    return {
+        "status": "ok",
+        "latest_nav": latest["nav"],
+        "latest_nav_date": latest["date"].isoformat(),
+        "latest_daily_return_pct": latest.get("daily_return_pct"),
+        "period_returns_pct": {
+            "1m": _period_return(rows, 30),
+            "3m": _period_return(rows, 90),
+            "6m": _period_return(rows, 180),
+            "1y": one_year_return,
+            "3y": _period_return(rows, 365 * 3),
+        },
+        "max_drawdown_pct": {
+            "1y": one_year_dd,
+            "all": _max_drawdown(rows),
+        },
+        "calmar_ratio_1y": calmar,
+        "monthly_win_rate_12m_pct": _monthly_win_rate(rows, 12),
+        "data_points": len(rows),
     }
 
 
@@ -695,6 +860,200 @@ get_portfolio_snapshot_tool = ToolDefinition(
 
 
 # ============================================================
+# get_fund_analysis_context
+# ============================================================
+
+def _handle_get_fund_analysis_context(fund_code: str, report_year: Optional[str] = None) -> dict:
+    """Aggregate open-end fund context for fund AI Q&A."""
+    code = _normalize_fund_code(fund_code)
+    if not code:
+        return {"status": "failed", "error": "fund_code is required"}
+
+    year = str(report_year or date.today().year).strip()
+    flags: List[str] = []
+    result: Dict[str, Any] = {
+        "status": "ok",
+        "fund_code": code,
+        "report_year": year,
+        "source": "akshare",
+        "profile": {"status": "empty"},
+        "performance": {"status": "empty"},
+        "risk_metrics": {"status": "empty"},
+        "holding_experience": {"status": "empty"},
+        "holdings": {"status": "empty"},
+        "data_flags": flags,
+    }
+
+    try:
+        import akshare as ak
+    except Exception as exc:
+        return {"status": "failed", "fund_code": code, "error": f"akshare unavailable: {exc}"}
+
+    try:
+        overview_df = ak.fund_overview_em(symbol=code)
+        overview = _df_records(overview_df, limit=1)
+        if overview:
+            row = overview[0]
+            result["profile"] = {
+                "status": "ok",
+                "fund_full_name": _clean_text(row.get("基金全称")),
+                "fund_short_name": _clean_text(row.get("基金简称")),
+                "fund_code_display": _clean_text(row.get("基金代码")),
+                "fund_type": _clean_text(row.get("基金类型")),
+                "issue_date": _clean_text(row.get("发行日期")),
+                "inception": _clean_text(row.get("成立日期/规模")),
+                "net_asset_size": _clean_text(row.get("净资产规模")),
+                "share_size": _clean_text(row.get("份额规模")),
+                "manager_company": _clean_text(row.get("基金管理人")),
+                "custodian": _clean_text(row.get("基金托管人")),
+                "fund_managers": _clean_text(row.get("基金经理人")),
+                "dividend_since_inception": _clean_text(row.get("成立来分红")),
+                "management_fee": _clean_text(row.get("管理费率")),
+                "custody_fee": _clean_text(row.get("托管费率")),
+                "sales_service_fee": _clean_text(row.get("销售服务费率")),
+                "benchmark": _clean_text(row.get("业绩比较基准")),
+                "tracking_target": _clean_text(row.get("跟踪标的")),
+            }
+        else:
+            flags.append("fund_overview_empty")
+    except Exception as exc:
+        flags.append(f"fund_overview_failed: {exc}")
+
+    try:
+        purchase_df = ak.fund_purchase_em()
+        if hasattr(purchase_df, "empty") and not purchase_df.empty and "基金代码" in purchase_df.columns:
+            matched = purchase_df[purchase_df["基金代码"].astype(str).str.zfill(6) == code]
+            records = _df_records(matched, limit=1)
+            if records:
+                row = records[0]
+                result["trading"] = {
+                    "status": "ok",
+                    "latest_nav_or_income": _clean_text(row.get("最新净值/万份收益")),
+                    "latest_report_time": _clean_text(row.get("最新净值/万份收益-报告时间")),
+                    "subscription_status": _clean_text(row.get("申购状态")),
+                    "redemption_status": _clean_text(row.get("赎回状态")),
+                    "next_open_date": _clean_text(row.get("下一开放日")),
+                    "min_purchase_amount": _clean_text(row.get("购买起点")),
+                    "daily_purchase_limit": _clean_text(row.get("日累计限定金额")),
+                    "fee": _clean_text(row.get("手续费")),
+                }
+    except Exception as exc:
+        flags.append(f"fund_purchase_failed: {exc}")
+
+    try:
+        nav_df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
+        nav_rows = _nav_rows(nav_df)
+        result["performance"] = _fund_performance_from_nav(nav_rows)
+    except Exception as exc:
+        flags.append(f"fund_nav_failed: {exc}")
+
+    try:
+        analysis_df = ak.fund_individual_analysis_xq(symbol=code, timeout=15)
+        rows = _compact_records(
+            _df_records(analysis_df),
+            ["周期", "较同类风险收益比", "较同类抗风险波动", "年化波动率", "年化夏普比率", "最大回撤"],
+            limit=5,
+        )
+        if rows:
+            result["risk_metrics"] = {"status": "ok", "periods": rows}
+    except Exception as exc:
+        flags.append(f"fund_risk_metrics_failed: {exc}")
+
+    try:
+        achievement_df = ak.fund_individual_achievement_xq(symbol=code, timeout=15)
+        rows = _compact_records(
+            _df_records(achievement_df),
+            ["业绩类型", "周期", "本产品区间收益", "本产品最大回撒", "周期收益同类排名"],
+            limit=6,
+        )
+        if rows:
+            result["achievement"] = {"status": "ok", "periods": rows}
+    except Exception as exc:
+        flags.append(f"fund_achievement_failed: {exc}")
+
+    try:
+        probability_df = ak.fund_individual_profit_probability_xq(symbol=code, timeout=15)
+        rows = _compact_records(
+            _df_records(probability_df),
+            ["持有时长", "盈利概率", "平均收益"],
+            limit=5,
+        )
+        if rows:
+            result["holding_experience"] = {"status": "ok", "periods": rows}
+    except Exception as exc:
+        flags.append(f"fund_profit_probability_failed: {exc}")
+
+    try:
+        stock_hold_df = ak.fund_portfolio_hold_em(symbol=code, date=year)
+        stock_rows = _compact_records(
+            _df_records(stock_hold_df),
+            ["股票代码", "股票名称", "占净值比例", "持股数", "持仓市值", "季度"],
+            limit=8,
+        )
+        top_weight = sum((_safe_float(row.get("占净值比例")) or 0.0) for row in stock_rows)
+        result["holdings"] = {
+            "status": "ok" if stock_rows else "empty",
+            "top_stocks": stock_rows,
+            "top_stock_weight_pct": round(top_weight, 2) if stock_rows else None,
+        }
+    except Exception as exc:
+        flags.append(f"fund_stock_holdings_failed: {exc}")
+
+    try:
+        industry_df = ak.fund_portfolio_industry_allocation_em(symbol=code, date=year)
+        industry_rows = _compact_records(
+            _df_records(industry_df),
+            ["行业类别", "占净值比例", "市值", "截止时间"],
+            limit=6,
+        )
+        result.setdefault("holdings", {})["industry_allocation"] = industry_rows
+    except Exception as exc:
+        flags.append(f"fund_industry_allocation_failed: {exc}")
+
+    try:
+        bond_hold_df = ak.fund_portfolio_bond_hold_em(symbol=code, date=year)
+        bond_rows = _compact_records(
+            _df_records(bond_hold_df),
+            ["债券代码", "债券名称", "占净值比例", "持仓市值", "季度"],
+            limit=5,
+        )
+        result.setdefault("holdings", {})["top_bonds"] = bond_rows
+    except Exception as exc:
+        flags.append(f"fund_bond_holdings_failed: {exc}")
+
+    if flags:
+        result["status"] = "partial"
+    return result
+
+
+get_fund_analysis_context_tool = ToolDefinition(
+    name="get_fund_analysis_context",
+    description=(
+        "Get aggregated open-end fund analysis context from AkShare, including profile, NAV performance, "
+        "risk metrics, holding experience, stock/bond holdings and industry allocation. "
+        "Use this as the primary tool for fund manager, holding, performance, drawdown, risk and buy/hold Q&A. "
+        "ETF-specific market quote is not included."
+    ),
+    parameters=[
+        ToolParameter(
+            name="fund_code",
+            type="string",
+            description="6-digit fund code, e.g., '000001'.",
+        ),
+        ToolParameter(
+            name="report_year",
+            type="string",
+            description="Optional portfolio report year, e.g., '2024'. Defaults to current year.",
+            required=False,
+            default=None,
+        ),
+    ],
+    handler=_handle_get_fund_analysis_context,
+    category="data",
+)
+
+
+# ============================================================
 # Export all data tools
 # ============================================================
 
@@ -705,6 +1064,7 @@ ALL_DATA_TOOLS = [
     get_analysis_context_tool,
     get_stock_info_tool,
     get_portfolio_snapshot_tool,
+    get_fund_analysis_context_tool,
 ]
 
 

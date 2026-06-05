@@ -46,6 +46,13 @@ _SENTINEL = object()
 _SKILL_MANAGER_CUSTOM_DIR: object = _SENTINEL
 
 
+def invalidate_skill_manager_cache() -> None:
+    """Force SkillManager to reload definitions on the next request."""
+    global _SKILL_MANAGER_PROTOTYPE, _SKILL_MANAGER_CUSTOM_DIR
+    _SKILL_MANAGER_PROTOTYPE = None
+    _SKILL_MANAGER_CUSTOM_DIR = _SENTINEL
+
+
 @dataclass
 class SkillPromptState:
     """Resolved skill activation + prompt fragments for analysis entrypoints."""
@@ -195,6 +202,23 @@ def get_tool_registry():
     return _TOOL_REGISTRY
 
 
+def _filter_tool_registry(registry, tool_names: Optional[List[str]]):
+    """Return a registry restricted to the configured tool names."""
+    if tool_names is None:
+        return registry
+
+    from src.agent.tools.registry import ToolRegistry
+
+    filtered = ToolRegistry()
+    for name in tool_names:
+        tool_def = registry.get(name)
+        if tool_def is None:
+            logger.warning("[AgentFactory] catalog tool '%s' not found", name)
+            continue
+        filtered.register(tool_def)
+    return filtered
+
+
 def get_skill_manager(config=None):
     """Return a deepcopy-clone of the cached SkillManager prototype.
 
@@ -320,6 +344,9 @@ def build_agent_executor(config=None, skills: Optional[List[str]] = None):
     from src.agent.llm_adapter import LLMToolAdapter
 
     registry = get_tool_registry()
+    catalog_agent = getattr(config, "agent_catalog_agent", None)
+    if catalog_agent is not None and getattr(catalog_agent, "tools", None) is not None:
+        registry = _filter_tool_registry(registry, list(getattr(catalog_agent, "tools", []) or []))
     prompt_state = resolve_skill_prompt_state(config, skills=skills)
     skill_manager = prompt_state.skill_manager
     logger.info(
@@ -352,6 +379,7 @@ def build_agent_executor(config=None, skills: Optional[List[str]] = None):
         skill_instructions=prompt_state.skill_instructions,
         default_skill_policy=prompt_state.default_skill_policy,
         use_legacy_default_prompt=prompt_state.use_legacy_default_prompt,
+        custom_chat_system_prompt=(getattr(catalog_agent, "prompt", {}) or {}).get("system", "") if catalog_agent else "",
         max_steps=_coerce_config_int(
             getattr(config, "agent_max_steps", AGENT_MAX_STEPS_DEFAULT),
             AGENT_MAX_STEPS_DEFAULT,

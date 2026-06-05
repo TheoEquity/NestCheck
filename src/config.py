@@ -549,6 +549,12 @@ def get_effective_agent_primary_model(config: "Config") -> str:
         configured_models=configured_router_models,
     )
     if configured_agent_model:
+        if (
+            configured_router_models
+            and configured_agent_model not in configured_router_models
+            and not _uses_direct_env_provider(configured_agent_model)
+        ):
+            return (getattr(config, "litellm_model", "") or "").strip()
         return configured_agent_model
     return (getattr(config, "litellm_model", "") or "").strip()
 
@@ -1255,6 +1261,21 @@ class Config:
             )
             if llm_model_list:
                 llm_models_source = "legacy_env"
+
+        configured_runtime_models = get_configured_llm_models(llm_model_list)
+        if (
+            litellm_model
+            and configured_runtime_models
+            and litellm_model not in configured_runtime_models
+            and not _uses_direct_env_provider(litellm_model)
+        ):
+            replacement_model = configured_runtime_models[0]
+            logger.warning(
+                "Configured LITELLM_MODEL %s is not present in current runtime model list; using %s instead.",
+                litellm_model,
+                replacement_model,
+            )
+            litellm_model = replacement_model
 
         if (
             inferred_legacy_deepseek_model

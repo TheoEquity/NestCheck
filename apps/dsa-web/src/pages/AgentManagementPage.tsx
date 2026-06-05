@@ -7,6 +7,7 @@ import {
   type AgentManagementOverview,
   type AgentManagementProfile,
   type AgentManagementSkill,
+  type AgentSkillTextResponse,
   type AgentManagementTool,
 } from '../api/agentManagement';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
@@ -32,6 +33,11 @@ type ProfileFormState = {
   mode: string;
   workflow: string[];
   description: string;
+};
+type SkillEditorState = {
+  skill: AgentManagementSkill;
+  content: string;
+  sourcePath: string;
 };
 
 const tabs: Array<{ key: TabKey; label: string; description: string }> = [
@@ -581,27 +587,95 @@ function ToolsTab({ tools }: { tools: AgentManagementTool[] }) {
   );
 }
 
-function SkillsTab({ skills }: { skills: AgentManagementSkill[] }) {
+function SkillEditorModal({
+  editor,
+  busy,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  editor: SkillEditorState;
+  busy: boolean;
+  onChange: (content: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
   return (
-    <div className="grid gap-3 md:grid-cols-2">
-      {skills.map((skill) => (
-        <Card key={skill.id} padding="lg">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">{skill.name}</h3>
-              <p className="mt-1 text-sm text-secondary-text">{skill.description || '暂无说明'}</p>
-            </div>
-            <Badge>{labelFor(skill.category, categoryLabels)}</Badge>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <Card className="max-h-[92vh] w-full max-w-5xl overflow-y-auto" padding="lg">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <span className="label-uppercase">编辑 Skill</span>
+            <h3 className="mt-2 text-xl font-semibold text-foreground">{editor.skill.name}</h3>
+            <p className="mt-1 break-all text-xs text-muted-text">{editor.sourcePath}</p>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {skill.default_active ? <Badge variant="success">默认激活</Badge> : null}
-            {skill.default_router ? <Badge variant="info">自动路由</Badge> : null}
-            {skill.user_invocable ? <Badge>用户可选</Badge> : null}
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={busy}>取消</Button>
+            <Button onClick={onSave} disabled={busy}>保存 Skill</Button>
           </div>
-          <p className="mt-4 text-xs text-muted-text">Skill 内容来自策略目录；当前页面用于查看和配置 Agent 对 skill 的引用。</p>
-        </Card>
-      ))}
+        </div>
+        <Textarea
+          className="mt-4 min-h-[560px] font-mono text-xs"
+          value={editor.content}
+          onChange={(event) => onChange(event.target.value)}
+          spellCheck={false}
+        />
+      </Card>
     </div>
+  );
+}
+
+function SkillsTab({
+  skills,
+  editor,
+  busy,
+  onEditSkill,
+  onChangeSkillContent,
+  onCloseEditor,
+  onSaveSkill,
+}: {
+  skills: AgentManagementSkill[];
+  editor: SkillEditorState | null;
+  busy: boolean;
+  onEditSkill: (skill: AgentManagementSkill) => void;
+  onChangeSkillContent: (content: string) => void;
+  onCloseEditor: () => void;
+  onSaveSkill: () => void;
+}) {
+  return (
+    <>
+      <div className="grid gap-3 md:grid-cols-2">
+        {skills.map((skill) => (
+          <Card key={skill.id} padding="lg">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">{skill.name}</h3>
+                <p className="mt-1 text-sm text-secondary-text">{skill.description || '暂无说明'}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge>{labelFor(skill.category, categoryLabels)}</Badge>
+                <Button variant="secondary" onClick={() => onEditSkill(skill)} disabled={busy}>编辑</Button>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {skill.default_active ? <Badge variant="success">默认激活</Badge> : null}
+              {skill.default_router ? <Badge variant="info">自动路由</Badge> : null}
+              {skill.user_invocable ? <Badge>用户可选</Badge> : null}
+            </div>
+            <p className="mt-4 break-all text-xs text-muted-text">Skill 内容来自 {skill.source_path || skill.source}，可通过右上角编辑按钮改写定义文件。</p>
+          </Card>
+        ))}
+      </div>
+      {editor ? (
+        <SkillEditorModal
+          editor={editor}
+          busy={busy}
+          onChange={onChangeSkillContent}
+          onClose={onCloseEditor}
+          onSave={onSaveSkill}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -613,6 +687,7 @@ const AgentManagementPage: React.FC = () => {
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [skillEditor, setSkillEditor] = useState<SkillEditorState | null>(null);
   const [message, setMessage] = useState('');
 
   const activeTabMeta = useMemo(() => tabs.find((tab) => tab.key === activeTab) ?? tabs[0], [activeTab]);
@@ -672,6 +747,36 @@ const AgentManagementPage: React.FC = () => {
     setMessage(`${form.display_name} 已应用到 YAML，保存后生效`);
   };
 
+  const openSkillEditor = async (skill: AgentManagementSkill) => {
+    setSaving(true);
+    try {
+      const data: AgentSkillTextResponse = await agentManagementApi.getSkill(skill.id);
+      setSkillEditor({ skill, content: data.content, sourcePath: data.source_path });
+      setMessage(`${skill.name} 已加载，可编辑后保存`);
+      setError(null);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveSkill = async () => {
+    if (!skillEditor) return;
+    setSaving(true);
+    try {
+      const result = await agentManagementApi.saveSkill(skillEditor.skill.id, skillEditor.content);
+      setOverview(result.overview);
+      setSkillEditor(null);
+      setMessage(`${skillEditor.skill.name} 已保存并刷新`);
+      setError(null);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <AppPage className="space-y-5">
@@ -729,7 +834,17 @@ const AgentManagementPage: React.FC = () => {
         {activeTab === 'profiles' ? <ProfilesTab profiles={overview.profiles} agents={overview.agents} onApplyProfile={applyProfileConfig} /> : null}
         {activeTab === 'agents' ? <AgentsTab agents={overview.agents} tools={overview.tools} skills={overview.skills} onApplyAgent={applyAgentConfig} /> : null}
         {activeTab === 'tools' ? <ToolsTab tools={overview.tools} /> : null}
-        {activeTab === 'skills' ? <SkillsTab skills={overview.skills} /> : null}
+        {activeTab === 'skills' ? (
+          <SkillsTab
+            skills={overview.skills}
+            editor={skillEditor}
+            busy={saving || loading}
+            onEditSkill={openSkillEditor}
+            onChangeSkillContent={(content) => setSkillEditor((prev) => (prev ? { ...prev, content } : prev))}
+            onCloseEditor={() => setSkillEditor(null)}
+            onSaveSkill={saveSkill}
+          />
+        ) : null}
       </Card>
 
       <CatalogEditor

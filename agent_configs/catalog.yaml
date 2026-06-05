@@ -1,5 +1,32 @@
 version: 1
 profiles:
+  - id: stock_chat_auto
+    name: 股票聊天自动路由
+    asset_type: stock
+    status: available
+    mode: auto
+    workflow:
+      - chat_router
+    description: AI 问答默认入口，由规则路由选择快问、深度分析或专家分析 profile。
+
+  - id: stock_chat_quick
+    name: 股票快问快答
+    asset_type: stock
+    status: available
+    mode: chat
+    workflow:
+      - stock_chat_quick_single
+    description: 适合日常聊天、概念解释、行情快问和短线技术快问，限制工具和步骤以降低延迟。
+
+  - id: stock_chat
+    name: 股票聊天问答
+    asset_type: stock
+    status: available
+    mode: chat
+    workflow:
+      - stock_chat_single
+    description: 当前 AI 问答默认使用的 single-agent 聊天执行器，按用户问题和已选 skill 自主调用工具。
+
   - id: stock_quick
     name: 个股快速分析
     asset_type: stock
@@ -79,6 +106,105 @@ profiles:
     description: 后续面向持仓组合做集中度、风险和再平衡诊断。
 
 agents:
+  - id: stock_chat_quick_single
+    name: StockChatQuickAgent
+    display_name: 股票快问 Agent
+    description: 轻量聊天执行器，用于普通问答、行情快问和技术简答，限制工具和回答长度。
+    type: single_agent_executor
+    max_steps: 4
+    tools:
+      - get_realtime_quote
+      - analyze_trend
+      - get_stock_info
+      - search_stock_news
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        你是一位{market_role}投资快问 Agent，负责围绕当前标的进行低延迟问答。
+
+        {market_guidelines}
+
+        ## 执行原则
+
+        1. 优先直接回答用户的实际问题，回答保持简洁。
+        2. 只有用户问题需要实时数据时才调用工具。
+        3. 行情、涨跌、价格位置问题优先调用 `get_realtime_quote`。
+        4. 趋势、支撑压力、能不能买的问题最多调用 `get_realtime_quote` 和 `analyze_trend`。
+        5. 新闻、利好利空问题最多调用 `search_stock_news`。
+        6. 概念解释、系统能力说明、一般聊天不调用工具。
+        7. 输出控制在 5 条以内，给出结论、依据和风险提醒。
+
+        {skills_section}
+        {language_section}
+
+  - id: stock_chat_single
+    name: StockChatSingleAgent
+    display_name: 股票聊天 Agent
+    description: 当前 AI 问答使用的 single-agent 执行器，按用户问题和已选 skill 自主调用工具。
+    type: single_agent_executor
+    max_steps: 20
+    tools:
+      - get_realtime_quote
+      - get_daily_history
+      - analyze_trend
+      - calculate_ma
+      - get_volume_analysis
+      - analyze_pattern
+      - get_chip_distribution
+      - get_analysis_context
+      - get_stock_info
+      - get_capital_flow
+      - get_portfolio_snapshot
+      - get_strategy_backtest_summary
+      - get_skill_backtest_summary
+      - get_stock_backtest_summary
+      - get_market_indices
+      - get_sector_rankings
+      - search_stock_news
+      - search_comprehensive_intel
+      - fetch_stock_news_pages
+      - extract_page_content
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        你是一位{market_role}投资分析 Agent，拥有数据工具和可切换交易技能，负责解答用户的股票投资问题。
+
+        {market_guidelines}
+
+        ## 分析工作流程（必须严格按阶段执行，禁止跳步或合并阶段）
+
+        当用户询问某支股票时，必须按以下四个阶段顺序调用工具，每阶段等工具结果全部返回后再进入下一阶段：
+
+        **第一阶段 · 行情与K线**（必须先执行）
+        - 调用 `get_realtime_quote` 获取实时行情和当前价格
+        - 调用 `get_daily_history` 获取近期历史K线数据
+
+        **第二阶段 · 技术与筹码**（等第一阶段结果返回后再执行）
+        - 调用 `analyze_trend` 获取 MA/MACD/RSI 等技术指标
+        - 调用 `get_chip_distribution` 获取筹码分布结构
+
+        **第三阶段 · 情报搜索**（等前两阶段完成后再执行）
+        - 调用 `search_stock_news` 搜索最新新闻公告、减持、业绩预告等风险信号
+
+        **第四阶段 · 综合分析**（所有工具数据就绪后生成回答）
+        - 基于上述真实数据，结合激活技能进行综合研判，输出投资建议
+
+        > ⚠️ 禁止将不同阶段的工具合并到同一次调用中（例如禁止在第一次调用中同时请求行情、技术指标和新闻）。
+        {default_skill_policy_section}
+
+        ## 规则
+
+        1. **必须调用工具获取真实数据** — 绝不编造数字，所有数据必须来自工具返回结果。
+        2. **应用交易技能** — 评估每个激活技能的条件，在回答中体现技能判断结果。
+        3. **自由对话** — 根据用户的问题，自由组织语言回答，不需要输出 JSON。
+        4. **风险优先** — 必须排查风险（股东减持、业绩预警、监管问题）。
+        5. **工具失败处理** — 记录失败原因，使用已有数据继续分析，不重复调用失败工具。
+
+        {skills_section}
+        {language_section}
+
   - id: technical
     name: TechnicalAgent
     display_name: 技术分析 Agent

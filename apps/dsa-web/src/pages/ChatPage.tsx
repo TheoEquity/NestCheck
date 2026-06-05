@@ -37,6 +37,9 @@ const QUICK_QUESTIONS = [
 
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
+const DEFAULT_CHAT_PROFILE_ID = 'stock_chat_auto';
+const STOCK_SPECIALIST_PROFILE_ID = 'stock_specialist';
+const STOCK_SPECIALIST_PROMPT = '请对当前个股进行专家分析，结合已选策略技能，覆盖行情位置、技术结构、情报风险、策略条件和操作建议。';
 
 const MARKET_OPTIONS = [
   { value: 'cn', label: 'A股' },
@@ -427,7 +430,7 @@ const ChatPage: React.FC = () => {
   }, [applyTopicSelection, searchParams, setSearchParams, switchSession]);
 
   const handleSend = useCallback(
-    async (overrideMessage?: string, overrideSkillIds?: string[]) => {
+    async (overrideMessage?: string, overrideSkillIds?: string[], overrideProfileId?: string) => {
       const msgText = (overrideMessage ?? input).trim();
       if (!msgText || loading || !activeTopic) return;
       const usedSkillIds = normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
@@ -436,6 +439,7 @@ const ChatPage: React.FC = () => {
       const payload = {
         message: msgText,
         session_id: activeTopic.sessionId,
+        profile_id: overrideProfileId ?? DEFAULT_CHAT_PROFILE_ID,
         ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
         context: {
           ...(followUpContextRef.current ?? {}),
@@ -489,6 +493,10 @@ const ChatPage: React.FC = () => {
     setSelectedSkillIds([q.skill]);
     handleSend(q.label, [q.skill]);
   };
+
+  const handleStockSpecialistAnalysis = useCallback(() => {
+    void handleSend(STOCK_SPECIALIST_PROMPT, selectedSkillIds, STOCK_SPECIALIST_PROFILE_ID);
+  }, [handleSend, selectedSkillIds]);
 
   const toggleThinking = (msgId: string) => {
     setExpandedThinking((prev) => {
@@ -852,9 +860,19 @@ const ChatPage: React.FC = () => {
           {topicError ? (
             <p className="ml-auto text-xs text-danger">{topicError}</p>
           ) : (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleStockSpecialistAnalysis}
+                disabled={loading || !activeTopic || activeTopic.assetType !== 'stock'}
+                className="ml-auto h-8 whitespace-nowrap"
+              >
+                个股专家分析
+              </Button>
             <label
               className={cn(
-                'ml-auto inline-flex items-center gap-1.5 text-xs',
+                'inline-flex items-center gap-1.5 text-xs',
                 contextCompressionLoaded && !contextCompressionSaving
                   ? 'cursor-pointer text-secondary-text'
                   : 'cursor-not-allowed text-muted-text',
@@ -872,6 +890,7 @@ const ChatPage: React.FC = () => {
                 {contextCompressionSaving ? '保存中…' : contextCompressionEnabled ? '已启用' : '未启用'}
               </span>
             </label>
+            </>
           )}
         </section>
 

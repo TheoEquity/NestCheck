@@ -44,6 +44,7 @@ export type AgentManagementSkill = {
   description: string;
   category: string;
   source: string;
+  source_path: string;
   default_active: boolean;
   default_router: boolean;
   user_invocable: boolean;
@@ -97,6 +98,18 @@ export type AgentCatalogUpdateResponse = {
   overview: AgentManagementOverview;
 };
 
+export type AgentSkillTextResponse = {
+  id: string;
+  content: string;
+  source_path: string;
+};
+
+export type AgentSkillUpdateResponse = {
+  success: boolean;
+  message: string;
+  overview: AgentManagementOverview;
+};
+
 export const agentManagementApi = {
   getOverview: async (): Promise<AgentManagementOverview> => {
     const response = await apiClient.get<AgentManagementOverview>('/api/v1/agent-management/overview');
@@ -111,6 +124,14 @@ export const agentManagementApi = {
   },
   saveCatalog: async (content: string): Promise<AgentCatalogUpdateResponse> => {
     const response = await apiClient.put<AgentCatalogUpdateResponse>('/api/v1/agent-management/catalog', { content });
+    return response.data;
+  },
+  getSkill: async (skillId: string): Promise<AgentSkillTextResponse> => {
+    const response = await apiClient.get<AgentSkillTextResponse>(`/api/v1/agent-management/skills/${encodeURIComponent(skillId)}`);
+    return response.data;
+  },
+  saveSkill: async (skillId: string, content: string): Promise<AgentSkillUpdateResponse> => {
+    const response = await apiClient.put<AgentSkillUpdateResponse>(`/api/v1/agent-management/skills/${encodeURIComponent(skillId)}`, { content });
     return response.data;
   },
 };

@@ -465,6 +465,7 @@ class AgentExecutor:
         skill_instructions: str = "",
         default_skill_policy: str = "",
         use_legacy_default_prompt: bool = False,
+        custom_chat_system_prompt: str = "",
         max_steps: int = 10,
         timeout_seconds: Optional[float] = None,
     ):
@@ -473,6 +474,7 @@ class AgentExecutor:
         self.skill_instructions = skill_instructions
         self.default_skill_policy = default_skill_policy
         self.use_legacy_default_prompt = use_legacy_default_prompt
+        self.custom_chat_system_prompt = str(custom_chat_system_prompt or "").strip()
         self.max_steps = max_steps
         self.timeout_seconds = timeout_seconds
 
@@ -546,18 +548,25 @@ class AgentExecutor:
         stock_code = (context or {}).get("stock_code", "")
         market_role = get_market_role(stock_code, report_language)
         market_guidelines = get_market_guidelines(stock_code, report_language)
-        prompt_template = (
+        custom_prompt = self.custom_chat_system_prompt
+        prompt_template = custom_prompt or (
             LEGACY_DEFAULT_CHAT_SYSTEM_PROMPT
             if self.use_legacy_default_prompt
             else CHAT_SYSTEM_PROMPT
         )
-        system_prompt = prompt_template.format(
-            market_role=market_role,
-            market_guidelines=market_guidelines,
-            default_skill_policy_section=default_skill_policy_section,
-            skills_section=skills_section,
-            language_section=_build_language_section(report_language, chat_mode=True),
-        )
+        prompt_values = {
+            "market_role": market_role,
+            "market_guidelines": market_guidelines,
+            "default_skill_policy_section": default_skill_policy_section,
+            "skills_section": skills_section,
+            "language_section": _build_language_section(report_language, chat_mode=True),
+        }
+        if custom_prompt:
+            system_prompt = prompt_template
+            for key, value in prompt_values.items():
+                system_prompt = system_prompt.replace("{" + key + "}", value)
+        else:
+            system_prompt = prompt_template.format(**prompt_values)
 
         # Build tool declarations in OpenAI format (litellm handles all providers)
         tool_decls = self.tool_registry.to_openai_tools()

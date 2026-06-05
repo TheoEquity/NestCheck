@@ -89,6 +89,8 @@ from your search results. Do NOT invent risks.
         # Feed any existing intel data so the risk agent doesn't redo searches
         if ctx.get_data("intel_opinion"):
             parts.append(f"\n[Existing intel data]\n{json.dumps(ctx.get_data('intel_opinion'), ensure_ascii=False, default=str)}")
+            if ctx.meta.get("response_mode") == "chat":
+                parts.append("Use the existing intel data above for the chat response. Do not run another news search unless the existing intel data is empty.")
 
         return "\n".join(parts)
 
@@ -125,4 +127,3 @@ def _risk_to_signal(risk_level: str) -> str:
         "high": "strong_sell",
     }
     return mapping.get(risk_level, "hold")
-

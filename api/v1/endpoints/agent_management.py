@@ -9,13 +9,16 @@ changing any execution behavior.
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 
 from src.agent.configs import load_agent_catalog, read_agent_catalog_text, validate_agent_catalog_yaml, write_agent_catalog_text
-from src.agent.factory import get_skill_manager, get_tool_registry
+from src.agent.factory import get_skill_manager, get_tool_registry, invalidate_skill_manager_cache
+from src.agent.skills.base import load_skill_from_markdown, load_skill_from_yaml
 from src.config import get_config, get_effective_agent_primary_model
 
 
@@ -37,8 +40,74 @@ class AgentCatalogUpdateResponse(BaseModel):
     overview: Dict[str, Any]
 
 
+class AgentSkillTextResponse(BaseModel):
+    id: str
+    content: str
+    source_path: str
+
+
+class AgentSkillUpdateRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class AgentSkillUpdateResponse(BaseModel):
+    success: bool
+    message: str
+    overview: Dict[str, Any]
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+EDITABLE_SKILL_SUFFIXES = {".yaml", ".yml"}
+
+
 def _safe_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _resolve_editable_skill_path(skill_id: str) -> Path:
+    config = get_config()
+    manager = get_skill_manager(config)
+    skill = manager.get(skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+
+    raw_path = _safe_text(getattr(skill, "entrypoint", ""))
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="Skill has no editable entrypoint")
+
+    path = Path(raw_path).resolve()
+    try:
+        path.relative_to(PROJECT_ROOT)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Skill entrypoint is outside the project") from exc
+
+    is_markdown_skill = path.name == "SKILL.md"
+    if path.suffix not in EDITABLE_SKILL_SUFFIXES and not is_markdown_skill:
+        raise HTTPException(status_code=400, detail="Skill entrypoint type is not editable")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Skill entrypoint not found: {path}")
+    return path
+
+
+def _validate_skill_content(path: Path, content: str) -> None:
+    suffix = ".md" if path.name == "SKILL.md" else path.suffix
+    with NamedTemporaryFile("w", encoding="utf-8", suffix=suffix) as temp_file:
+        temp_file.write(content)
+        temp_file.flush()
+        temp_path = Path(temp_file.name)
+        if path.name == "SKILL.md":
+            load_skill_from_markdown(temp_path)
+        else:
+            load_skill_from_yaml(temp_path)
+
+
+def _read_skill_text(skill_id: str) -> AgentSkillTextResponse:
+    path = _resolve_editable_skill_path(skill_id)
+    return AgentSkillTextResponse(
+        id=skill_id,
+        content=path.read_text(encoding="utf-8"),
+        source_path=str(path),
+    )
 
 
 def _serialize_skills(config: Any) -> List[Dict[str, Any]]:
@@ -52,6 +121,7 @@ def _serialize_skills(config: Any) -> List[Dict[str, Any]]:
                 "description": _safe_text(getattr(skill, "description", "")),
                 "category": _safe_text(getattr(skill, "category", "trend")) or "trend",
                 "source": _safe_text(getattr(skill, "source", "builtin")) or "builtin",
+                "source_path": _safe_text(getattr(skill, "entrypoint", "")),
                 "default_active": bool(getattr(skill, "default_active", False)),
                 "default_router": bool(getattr(skill, "default_router", False)),
                 "user_invocable": bool(getattr(skill, "user_invocable", True)),
@@ -168,5 +238,33 @@ def update_agent_catalog(payload: AgentCatalogUpdateRequest) -> AgentCatalogUpda
     return AgentCatalogUpdateResponse(
         success=True,
         message="Agent catalog saved",
+        overview=get_agent_management_overview(),
+    )
+
+
+@router.get("/skills/{skill_id}", response_model=AgentSkillTextResponse)
+def get_agent_skill_text(skill_id: str) -> AgentSkillTextResponse:
+    """Return raw skill definition text for editing."""
+    return _read_skill_text(skill_id)
+
+
+@router.put("/skills/{skill_id}", response_model=AgentSkillUpdateResponse)
+def update_agent_skill_text(skill_id: str, payload: AgentSkillUpdateRequest) -> AgentSkillUpdateResponse:
+    """Validate and persist raw skill definition text."""
+    path = _resolve_editable_skill_path(skill_id)
+    try:
+        _validate_skill_content(path, payload.content)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Skill validation failed: {exc}") from exc
+
+    try:
+        path.write_text(payload.content, encoding="utf-8")
+        invalidate_skill_manager_cache()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Skill save failed: {exc}") from exc
+
+    return AgentSkillUpdateResponse(
+        success=True,
+        message="Skill saved",
         overview=get_agent_management_overview(),
     )

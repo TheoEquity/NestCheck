@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from src.agent.configs import AgentProfileResolveError, resolve_profile_runtime_config
+from src.agent.chat_router import resolve_chat_profile_id
 from src.config import get_config
 from src.services.agent_model_service import list_agent_model_deployments
 
@@ -103,7 +104,7 @@ class AgentModelsResponse(BaseModel):
 @router.get("/models", response_model=AgentModelsResponse)
 async def get_agent_models():
     """Get configured Agent model deployments for frontend selection."""
-    config = _resolve_request_config(get_config(), request.profile_id)
+    config = get_config()
     return AgentModelsResponse(
         models=[AgentModelDeployment(**item) for item in list_agent_model_deployments(config)]
     )
@@ -158,7 +159,8 @@ async def agent_chat(request: ChatRequest):
     """
     Chat with the AI Agent.
     """
-    config = _resolve_request_config(get_config(), request.profile_id)
+    resolved_profile_id = resolve_chat_profile_id(request.profile_id, request.message, request.context)
+    config = _resolve_request_config(get_config(), resolved_profile_id)
     
     if not config.is_agent_available():
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
@@ -181,8 +183,8 @@ async def agent_chat(request: ChatRequest):
         # Direct assignment so caller-provided skills always take precedence
         # over any stale value carried in the context dict.
         ctx = dict(prepared.context)
-        if request.profile_id:
-            ctx["profile_id"] = request.profile_id
+        if resolved_profile_id:
+            ctx["profile_id"] = resolved_profile_id
         if skills is not None:
             ctx["skills"] = skills
 
@@ -553,7 +555,8 @@ async def agent_chat_stream(request: ChatRequest):
       - done: analysis complete, contains 'content' and 'success'
       - error: error occurred, contains 'message'
     """
-    config = _resolve_request_config(get_config(), request.profile_id)
+    resolved_profile_id = resolve_chat_profile_id(request.profile_id, request.message, request.context)
+    config = _resolve_request_config(get_config(), resolved_profile_id)
     if not config.is_agent_available():
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
 
@@ -579,8 +582,8 @@ async def agent_chat_stream(request: ChatRequest):
     # Pass explicit skills into context for the orchestrator.
     # Direct assignment so caller-provided skills always take precedence.
     skills = request.effective_skills
-    if request.profile_id:
-        stream_ctx["profile_id"] = request.profile_id
+    if resolved_profile_id:
+        stream_ctx["profile_id"] = resolved_profile_id
     if skills is not None:
         stream_ctx["skills"] = skills
 

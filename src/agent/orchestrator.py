@@ -729,6 +729,34 @@ class AgentOrchestrator:
     @staticmethod
     def _fallback_summary(ctx: AgentContext) -> str:
         """Build a plaintext summary when dashboard JSON is unavailable."""
+        report_language = normalize_report_language(ctx.meta.get("report_language", "zh"))
+        if report_language != "en":
+            signal_labels = {
+                "strong_buy": "强烈看多",
+                "buy": "看多",
+                "hold": "观望",
+                "sell": "看空",
+                "strong_sell": "强烈看空",
+            }
+            lines = [f"# 阶段性专家分析：{ctx.stock_code} ({ctx.stock_name})", ""]
+            if ctx.meta.get("response_mode") == "chat":
+                lines.extend([
+                    "本次专家分析未生成最终综合结论，以下内容基于已完成的 Agent 阶段整理。",
+                    "",
+                ])
+            for op in ctx.opinions:
+                signal = signal_labels.get(op.signal, op.signal)
+                lines.append(f"## {op.agent_name}")
+                lines.append(f"结论：{signal}（置信度 {op.confidence:.0%}）")
+                if op.reasoning:
+                    lines.append(op.reasoning)
+                lines.append("")
+            if ctx.risk_flags:
+                lines.append("## 风险提示")
+                for rf in ctx.risk_flags:
+                    lines.append(f"- [{rf['severity']}] {rf['description']}")
+            return "\n".join(lines)
+
         lines = [f"# Analysis Summary: {ctx.stock_code} ({ctx.stock_name})", ""]
         for op in ctx.opinions:
             lines.append(f"## {op.agent_name}")

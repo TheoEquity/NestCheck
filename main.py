@@ -722,14 +722,16 @@ def main() -> int:
             args.port = int(os.getenv('WEBUI_PORT'))
 
     bot_clients_started = False
-    if start_serve:
+    # Only start background server for --serve mode (not --serve-only)
+    # --serve-only will start uvicorn in main thread to ensure lifespan works
+    if start_serve and not args.serve_only:
         if not prepare_webui_frontend_assets():
             logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
         try:
             start_api_server(host=args.host, port=args.port, config=config)
             bot_clients_started = True
         except Exception as e:
-            logger.error(f"启动 FastAPI 服务失败: {e}")
+            logger.error(f"启动 FastAPI 服务失败：{e}")
 
     if bot_clients_started:
         start_bot_stream_clients(config)

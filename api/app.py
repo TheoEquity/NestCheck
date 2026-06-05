@@ -21,7 +21,7 @@ import os
 import re
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote
 from typing import List, Optional
@@ -177,20 +177,57 @@ async def app_lifespan(app: FastAPI):
 
 
 async def _daily_portfolio_price_refresh():
-    """Refresh portfolio positions prices once daily at 20:30 (after market close)."""
+    """Refresh portfolio positions prices once daily at 20:30 (after market close).
+    
+    On startup, checks if today's 20:30 refresh was missed (e.g., server was off).
+    If current time is >= 20:30 Beijing time and no refresh has been done today,
+    executes immediately to catch up.
+    """
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
-    # Wait before first check so server can start normally
+    # Use Beijing time (UTC+8) for all time-based checks
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz)
+    today = now.date()
+    
+    # Check if we need to catch up a missed 20:30 refresh on startup
+    # This handles the case where the server was off during 20:30
+    try:
+        if now.hour >= 20 and now.minute >= 30:
+            # Check if any position was updated today (indicating refresh already ran)
+            from src.storage import get_db, PortfolioPosition
+            db = get_db()
+            with db.get_session() as session:
+                today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=beijing_tz)
+                updated_count = session.query(PortfolioPosition).filter(
+                    PortfolioPosition.updated_at >= today_start
+                ).count()
+                
+            if updated_count == 0:
+                logger.info("Startup catch-up: Today's 20:30 refresh was missed, executing now")
+                loop = asyncio.get_event_loop()
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    await loop.run_in_executor(executor, _run_price_refresh)
+                logger.info("Startup catch-up: Refresh completed")
+            else:
+                logger.info("Startup check: Today's 20:30 refresh already executed (%d positions updated)", updated_count)
+        else:
+            logger.info("Startup check: Current time %02d:%02d is before 20:30, no catch-up needed", now.hour, now.minute)
+    except Exception as exc:
+        logger.error("Startup catch-up check failed: %s", exc, exc_info=True)
+    
+    # Wait before entering the regular check loop so server can start normally
     await asyncio.sleep(30)
 
     last_refresh_date = None
     with ThreadPoolExecutor(max_workers=1) as executor:
         while True:
             try:
-                now = datetime.now()
+                # Use Beijing time (UTC+8) for time-based checks
+                now = datetime.now(beijing_tz)
                 today = now.date()
-                # Refresh at 20:30 daily
+                # Refresh at 20:30 Beijing time daily
                 if now.hour == 20 and now.minute >= 30 and last_refresh_date != today:
                     logger.info("Daily portfolio price refresh started")
                     loop = asyncio.get_event_loop()
@@ -350,8 +387,9 @@ async def _daily_market_cache_refresh_loop():
     with ThreadPoolExecutor(max_workers=1) as executor:
         await asyncio.sleep(30)  # wait for server to start normally
         while True:
-            now = datetime.now()
-            # Only refresh during trading hours (same window as price refresh)
+            # Use Beijing time (UTC+8) for trading hour checks
+            now = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+            # Only refresh during A-share trading hours (Monday-Friday, 9:00-15:00 Beijing time)
             if now.weekday() < 5 and 9 <= now.hour < 15:
                 try:
                     logger.info("Market cache refresh started")

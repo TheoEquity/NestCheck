@@ -57,3 +57,14 @@
   - 修改代码前必须先分析清楚系统现状、涉及的字段、关联的影响面
   - 将分析结果反馈给用户确认后，再动手改代码
   - 不要理解不清楚就盲目修改
+
+### 后台任务必须使用北京时间
+- Date: 2026-06-05
+- Context: 后台定时任务（市场数据刷新、持仓价格刷新）没有执行，数据停留在昨天
+- Instructions:
+  - 系统运行在 UTC 环境，但 A 股交易时间判断必须使用北京时间（UTC+8）
+  - `api/app.py` 中的 `_daily_market_cache_refresh_loop()` 和 `_daily_portfolio_price_refresh()` 必须使用 `datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))` 获取北京时间
+  - 交易时间判断：周一至周五 9:00-15:00（北京时间）
+  - 持仓价格刷新：每天 20:30（北京时间）
+  - 使用 `--serve-only` 模式启动服务时，lifespan 后台任务才能正确执行。不能用后台线程方式启动 uvicorn
+  - **个人电脑不会 24 小时运行**：`_daily_portfolio_price_refresh()` 在启动时会检查当前北京时间，如果已经过了 20:30 且今天还没执行过，会立即补执行一次

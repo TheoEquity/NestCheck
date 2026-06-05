@@ -443,9 +443,20 @@ class WatchlistSignalService:
                 ret_3m = _safe_float(row.get("近3月"))
                 ret_1y = _safe_float(row.get("近1年"))
                 
+                # 获取排名（序号列从 1 开始）
+                rank_1m = int(matched.iloc[0]["序号"]) if "序号" in matched.columns else None
+                rank_3m = None  # 榜单只按一个维度排序，其他维度需要自己计算
+                rank_1y = None
+                
                 result["raw_rank_1m"] = ret_1m
                 result["raw_rank_3m"] = ret_3m
                 result["raw_rank_1y"] = ret_1y
+                
+                # 保存排名和总数
+                result["rank_1m"] = rank_1m
+                result["rank_1m_total"] = total
+                result["rank_3m_total"] = total  # 总数相同
+                result["rank_1y_total"] = total
                 
                 # 计算排名分位 (同类中超过多少比例的基金)
                 def calc_pct(col: str, val: Optional[float]) -> Optional[float]:
@@ -461,6 +472,18 @@ class WatchlistSignalService:
                 result["rank_1m_pct"] = calc_pct("近1月", ret_1m)
                 result["rank_3m_pct"] = calc_pct("近3月", ret_3m)
                 result["rank_1y_pct"] = calc_pct("近1年", ret_1y)
+                
+                # 计算近 3 月和近 1 年的实际排名
+                def calc_rank(col: str, val: Optional[float]) -> Optional[int]:
+                    if val is None:
+                        return None
+                    s = pd.to_numeric(rank_df[col], errors="coerce").dropna()
+                    # 比该值大的数量 + 1 = 排名
+                    cnt_better = (s > val).sum()
+                    return int(cnt_better) + 1
+                
+                result["rank_3m"] = calc_rank("近3月", ret_3m)
+                result["rank_1y"] = calc_rank("近1年", ret_1y)
             else:
                 flags.append("fund_not_in_rank_list")
         except Exception as exc:
@@ -678,35 +701,44 @@ class WatchlistSignalService:
         lights = []
         
         p1m = _safe_float(indicator.get("rank_1m_pct"))
+        rank_1m = indicator.get("rank_1m")
+        rank_1m_total = indicator.get("rank_1m_total")
+        rank_1m_str = f"({rank_1m}/{rank_1m_total})" if rank_1m and rank_1m_total else ""
         if p1m is not None:
             if p1m >= 0.7:
-                lights.append(_fund_light("F_RANK_1M", "G", f"近1月同类排名前30% ({p1m:.0%})"))
+                lights.append(_fund_light("F_RANK_1M", "G", f"近1月同类排名前30% {rank_1m_str}"))
             elif p1m >= 0.5:
-                lights.append(_fund_light("F_RANK_1M", "Y", f"近1月同类排名前30-50% ({p1m:.0%})"))
+                lights.append(_fund_light("F_RANK_1M", "Y", f"近1月同类排名前30-50% {rank_1m_str}"))
             else:
-                lights.append(_fund_light("F_RANK_1M", "R", f"近1月同类排名50%后 ({p1m:.0%})"))
+                lights.append(_fund_light("F_RANK_1M", "R", f"近1月同类排名50%后 {rank_1m_str}"))
         else:
             lights.append(_fund_light("F_RANK_1M", "Y", "近1月排名数据缺失"))
             
         p3m = _safe_float(indicator.get("rank_3m_pct"))
+        rank_3m = indicator.get("rank_3m")
+        rank_3m_total = indicator.get("rank_3m_total")
+        rank_3m_str = f"({rank_3m}/{rank_3m_total})" if rank_3m and rank_3m_total else ""
         if p3m is not None:
             if p3m >= 0.7:
-                lights.append(_fund_light("F_RANK_3M", "G", f"近3月同类排名前30% ({p3m:.0%})"))
+                lights.append(_fund_light("F_RANK_3M", "G", f"近3月同类排名前30% {rank_3m_str}"))
             elif p3m >= 0.5:
-                lights.append(_fund_light("F_RANK_3M", "Y", f"近3月同类排名前30-50% ({p3m:.0%})"))
+                lights.append(_fund_light("F_RANK_3M", "Y", f"近3月同类排名前30-50% {rank_3m_str}"))
             else:
-                lights.append(_fund_light("F_RANK_3M", "R", f"近3月同类排名50%后 ({p3m:.0%})"))
+                lights.append(_fund_light("F_RANK_3M", "R", f"近3月同类排名50%后 {rank_3m_str}"))
         else:
             lights.append(_fund_light("F_RANK_3M", "Y", "近3月排名数据缺失"))
             
         p1y = _safe_float(indicator.get("rank_1y_pct"))
+        rank_1y = indicator.get("rank_1y")
+        rank_1y_total = indicator.get("rank_1y_total")
+        rank_1y_str = f"({rank_1y}/{rank_1y_total})" if rank_1y and rank_1y_total else ""
         if p1y is not None:
             if p1y >= 0.7:
-                lights.append(_fund_light("F_RANK_1Y", "G", f"近1年同类排名前30% ({p1y:.0%})"))
+                lights.append(_fund_light("F_RANK_1Y", "G", f"近1年同类排名前30% {rank_1y_str}"))
             elif p1y >= 0.5:
-                lights.append(_fund_light("F_RANK_1Y", "Y", f"近1年同类排名前30-50% ({p1y:.0%})"))
+                lights.append(_fund_light("F_RANK_1Y", "Y", f"近1年同类排名前30-50% {rank_1y_str}"))
             else:
-                lights.append(_fund_light("F_RANK_1Y", "R", f"近1年同类排名50%后 ({p1y:.0%})"))
+                lights.append(_fund_light("F_RANK_1Y", "R", f"近1年同类排名50%后 {rank_1y_str}"))
         else:
             lights.append(_fund_light("F_RANK_1Y", "Y", "近1年排名数据缺失"))
             
@@ -756,6 +788,12 @@ class WatchlistSignalService:
             "prev_ma30w": indicator.get("prev_ma30w"),
             "price_change_pct": indicator.get("price_change_pct"),
             "change_amount": indicator.get("change_amount"),
+            "rank_1m": indicator.get("rank_1m"),
+            "rank_1m_total": indicator.get("rank_1m_total"),
+            "rank_3m": indicator.get("rank_3m"),
+            "rank_3m_total": indicator.get("rank_3m_total"),
+            "rank_1y": indicator.get("rank_1y"),
+            "rank_1y_total": indicator.get("rank_1y_total"),
             "sector_tag": indicator.get("sector_tag") if indicator.get("sector_tag") in SECTOR_TAGS else "stable",
             "source": "watchlist_signal_service",
             "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),

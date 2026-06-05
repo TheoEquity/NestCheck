@@ -26,40 +26,34 @@ profiles:
     workflow:
       - stock_chat_single
     description: 当前 AI 问答默认使用的 single-agent 聊天执行器，按用户问题和已选 skill 自主调用工具。
-
   - id: stock_quick
-    name: 个股快速分析
+    name: "个股技术分析"
     asset_type: stock
     status: available
     mode: quick
     workflow:
       - technical
       - decision
-    description: 适合快速判断趋势与关键价位。
-
-  - id: stock_standard
-    name: 个股标准分析
+    description: "适合快速判断趋势与关键价位。"
+  - id: stock_intel
+    name: "个股情报分析"
     asset_type: stock
     status: available
     mode: standard
     workflow:
-      - technical
       - intel
       - decision
-    description: 适合日常问股，兼顾技术面和消息面。
-
-  - id: stock_full
-    name: 个股深度分析
+    description: "适合日常问股，兼顾技术面和消息面。"
+  - id: stock_risk
+    name: "个股风险分析"
     asset_type: stock
     status: available
     mode: full
     workflow:
-      - technical
       - intel
       - risk
       - decision
-    description: 适合需要明确风险过滤的深度分析。
-
+    description: "适合需要明确风险过滤的深度分析。"
   - id: stock_specialist
     name: 个股专家分析
     asset_type: stock

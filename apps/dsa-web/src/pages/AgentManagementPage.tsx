@@ -307,7 +307,7 @@ function ProfilesTab({
         <Card title={editingNew ? '新增 Profile 配置' : `${form.name || form.id} 配置`} subtitle="workflow 从专业 Agent 清单中选择节点，应用到 YAML 后保存生效" padding="lg">
           <div className="grid gap-4 md:grid-cols-2">
             <Input label="id" value={form.id} onChange={(event) => updateForm('id', event.target.value)} placeholder="stock_quick" />
-            <Input label="name" value={form.name} onChange={(event) => updateForm('name', event.target.value)} placeholder="个股快速分析" />
+            <Input label="name" value={form.name} onChange={(event) => updateForm('name', event.target.value)} placeholder="个股技术分析" />
             <Select
               label="asset_type"
               value={form.asset_type}

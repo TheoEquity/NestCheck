@@ -37,7 +37,7 @@ def select_chat_profile_id(message: str, context: Mapping[str, Any] | None = Non
         "风险", "暴雷", "减持", "监管", "处罚", "预亏", "亏损", "解禁", "退市",
     )
     if _contains_any(text, deep_keywords) or _contains_any(text, risk_keywords):
-        return "stock_full"
+        return "stock_risk"
 
     return DEFAULT_QUICK_CHAT_PROFILE_ID
 

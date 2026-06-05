@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 资产初始化页的“风险分类”改为独立使用 `asset_risk_class` 字段，与系统原有 `risk_level` 语义隔离，避免混用。
 - [改进] 资产管理页升级为更高密度的组合监控台，新增账户维度总览、筛选后摘要和更完整的持仓明细列。
 - [新功能] 新增只读 Agent 管理页与 `/api/v1/agent-management/overview`，通过 `agent_configs/catalog.yaml` 配置定义层统一展示当前 Agent runtime、内置分析方案、专业 Agent、skills 与 tools。
-- [新功能] 问股 Agent 请求新增 `profile_id`，可将 `stock_quick`、`stock_standard`、`stock_full`、`stock_specialist` 映射到现有 multi-agent 编排模式执行。
+- [新功能] 问股 Agent 请求新增 `profile_id`，可将 `stock_quick`、`stock_intel`、`stock_risk`、`stock_specialist` 映射到现有 multi-agent 编排模式执行。
 - [改进] Agent 管理页升级为 Profiles、专业 Agent、Tools、Skills 四页签，并支持在线编辑保存 `agent_configs/catalog.yaml` 与新增 profile/agent 流程节点。
 - [改进] Agent 管理页的专业 Agent 配置改为单 Agent 下拉编辑表单，tools 与 skills 支持从清单中多选后写入 catalog YAML。
 - [改进] Agent 管理页的 Profiles 配置改为单 Profile 下拉编辑表单，workflow 支持从专业 Agent 清单中下拉添加节点。
@@ -78,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] AI 问答工具数据改为写入短期缓存，避免临时问答污染 `stock_daily` 与新闻长期业务表，并新增网页新闻证据抓取工具供 Agent 使用。
 - [新功能] Agent 管理页 Skills 卡片新增编辑入口，支持读取、校验并保存 skill 定义文件后刷新 runtime skill 缓存。
 - [改进] 将当前 AI 问答 single-agent 显式纳入 Agent catalog，新增 `stock_chat` profile 与 `stock_chat_single` agent，并让 `/chat` 默认通过该 profile 读取可编辑 prompt、tools 和 max_steps。
-- [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认轻量快问走 `stock_chat_quick`，明确深度/风险/专家类问题再切换到 `stock_full` 或 `stock_specialist`。
+- [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认轻量快问走 `stock_chat_quick`，明确深度/风险/专家类问题再切换到 `stock_risk` 或 `stock_specialist`。
 - [改进] AI 问答页新增“个股专家分析”快捷按钮，直接在当前聊天中调用 `stock_specialist` 完成带策略技能的完整个股分析。
 - [改进] 个股专家分析在多 Agent 超时降级时改为中文用户态摘要，并减少聊天模式下 RiskAgent 对已获取情报的重复搜索。
 - [修复] Agent 模型路由在系统主模型已不属于当前 runtime model list 时自动切换到可用渠道模型，避免继续调用失效的 `openai/gpt-5.5`。

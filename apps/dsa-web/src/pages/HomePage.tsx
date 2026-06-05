@@ -35,7 +35,7 @@ const HomePage: React.FC = () => {
   const [marketReviewReportCopied, setMarketReviewReportCopied] = useState(false);
   const [analysisSkills, setAnalysisSkills] = useState<SkillInfo[]>([]);
   const [agentProfiles, setAgentProfiles] = useState<AgentManagementProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState('stock_standard');
+  const [selectedProfileId, setSelectedProfileId] = useState('stock_intel');
   const [selectedStrategyId, setSelectedStrategyId] = useState('');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [strategyMenuOpen, setStrategyMenuOpen] = useState(false);
@@ -163,7 +163,7 @@ const HomePage: React.FC = () => {
           (profile) => profile.asset_type === 'stock' && profile.status === 'available',
         );
         setAgentProfiles(profiles);
-        if (profiles.length > 0 && !profiles.some((profile) => profile.id === 'stock_standard')) {
+        if (profiles.length > 0 && !profiles.some((profile) => profile.id === 'stock_intel')) {
           setSelectedProfileId(profiles[0].id);
         }
       })

@@ -151,6 +151,9 @@ class WatchlistSignalService:
     def refresh_item(self, item: WatchlistItem) -> Dict[str, Any]:
         if item.asset_category == "stock":
             self._backfill_daily_data(item.symbol)
+        elif item.asset_category == "fund":
+            # 基金不需要 backfill daily data（没有 StockDaily 记录），但需要确保 indicator 中包含 price
+            pass
         indicator, flags = self._build_indicator(item)
         signal = self._calculate_signal(indicator, flags)
         self._save_indicator_and_signal(item, indicator, signal)
@@ -364,9 +367,41 @@ class WatchlistSignalService:
         return result
 
     def _build_fund_indicator(self, item: WatchlistItem, flags: List[str]) -> Dict[str, Any]:
-        """构建基金指标：同类排名、经理任职、近1年最大回撤。"""
+        """构建基金指标：同类排名、经理任职、近 1 年最大回撤。"""
         result: Dict[str, Any] = {}
         fund_code = item.symbol.strip()
+        
+        # 0. 先获取最新净值数据（即使不是当天的，也要有数据）
+        # 这样 watchlist_indicator_snapshot 表中的 price 字段才有值
+        try:
+            import akshare as ak
+            from datetime import datetime, timedelta
+            
+            # 获取基金净值历史，取最新一条
+            nav_df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+            if nav_df is not None and not nav_df.empty:
+                # 列名：['净值日期', '单位净值', '日增长率']
+                # 取最后一行（最新数据）
+                latest_row = nav_df.iloc[-1]
+                nav_date = latest_row.iloc[0]  # 已经是 date 对象
+                nav_value = _safe_float(latest_row.iloc[1])
+                
+                # 保存到 result，会被 _save_indicator_and_signal 存入数据库
+                result["price"] = nav_value
+                result["as_of_date"] = nav_date
+                
+                # 计算涨跌幅（如果有历史数据）
+                if len(nav_df) >= 2:
+                    prev_row = nav_df.iloc[-2]
+                    prev_nav = _safe_float(prev_row.iloc[1])
+                    if prev_nav and prev_nav > 0 and nav_value:
+                        change_pct = (nav_value - prev_nav) / prev_nav * 100
+                        result["price_change_pct"] = round(change_pct, 4)
+                        result["change_amount"] = round(nav_value - prev_nav, 4) if nav_value and prev_nav else None
+            else:
+                flags.append("fund_nav_fetch_empty")
+        except Exception as exc:
+            flags.append(f"fund_nav_fetch_failed: {exc}")
         
         try:
             import akshare as ak

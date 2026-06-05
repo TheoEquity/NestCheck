@@ -7,7 +7,7 @@ profiles:
     mode: auto
     workflow:
       - chat_router
-    description: AI 问答默认入口，由规则路由选择快问、深度分析或专家分析 profile。
+    description: AI 问答默认入口，由规则路由选择快问、技术、情报或风险 profile；兜底使用股票快问快答。
 
   - id: stock_chat_quick
     name: 股票快问快答
@@ -25,7 +25,7 @@ profiles:
     mode: chat
     workflow:
       - stock_chat_single
-    description: 当前 AI 问答默认使用的 single-agent 聊天执行器，按用户问题和已选 skill 自主调用工具。
+    description: 保留的 single-agent 聊天执行器，可手动选择；自动路由默认不使用该重型聊天 profile。
   - id: stock_quick
     name: "个股技术分析"
     asset_type: stock

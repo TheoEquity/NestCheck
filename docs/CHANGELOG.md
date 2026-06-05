@@ -77,8 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] Web AI 问答改为先选择市场、大类和代码后进入单标的主题会话，同一标的历史自动复用并阻止会话内跨标的追问。
 - [改进] AI 问答工具数据改为写入短期缓存，避免临时问答污染 `stock_daily` 与新闻长期业务表，并新增网页新闻证据抓取工具供 Agent 使用。
 - [新功能] Agent 管理页 Skills 卡片新增编辑入口，支持读取、校验并保存 skill 定义文件后刷新 runtime skill 缓存。
-- [改进] 将当前 AI 问答 single-agent 显式纳入 Agent catalog，新增 `stock_chat` profile 与 `stock_chat_single` agent，并让 `/chat` 默认通过该 profile 读取可编辑 prompt、tools 和 max_steps。
-- [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认轻量快问走 `stock_chat_quick`，明确深度/风险/专家类问题再切换到 `stock_risk` 或 `stock_specialist`。
+- [改进] 将重型 AI 问答 single-agent 显式纳入 Agent catalog，保留 `stock_chat` profile 与 `stock_chat_single` agent 供手动选择和编辑。
+- [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认和兜底走 `stock_chat_quick`，技术/走势类走 `stock_quick`，新闻/消息类走 `stock_intel`，风险/利空类走 `stock_risk`。
 - [改进] AI 问答页新增“个股专家分析”快捷按钮，直接在当前聊天中调用 `stock_specialist` 完成带策略技能的完整个股分析。
 - [改进] 个股专家分析在多 Agent 超时降级时改为中文用户态摘要，并减少聊天模式下 RiskAgent 对已获取情报的重复搜索。
 - [修复] Agent 模型路由在系统主模型已不属于当前 runtime model list 时自动切换到可用渠道模型，避免继续调用失效的 `openai/gpt-5.5`。

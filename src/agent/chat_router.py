@@ -8,6 +8,9 @@ from typing import Any, Mapping
 
 AUTO_CHAT_PROFILE_ID = "stock_chat_auto"
 DEFAULT_QUICK_CHAT_PROFILE_ID = "stock_chat_quick"
+TECHNICAL_PROFILE_ID = "stock_quick"
+INTEL_PROFILE_ID = "stock_intel"
+RISK_PROFILE_ID = "stock_risk"
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
@@ -22,22 +25,24 @@ def select_chat_profile_id(message: str, context: Mapping[str, Any] | None = Non
     if asset_type and asset_type != "stock":
         return DEFAULT_QUICK_CHAT_PROFILE_ID
 
-    specialist_keywords = (
-        "专家", "专项", "策略专项", "multi-agent", "多agent", "多 agent",
-        "龙头", "缠论", "波浪", "箱体", "金叉", "放量突破", "缩量回踩",
-    )
-    if _contains_any(text, specialist_keywords):
-        return "stock_specialist"
-
-    deep_keywords = (
-        "深度", "完整", "全面", "详细", "系统分析", "全方位", "报告", "研报",
-        "完整分析", "深度分析", "全面分析",
-    )
     risk_keywords = (
-        "风险", "暴雷", "减持", "监管", "处罚", "预亏", "亏损", "解禁", "退市",
+        "风险", "利空", "暴雷", "减持", "监管", "处罚", "预亏", "亏损", "解禁", "退市",
     )
-    if _contains_any(text, deep_keywords) or _contains_any(text, risk_keywords):
-        return "stock_risk"
+    if _contains_any(text, risk_keywords):
+        return RISK_PROFILE_ID
+
+    intel_keywords = (
+        "新闻", "消息", "资讯", "公告", "舆情", "事件", "传闻", "题材", "催化",
+    )
+    if _contains_any(text, intel_keywords):
+        return INTEL_PROFILE_ID
+
+    technical_keywords = (
+        "技术面", "走势", "趋势", "形态", "k线", "k 线", "均线", "支撑", "压力",
+        "量能", "成交量", "macd", "rsi", "kdj", "金叉", "死叉", "突破", "回踩",
+    )
+    if _contains_any(text, technical_keywords):
+        return TECHNICAL_PROFILE_ID
 
     return DEFAULT_QUICK_CHAT_PROFILE_ID
 

@@ -46,6 +46,14 @@
 - `api/app.py` 中 `_daily_portfolio_price_refresh()` 和 `_daily_market_cache_refresh_loop()` 都已改用北京时间
 - 启动补执行逻辑：启动时检查当前北京时间，如果已过 20:30 且今天未执行过，立即补执行（解决个人电脑不 24 小时运行的场景）
 
+### Watchlist 基金净值数据流
+- Watchlist 基金净值独立存储于 `watchlist_indicator_snapshot` 表，与持仓资产的 `FundDailyNav` 分离
+- 三个场景统一使用该表：
+  1. **新增 Watchlist 基金**：`WatchlistService.create_item()` → `refresh_item()` → `_save_indicator_and_signal()` → 写入 `WatchlistIndicatorSnapshot`
+  2. **定时任务刷新**：`market_cache_refresh` (5 分钟) → `WatchlistSignalService().refresh_enabled_funds()` → 写入 `WatchlistIndicatorSnapshot`
+  3. **前端展示读取**：`quote_summary_for_items()` → 从 `WatchlistIndicatorSnapshot` 读取（而非 `FundDailyNav`）
+- 字段：`price`（净值）、`price_change_pct`（涨跌幅%）、`change_amount`（涨跌额）、`as_of_date`（数据日期）
+
 ## 条目格式
 
 ### 用户指令条目

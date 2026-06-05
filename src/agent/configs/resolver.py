@@ -78,8 +78,11 @@ def resolve_profile_runtime_config(config: Any, profile_id: str | None) -> Any:
             f"Agent profile '{profile.id}' is configured but not executable yet"
         )
 
-    return replace(
+    runtime_config = replace(
         config,
         agent_arch="multi",
         agent_orchestrator_mode=profile.mode,
     )
+    setattr(runtime_config, "agent_catalog_profile_id", profile.id)
+    setattr(runtime_config, "agent_catalog_workflow", list(profile.workflow))
+    return runtime_config

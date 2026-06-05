@@ -603,6 +603,18 @@ class AgentOrchestrator:
         intel = self._prepare_agent(IntelAgent(**common_kwargs))
         risk = self._prepare_agent(RiskAgent(**common_kwargs))
         decision = self._prepare_agent(DecisionAgent(**common_kwargs))
+        agents_by_name = {
+            "technical": technical,
+            "intel": intel,
+            "risk": risk,
+            "decision": decision,
+        }
+
+        catalog_workflow = getattr(self.config, "agent_catalog_workflow", None)
+        if catalog_workflow:
+            ordered_agents = [agents_by_name[name] for name in catalog_workflow if name in agents_by_name]
+            if ordered_agents:
+                return ordered_agents
 
         if self.mode == "quick":
             return [technical, decision]

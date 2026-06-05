@@ -160,6 +160,12 @@ async def agent_chat(request: ChatRequest):
     Chat with the AI Agent.
     """
     resolved_profile_id = resolve_chat_profile_id(request.profile_id, request.message, request.context)
+    logger.info(
+        "Agent chat stream profile resolved: requested=%s resolved=%s message=%s",
+        request.profile_id,
+        resolved_profile_id,
+        request.message[:80],
+    )
     config = _resolve_request_config(get_config(), resolved_profile_id)
     
     if not config.is_agent_available():

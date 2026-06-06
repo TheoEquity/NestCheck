@@ -449,6 +449,7 @@ describe('ChatPage', () => {
   it('uses the fund analysis profile for fund topics', () => {
     expect(getDefaultChatProfileId('fund')).toBe('fund_analysis');
     expect(getDefaultChatProfileId('market')).toBe('market_analysis');
+    expect(getDefaultChatProfileId('bond')).toBe('bond_analysis');
     expect(getDefaultChatProfileId('stock')).toBe('stock_chat_auto');
   });
 
@@ -467,6 +468,24 @@ describe('ChatPage', () => {
       asset_name: 'A股市场',
       market: 'cn',
       asset_type: 'market',
+    }));
+  });
+
+  it('builds bond-specific context from the fixed chat topic', () => {
+    expect(buildChatTopicContext({
+      market: 'cn',
+      assetType: 'bond',
+      code: 'overview',
+      name: '中国债市',
+      sessionId: 'session-bond',
+    })).toEqual(expect.objectContaining({
+      agent_chat_mode: true,
+      stock_code: undefined,
+      fund_code: undefined,
+      asset_code: 'overview',
+      asset_name: '中国债市',
+      market: 'cn',
+      asset_type: 'bond',
     }));
   });
 
@@ -755,6 +774,64 @@ describe('ChatPage', () => {
         }),
         expect.objectContaining({
           skillName: '市场问答',
+        }),
+      );
+    });
+  });
+
+  it('starts a bond topic without code and sends through bond profile', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-bond',
+      topic_key: 'cn:bond:overview',
+      title: '中国债市',
+      market: 'cn',
+      asset_type: 'bond',
+      code: 'overview',
+      name: '中国债市',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'bond' } });
+    expect(screen.queryByLabelText('代码')).not.toBeInTheDocument();
+    expect(screen.getByText('债券问答将固定分析中国债市，无需输入代码和名称。')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+
+    await waitFor(() => {
+      expect(mockResolveChatTopic).toHaveBeenCalledWith('', undefined, {
+        market: 'cn',
+        assetType: 'bond',
+      });
+      expect(mockSwitchSession).toHaveBeenCalledWith('session-bond');
+    });
+
+    const bondQuestionButtons = await screen.findAllByRole('button', { name: '现在债市环境怎么样' });
+    const enabledButton = bondQuestionButtons.find((button) => !button.hasAttribute('disabled'));
+    expect(enabledButton).toBeTruthy();
+    fireEvent.click(enabledButton!);
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '现在债市环境怎么样',
+          profile_id: 'bond_analysis',
+          skills: [],
+          context: expect.objectContaining({
+            asset_code: 'overview',
+            asset_name: '中国债市',
+            asset_type: 'bond',
+            market: 'cn',
+          }),
+        }),
+        expect.objectContaining({
+          skillName: '债券问答',
         }),
       );
     });

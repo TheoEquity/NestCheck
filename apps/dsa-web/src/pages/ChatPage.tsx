@@ -60,6 +60,15 @@ const MARKET_QUICK_QUESTIONS: QuickQuestion[] = [
   { label: '当前适合加仓还是控制仓位' },
 ];
 
+const BOND_QUICK_QUESTIONS: QuickQuestion[] = [
+  { label: '现在债市环境怎么样' },
+  { label: '10年国债收益率怎么看' },
+  { label: '10年美债收益率怎么看' },
+  { label: '中美利差说明什么' },
+  { label: '债基现在适合加仓吗' },
+  { label: '固收仓位要不要调整' },
+];
+
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
 const MARKET_DEEP_PROFILE_ID = 'market_review';
@@ -301,14 +310,17 @@ const ChatPage: React.FC = () => {
   const activeAssetType = activeTopic?.assetType ?? topicForm.assetType;
   const isFundMode = activeAssetType === 'fund';
   const isMarketMode = activeAssetType === 'market';
+  const isBondMode = activeAssetType === 'bond';
   const availableSkillIds = new Set(skills.map((skill) => skill.id));
   const quickQuestions = isMarketMode
     ? MARKET_QUICK_QUESTIONS
+    : isBondMode
+    ? BOND_QUICK_QUESTIONS
     : isFundMode
     ? FUND_QUICK_QUESTIONS
     : STOCK_QUICK_QUESTIONS.filter((question) => !question.skill || availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
 
-  const canStartTopic = Boolean(topicForm.market && topicForm.assetType && (topicForm.assetType === 'market' || topicForm.code.trim()));
+  const canStartTopic = Boolean(topicForm.market && topicForm.assetType && (topicForm.assetType === 'market' || topicForm.assetType === 'bond' || topicForm.code.trim()));
   const canSendMessage = Boolean(activeTopic && input.trim() && !loading);
   const buildTopicContext = useCallback((topic: ActiveChatTopic) => (
     buildChatTopicContext(topic, followUpContextRef.current)
@@ -337,7 +349,7 @@ const ChatPage: React.FC = () => {
     if (!canStartTopic || topicResolving) return;
     setTopicResolving(true);
     setTopicError(null);
-    const code = topicForm.assetType === 'market' ? '' : topicForm.code.trim();
+    const code = topicForm.assetType === 'market' || topicForm.assetType === 'bond' ? '' : topicForm.code.trim();
     const name = topicForm.name.trim();
     try {
       const topic = await agentApi.resolveChatTopic(code, name || undefined, {
@@ -345,7 +357,11 @@ const ChatPage: React.FC = () => {
         assetType: topicForm.assetType,
       });
       if (!topic.found || !topic.session_id || !topic.market || !topic.asset_type || !topic.code) {
-        setTopicError(topicForm.assetType === 'market' ? '无法进入市场问答，请检查市场选择。' : '无法识别该标的，请检查市场、大类和代码。');
+        setTopicError(topicForm.assetType === 'market'
+          ? '无法进入市场问答，请检查市场选择。'
+          : topicForm.assetType === 'bond'
+          ? '无法进入债券问答，请检查市场选择。'
+          : '无法识别该标的，请检查市场、大类和代码。');
         return;
       }
       applyTopicSelection(topic);
@@ -472,20 +488,22 @@ const ChatPage: React.FC = () => {
       if (!msgText || loading || !activeTopic) return;
       const usedSkillIds = activeTopic.assetType === 'fund'
         ? []
-        : activeTopic.assetType === 'market'
+        : activeTopic.assetType === 'market' || activeTopic.assetType === 'bond'
         ? []
         : normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
       const usedSkillNames = activeTopic.assetType === 'fund'
         ? ['基金问答']
         : activeTopic.assetType === 'market'
         ? ['市场问答']
+        : activeTopic.assetType === 'bond'
+        ? ['债券问答']
         : usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
 
       const payload = {
         message: msgText,
         session_id: activeTopic.sessionId,
         profile_id: overrideProfileId ?? getDefaultChatProfileId(activeTopic.assetType),
-        ...(activeTopic.assetType === 'fund' || activeTopic.assetType === 'market' || usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
+        ...(activeTopic.assetType === 'fund' || activeTopic.assetType === 'market' || activeTopic.assetType === 'bond' || usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
         context: buildTopicContext(activeTopic),
       };
       followUpHydrationTokenRef.current += 1;
@@ -871,8 +889,8 @@ const ChatPage: React.FC = () => {
               onChange={(event) => setTopicForm((prev) => ({
                 ...prev,
                 assetType: event.target.value,
-                code: event.target.value === 'market' ? '' : prev.code,
-                name: event.target.value === 'market' ? '' : prev.name,
+                code: event.target.value === 'market' || event.target.value === 'bond' ? '' : prev.code,
+                name: event.target.value === 'market' || event.target.value === 'bond' ? '' : prev.name,
               }))}
               className="input-surface input-focus-glow h-8 rounded-lg border bg-transparent px-2 text-sm text-foreground"
             >
@@ -881,9 +899,11 @@ const ChatPage: React.FC = () => {
               ))}
             </select>
           </label>
-          {topicForm.assetType === 'market' ? (
+          {topicForm.assetType === 'market' || topicForm.assetType === 'bond' ? (
             <span className="rounded-lg border border-white/8 bg-elevated/45 px-2.5 py-1.5 text-xs text-secondary-text">
-              市场问答将固定分析 A 股大盘，无需输入代码和名称。
+              {topicForm.assetType === 'bond'
+                ? '债券问答将固定分析中国债市，无需输入代码和名称。'
+                : '市场问答将固定分析 A 股大盘，无需输入代码和名称。'}
             </span>
           ) : (
             <>
@@ -955,7 +975,7 @@ const ChatPage: React.FC = () => {
             <label
               className={cn(
                 'inline-flex items-center gap-1.5 text-xs',
-                activeTopic?.assetType !== 'stock' && activeTopic?.assetType !== 'fund' && activeTopic?.assetType !== 'market' ? 'ml-auto' : '',
+                activeTopic?.assetType !== 'stock' && activeTopic?.assetType !== 'fund' && activeTopic?.assetType !== 'market' && activeTopic?.assetType !== 'bond' ? 'ml-auto' : '',
                 contextCompressionLoaded && !contextCompressionSaving
                   ? 'cursor-pointer text-secondary-text'
                   : 'cursor-not-allowed text-muted-text',
@@ -1177,7 +1197,7 @@ const ChatPage: React.FC = () => {
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
               ) : null}
-              {isFundMode || isMarketMode ? (
+              {isFundMode || isMarketMode || isBondMode ? (
                 <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
                   <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
                     快捷问答

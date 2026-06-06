@@ -3,11 +3,18 @@ import type { ChatFollowUpContext } from '../utils/chatFollowUp';
 export const DEFAULT_CHAT_PROFILE_ID = 'stock_chat_auto';
 export const FUND_CHAT_PROFILE_ID = 'fund_analysis';
 export const MARKET_CHAT_PROFILE_ID = 'market_analysis';
+export const BOND_CHAT_PROFILE_ID = 'bond_analysis';
 
 export type ActiveChatTopic = { market: string; assetType: string; code: string; name: string; sessionId: string };
 
 export const getDefaultChatProfileId = (assetType?: string | null) => (
-  assetType === 'fund' ? FUND_CHAT_PROFILE_ID : assetType === 'market' ? MARKET_CHAT_PROFILE_ID : DEFAULT_CHAT_PROFILE_ID
+  assetType === 'fund'
+    ? FUND_CHAT_PROFILE_ID
+    : assetType === 'market'
+    ? MARKET_CHAT_PROFILE_ID
+    : assetType === 'bond'
+    ? BOND_CHAT_PROFILE_ID
+    : DEFAULT_CHAT_PROFILE_ID
 );
 
 export const buildChatTopicContext = (

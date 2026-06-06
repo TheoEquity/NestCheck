@@ -94,6 +94,15 @@ profiles:
       - market_deep_single
     description: 对 A 股大盘做完整深度分析，覆盖市场趋势、宽基指数、热点板块、风险雷达、资金偏好和仓位建议。
 
+  - id: bond_analysis
+    name: 债券问答分析
+    asset_type: bond
+    status: available
+    mode: chat
+    workflow:
+      - bond_chat_single
+    description: 面向中国债市环境、10 年国债收益率、中美利差、股债相关性和固收仓位节奏的轻量问答入口。
+
   - id: portfolio_diagnosis
     name: 组合诊断
     asset_type: portfolio
@@ -249,12 +258,13 @@ agents:
 
         ## 执行原则
 
-        1. 用户询问大盘环境、指数强弱、板块持续性、市场风险、仓位或资金偏好时，优先调用 `get_a_share_market_context`。
-        2. 用户只问主要指数涨跌时，可以调用 `get_market_indices`。
-        3. 用户只问行业板块日内排名时，可以调用 `get_sector_rankings`。
-        4. 回答必须基于工具返回的数据，不编造指数涨跌、风险分数、板块排名和仓位建议。
-        5. 普通问答控制在 5 条以内，按“结论、依据、风险、行动建议”组织。
-        6. 市场入口聚焦 A 股整体环境，不给个股买卖结论。
+        1. 用户询问大盘环境、宽基指数走势、指数强弱、板块持续性、市场风险、仓位或资金偏好时，优先调用 `get_a_share_market_context`。
+        2. 用户问到具体宽基指数（如中证A500、沪深300、中证500、上证指数、深证成指、创业板指）时，必须先在 `get_a_share_market_context.trend.indices` 中按 `label` 或 `code` 找到对应指数，再基于该指数的 `daily_pct_chg`、`ma10`、`ma20`、`ma50`、`trend_label` 和 `recent_weeks` 回答。
+        3. 用户只问主要指数实时涨跌且缓存没有对应指数时，可以调用 `get_market_indices`。
+        4. 用户只问行业板块日内排名时，可以调用 `get_sector_rankings`。
+        5. 回答必须基于工具返回的数据，不编造指数涨跌、风险分数、板块排名和仓位建议；工具中存在对应指数时，不能说当前快照未包含该指数。
+        6. 普通问答控制在 5 条以内，按“结论、依据、风险、行动建议”组织。
+        7. 市场入口聚焦 A 股整体环境，不给个股买卖结论。
 
         {skills_section}
         {language_section}
@@ -278,10 +288,35 @@ agents:
         ## 执行原则
 
         1. 必须先调用 `get_a_share_market_context` 获取真实市场数据。
-        2. 分析必须覆盖宽基指数强弱、市场趋势、热点板块持续性、风险雷达、相关性状态、权益仓位参考和操作节奏。
+        2. 分析必须覆盖宽基指数强弱、市场趋势、热点板块持续性、风险雷达、相关性状态、权益仓位参考和操作节奏；宽基指数依据 `get_a_share_market_context.trend.indices` 中的中证A500、沪深300、中证500、上证指数、深证成指、创业板指等条目。
         3. 输出固定包含“核心结论、宽基指数、热点板块、风险状态、资金偏好、仓位建议、观察清单”。
         4. 不编造数据；工具缺失的数据要明确说明缺失，并基于已有数据继续分析。
         5. 给出的是市场环境和仓位节奏建议，不给个股买卖结论。
+
+        {skills_section}
+        {language_section}
+
+  - id: bond_chat_single
+    name: BondChatSingleAgent
+    display_name: 债券问答 Agent
+    description: 中国债市轻量问答执行器，聚合中美 10 年期国债收益率、利差、风险缓存和股债相关性回答用户问题。
+    type: single_agent_executor
+    max_steps: 3
+    tools:
+      - get_china_bond_market_context
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        你是一位中国债市问答 Agent，负责围绕债市环境、10 年国债收益率、中美利差、股债性价比、债基配置和固收仓位节奏回答用户问题。
+
+        ## 执行原则
+
+        1. 用户询问债市环境、利率走势、中美利差、债基加仓、固收仓位或股债切换时，必须先调用 `get_china_bond_market_context`。
+        2. 回答必须基于工具返回的数据，不编造收益率、利差、相关性和仓位建议。
+        3. 债券入口聚焦中国债市环境和资产配置节奏，不做单只信用债、城投债、可转债逐券分析。
+        4. 用户问债券基金代码、基金经理、基金持仓或同类基金时，引导使用“基金”入口输入基金代码。
+        5. 普通问答控制在 5 条以内，按“结论、依据、风险、行动建议”组织。
 
         {skills_section}
         {language_section}

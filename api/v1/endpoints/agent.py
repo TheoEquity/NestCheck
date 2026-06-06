@@ -34,6 +34,7 @@ TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "get_market_indices":         "获取市场指数",
     "get_sector_rankings":        "分析行业板块",
     "get_a_share_market_context":  "获取A股市场上下文",
+    "get_china_bond_market_context": "获取中国债市上下文",
     "get_skill_backtest_summary": "获取技能回测概览",
     "get_strategy_backtest_summary": "获取策略回测概览",
     "get_stock_backtest_summary": "获取个股回测数据",
@@ -312,7 +313,12 @@ async def resolve_chat_topic_session(
     from src.agent.chat_topic import resolve_chat_topic
     from src.storage import get_db
 
-    topic_hint = " ".join(part for part in (market, asset_type, "大盘" if asset_type == "market" else "") if part)
+    topic_hint = " ".join(part for part in (
+        market,
+        asset_type,
+        "大盘" if asset_type == "market" else "",
+        "债市" if asset_type == "bond" else "",
+    ) if part)
     topic = resolve_chat_topic(topic_hint, stock_code=stock_code, stock_name=stock_name)
     if topic is None:
         return ChatTopicResolveResponse(found=False)
@@ -321,6 +327,8 @@ async def resolve_chat_topic_session(
     existing = db.get_agent_chat_topic(topic.topic_key)
     if topic.asset_type == "market":
         resolved_name = "A股市场" if topic.market == "cn" else topic.title
+    elif topic.asset_type == "bond":
+        resolved_name = "中国债市" if topic.market == "cn" else topic.title
     elif topic.asset_type == "fund":
         resolved_name = _resolve_fund_name_by_code(topic.code) or (existing.get("name") if existing else None) or stock_name
     elif stock_name:
@@ -343,7 +351,7 @@ async def resolve_chat_topic_session(
         found=True,
         session_id=topic.session_id,
         topic_key=topic.topic_key,
-        title=resolved_name if topic.asset_type == "market" else f"{topic.code}{f' {resolved_name}' if resolved_name else ''}",
+        title=resolved_name if topic.asset_type in {"market", "bond"} else f"{topic.code}{f' {resolved_name}' if resolved_name else ''}",
         market=topic.market,
         asset_type=topic.asset_type,
         code=topic.code,
@@ -483,7 +491,7 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
             "asset_code": asset_code,
             "asset_name": resolved_name,
         })
-        if asset_type == "market":
+        if asset_type in {"market", "bond"}:
             ctx.pop("stock_code", None)
             ctx.pop("stock_name", None)
             ctx.pop("fund_code", None)
@@ -514,6 +522,34 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
             "topic_session_id": topic.session_id,
             "market": topic.market,
             "asset_type": "market",
+            "asset_code": topic.code,
+            "asset_name": resolved_name,
+        })
+        ctx.pop("stock_code", None)
+        ctx.pop("stock_name", None)
+        ctx.pop("fund_code", None)
+        ctx.pop("fund_name", None)
+        return PreparedChatSession(session_id=topic.session_id, context=ctx)
+
+    if requested_asset_type == "bond":
+        topic = resolve_chat_topic("cn bond 债市")
+        if topic is None:
+            return PreparedChatSession(session_id=session_id, context=ctx, reject_message="请先从债券入口进入 AI 问答。")
+        resolved_name = requested_name or "中国债市"
+        db.upsert_agent_chat_topic(
+            topic_key=topic.topic_key,
+            session_id=topic.session_id,
+            market=topic.market,
+            asset_type=topic.asset_type,
+            code=topic.code,
+            name=resolved_name,
+            title=topic.title,
+        )
+        ctx.update({
+            "topic_key": topic.topic_key,
+            "topic_session_id": topic.session_id,
+            "market": topic.market,
+            "asset_type": "bond",
             "asset_code": topic.code,
             "asset_name": resolved_name,
         })

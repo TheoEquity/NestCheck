@@ -166,3 +166,51 @@ def test_prepare_chat_session_accepts_market_context(tmp_path: Path) -> None:
     assert prepared.context["asset_name"] == "A股市场"
     assert "stock_code" not in prepared.context
     assert "fund_code" not in prepared.context
+
+
+def test_resolve_chat_topic_accepts_bond_without_code(tmp_path: Path) -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{tmp_path / 'bond-topic.db'}")
+
+    with patch("api.middlewares.auth.is_auth_enabled", return_value=False):
+        client = TestClient(create_app(static_dir=tmp_path / "static"))
+        response = client.get(
+            "/api/v1/agent/chat/topics/resolve",
+            params={"market": "cn", "asset_type": "bond"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["found"] is True
+    assert payload["market"] == "cn"
+    assert payload["asset_type"] == "bond"
+    assert payload["code"] == "overview"
+    assert payload["name"] == "中国债市"
+    assert payload["title"] == "中国债市"
+
+
+def test_prepare_chat_session_accepts_bond_context(tmp_path: Path) -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{tmp_path / 'prepare-bond.db'}")
+
+    prepared = _prepare_chat_session(ChatRequest(
+        message="现在债市环境怎么样？",
+        context={
+            "agent_chat_mode": True,
+            "market": "cn",
+            "asset_type": "bond",
+            "asset_code": "overview",
+            "asset_name": "中国债市",
+        },
+    ))
+
+    assert prepared.reject_message is None
+    assert prepared.session_id.startswith("topic:")
+    assert prepared.context["market"] == "cn"
+    assert prepared.context["asset_type"] == "bond"
+    assert prepared.context["asset_code"] == "overview"
+    assert prepared.context["asset_name"] == "中国债市"
+    assert "stock_code" not in prepared.context
+    assert "fund_code" not in prepared.context

@@ -521,6 +521,79 @@ describe('ChatPage', () => {
     });
   });
 
+  it('shows fund quick questions instead of stock strategy controls in fund mode', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-fund',
+      topic_key: 'cn:fund:001258',
+      title: '001258 兴业收益增强债券A',
+      market: 'cn',
+      asset_type: 'fund',
+      code: '001258',
+      name: '兴业收益增强债券A',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'fund' } });
+    fireEvent.change(screen.getByLabelText('代码'), { target: { value: '001258' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+
+    expect(await screen.findByText('快捷问答')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '分析这只基金的持仓结构' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText('策略')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '趋势分析' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '个股专家分析' })).not.toBeInTheDocument();
+  });
+
+  it('sends fund deep analysis through the fund profile without strategy skills', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-fund',
+      topic_key: 'cn:fund:001258',
+      title: '001258 兴业收益增强债券A',
+      market: 'cn',
+      asset_type: 'fund',
+      code: '001258',
+      name: '兴业收益增强债券A',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'fund' } });
+    fireEvent.change(screen.getByLabelText('代码'), { target: { value: '001258' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '基金深度分析' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('请对当前基金进行深度分析'),
+          profile_id: 'fund_analysis',
+          skills: [],
+          context: expect.objectContaining({
+            fund_code: '001258',
+            asset_type: 'fund',
+          }),
+        }),
+        expect.objectContaining({
+          skillName: '基金问答',
+        }),
+      );
+    });
+  });
+
   it('omits skills when all concrete skills are cleared', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>

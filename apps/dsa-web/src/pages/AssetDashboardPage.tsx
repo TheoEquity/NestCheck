@@ -283,7 +283,8 @@ const AssetDashboardPage: React.FC = () => {
         {/* 右侧：市场情绪仪表盘 (2x2 Gauge) */}
         <Card className="xl:col-span-4 !rounded-xl !p-3">
           <div className="mb-2 border-b border-border/50 pb-2">
-            <h2 className="text-base font-semibold text-foreground">市场情绪</h2>
+            <h2 className="text-base font-semibold text-foreground">波动与风险</h2>
+            <p className="mt-1 text-xs text-secondary-text">数值越低代表预期波动越低，数值越高代表恐慌和波动放大。</p>
           </div>
           {!hasLoadedRiskAndTrend ? (
             <GaugeSkeletonGrid />
@@ -292,7 +293,7 @@ const AssetDashboardPage: React.FC = () => {
           ) : (
             <div className="grid grid-cols-2 gap-3 p-1">
               <Gauge
-                title="A 股情绪"
+                title="A 股恐慌指数"
                 unit=""
                 value={marketRisk.chineseVix?.value ?? 0}
                 minValue={0}
@@ -301,7 +302,7 @@ const AssetDashboardPage: React.FC = () => {
                 description={marketRisk.chineseVix?.description}
               />
               <Gauge
-                title="美股情绪"
+                title="美股恐慌指数"
                 unit=""
                 value={marketRisk.usVix?.value ?? 0}
                 minValue={0}

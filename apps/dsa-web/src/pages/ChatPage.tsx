@@ -25,8 +25,10 @@ import {
 import { isNearBottom } from '../utils/chatScroll';
 import { getReportText } from '../utils/reportLanguage';
 
+type QuickQuestion = { label: string; skill?: string };
+
 // Quick question examples shown on empty state
-const QUICK_QUESTIONS = [
+const STOCK_QUICK_QUESTIONS: QuickQuestion[] = [
   { label: '解释当前风险和估值位置', skill: 'bull_trend' },
   { label: '最近新闻有什么影响', skill: 'bull_trend' },
   { label: '当前适合加仓还是等待', skill: 'box_oscillation' },
@@ -35,12 +37,21 @@ const QUICK_QUESTIONS = [
   { label: '给出下一步观察清单', skill: 'bull_trend' },
 ];
 
+const FUND_QUICK_QUESTIONS: QuickQuestion[] = [
+  { label: '分析这只基金的持仓结构' },
+  { label: '这只基金业绩和回撤如何' },
+  { label: '适合长期持有吗' },
+  { label: '基金经理和风格是什么' },
+  { label: '申购赎回和费用情况如何' },
+];
+
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
 const DEFAULT_CHAT_PROFILE_ID = 'stock_chat_auto';
 const FUND_CHAT_PROFILE_ID = 'fund_analysis';
 const STOCK_SPECIALIST_PROFILE_ID = 'stock_specialist';
 const STOCK_SPECIALIST_PROMPT = '请对当前个股进行专家分析，结合已选策略技能，覆盖行情位置、技术结构、情报风险、策略条件和操作建议。';
+const FUND_DEEP_ANALYSIS_PROMPT = '请对当前基金进行深度分析，覆盖基金档案、基金经理、投资风格、持仓结构、行业配置、业绩表现、回撤风险、持有体验、费用和适合人群，并给出是否适合继续持有或新买入的建议。';
 
 export const getDefaultChatProfileId = (assetType?: string | null) => (
   assetType === 'fund' ? FUND_CHAT_PROFILE_ID : DEFAULT_CHAT_PROFILE_ID
@@ -294,8 +305,12 @@ const ChatPage: React.FC = () => {
     ],
   );
 
+  const activeAssetType = activeTopic?.assetType ?? topicForm.assetType;
+  const isFundMode = activeAssetType === 'fund';
   const availableSkillIds = new Set(skills.map((skill) => skill.id));
-  const quickQuestions = QUICK_QUESTIONS.filter((question) => availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
+  const quickQuestions = isFundMode
+    ? FUND_QUICK_QUESTIONS
+    : STOCK_QUICK_QUESTIONS.filter((question) => !question.skill || availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
 
   const canStartTopic = Boolean(topicForm.market && topicForm.assetType && topicForm.code.trim());
   const canSendMessage = Boolean(activeTopic && input.trim() && !loading);
@@ -512,14 +527,19 @@ const ChatPage: React.FC = () => {
     setSidebarOpen(false);
   }, [applyTopicSelection, requestScrollToBottom, sessions, switchSession]);
 
-  const handleQuickQuestion = (q: (typeof QUICK_QUESTIONS)[0]) => {
-    setSelectedSkillIds([q.skill]);
-    handleSend(q.label, [q.skill]);
+  const handleQuickQuestion = (q: QuickQuestion) => {
+    const nextSkillIds = q.skill ? [q.skill] : [];
+    setSelectedSkillIds(nextSkillIds);
+    handleSend(q.label, nextSkillIds);
   };
 
   const handleStockSpecialistAnalysis = useCallback(() => {
     void handleSend(STOCK_SPECIALIST_PROMPT, selectedSkillIds, STOCK_SPECIALIST_PROFILE_ID);
   }, [handleSend, selectedSkillIds]);
+
+  const handleFundDeepAnalysis = useCallback(() => {
+    void handleSend(FUND_DEEP_ANALYSIS_PROMPT, [], FUND_CHAT_PROFILE_ID);
+  }, [handleSend]);
 
   const toggleThinking = (msgId: string) => {
     setExpandedThinking((prev) => {
@@ -884,18 +904,31 @@ const ChatPage: React.FC = () => {
             <p className="ml-auto text-xs text-danger">{topicError}</p>
           ) : (
             <>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleStockSpecialistAnalysis}
-                disabled={loading || !activeTopic || activeTopic.assetType !== 'stock'}
-                className="ml-auto h-8 whitespace-nowrap"
-              >
-                个股专家分析
-              </Button>
+              {activeTopic?.assetType === 'stock' ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleStockSpecialistAnalysis}
+                  disabled={loading}
+                  className="ml-auto h-8 whitespace-nowrap"
+                >
+                  个股专家分析
+                </Button>
+              ) : activeTopic?.assetType === 'fund' ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleFundDeepAnalysis}
+                  disabled={loading}
+                  className="ml-auto h-8 whitespace-nowrap"
+                >
+                  基金深度分析
+                </Button>
+              ) : null}
             <label
               className={cn(
                 'inline-flex items-center gap-1.5 text-xs',
+                activeTopic?.assetType !== 'stock' ? 'ml-auto' : '',
                 contextCompressionLoaded && !contextCompressionSaving
                   ? 'cursor-pointer text-secondary-text'
                   : 'cursor-not-allowed text-muted-text',
@@ -1117,7 +1150,24 @@ const ChatPage: React.FC = () => {
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
               ) : null}
-              {skills.length > 0 && (
+              {isFundMode ? (
+                <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                  <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
+                    快捷问答
+                  </span>
+                  {FUND_QUICK_QUESTIONS.map((q) => (
+                    <button
+                      key={q.label}
+                      type="button"
+                      onClick={() => handleQuickQuestion(q)}
+                      disabled={!activeTopic || loading}
+                      className="quick-question-btn disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+              ) : skills.length > 0 && (
               <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
                 <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
                   策略

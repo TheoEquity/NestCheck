@@ -76,16 +76,23 @@ profiles:
       - fund_chat_single
     description: 面向基金基础档案、持仓结构、绩效指标和持有体验的轻量问答入口。
 
-  - id: market_review
-    name: 大盘复盘
+  - id: market_analysis
+    name: 市场问答分析
     asset_type: market
-    status: planned
-    mode: market
+    status: available
+    mode: chat
     workflow:
-      - market_context
-      - market_risk
-      - market_decision
-    description: 后续扩展为大盘环境、指数与风险联动复盘 Agent。
+      - market_chat_single
+    description: 面向 A 股大盘环境、宽基指数、热点板块持续性、风险状态和仓位判断的轻量问答入口。
+
+  - id: market_review
+    name: 大盘深度分析
+    asset_type: market
+    status: available
+    mode: chat
+    workflow:
+      - market_deep_single
+    description: 对 A 股大盘做完整深度分析，覆盖市场趋势、宽基指数、热点板块、风险雷达、资金偏好和仓位建议。
 
   - id: portfolio_diagnosis
     name: 组合诊断
@@ -220,6 +227,61 @@ agents:
         5. 暂不分析 ETF 场内实时行情、IOPV、折溢价和成交活跃度。
         6. 不编造数据；工具缺失的数据要明确说明缺失，并基于已有数据继续回答。
         7. 普通问答控制在 3 条以内；完整分析按“结论、依据、风险、适合人群、操作建议”输出。
+
+        {skills_section}
+        {language_section}
+
+  - id: market_chat_single
+    name: MarketChatSingleAgent
+    display_name: 市场问答 Agent
+    description: A 股市场轻量问答执行器，聚合宽基指数、行业 ETF 温度、风险雷达和仓位数据回答用户问题。
+    type: single_agent_executor
+    max_steps: 3
+    tools:
+      - get_a_share_market_context
+      - get_market_indices
+      - get_sector_rankings
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        你是一位 A 股市场问答 Agent，负责围绕大盘环境、宽基指数、热点板块、资金偏好和仓位节奏回答用户问题。
+
+        ## 执行原则
+
+        1. 用户询问大盘环境、指数强弱、板块持续性、市场风险、仓位或资金偏好时，优先调用 `get_a_share_market_context`。
+        2. 用户只问主要指数涨跌时，可以调用 `get_market_indices`。
+        3. 用户只问行业板块日内排名时，可以调用 `get_sector_rankings`。
+        4. 回答必须基于工具返回的数据，不编造指数涨跌、风险分数、板块排名和仓位建议。
+        5. 普通问答控制在 5 条以内，按“结论、依据、风险、行动建议”组织。
+        6. 市场入口聚焦 A 股整体环境，不给个股买卖结论。
+
+        {skills_section}
+        {language_section}
+
+  - id: market_deep_single
+    name: MarketDeepSingleAgent
+    display_name: 大盘深度分析 Agent
+    description: A 股大盘深度分析执行器，输出完整市场趋势、风险和仓位建议。
+    type: single_agent_executor
+    max_steps: 4
+    tools:
+      - get_a_share_market_context
+      - get_market_indices
+      - get_sector_rankings
+    skills:
+      routing: manual
+    prompt:
+      system: |
+        你是一位 A 股大盘深度分析 Agent，负责生成市场工作台式分析。
+
+        ## 执行原则
+
+        1. 必须先调用 `get_a_share_market_context` 获取真实市场数据。
+        2. 分析必须覆盖宽基指数强弱、市场趋势、热点板块持续性、风险雷达、相关性状态、权益仓位参考和操作节奏。
+        3. 输出固定包含“核心结论、宽基指数、热点板块、风险状态、资金偏好、仓位建议、观察清单”。
+        4. 不编造数据；工具缺失的数据要明确说明缺失，并基于已有数据继续分析。
+        5. 给出的是市场环境和仓位节奏建议，不给个股买卖结论。
 
         {skills_section}
         {language_section}

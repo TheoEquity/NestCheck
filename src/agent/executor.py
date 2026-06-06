@@ -587,6 +587,8 @@ class AgentExecutor:
             context_parts = []
             if context.get("asset_type"):
                 context_parts.append(f"标的类型: {context['asset_type']}")
+            if context.get("market"):
+                context_parts.append(f"市场: {context['market']}")
             if context.get("fund_code"):
                 context_parts.append(f"基金代码: {context['fund_code']}")
             if context.get("fund_name"):

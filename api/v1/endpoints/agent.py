@@ -33,6 +33,7 @@ TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "analyze_pattern":            "识别K线形态",
     "get_market_indices":         "获取市场指数",
     "get_sector_rankings":        "分析行业板块",
+    "get_a_share_market_context":  "获取A股市场上下文",
     "get_skill_backtest_summary": "获取技能回测概览",
     "get_strategy_backtest_summary": "获取策略回测概览",
     "get_stock_backtest_summary": "获取个股回测数据",
@@ -302,7 +303,7 @@ class ChatTopicResolveResponse(BaseModel):
 
 @router.get("/chat/topics/resolve", response_model=ChatTopicResolveResponse)
 async def resolve_chat_topic_session(
-    stock_code: str,
+    stock_code: str = "",
     stock_name: Optional[str] = None,
     market: Optional[str] = None,
     asset_type: Optional[str] = None,
@@ -311,14 +312,16 @@ async def resolve_chat_topic_session(
     from src.agent.chat_topic import resolve_chat_topic
     from src.storage import get_db
 
-    topic_hint = " ".join(part for part in (market, asset_type) if part)
+    topic_hint = " ".join(part for part in (market, asset_type, "大盘" if asset_type == "market" else "") if part)
     topic = resolve_chat_topic(topic_hint, stock_code=stock_code, stock_name=stock_name)
     if topic is None:
         return ChatTopicResolveResponse(found=False)
 
     db = get_db()
     existing = db.get_agent_chat_topic(topic.topic_key)
-    if topic.asset_type == "fund":
+    if topic.asset_type == "market":
+        resolved_name = "A股市场" if topic.market == "cn" else topic.title
+    elif topic.asset_type == "fund":
         resolved_name = _resolve_fund_name_by_code(topic.code) or (existing.get("name") if existing else None) or stock_name
     elif stock_name:
         resolved_name = stock_name
@@ -340,7 +343,7 @@ async def resolve_chat_topic_session(
         found=True,
         session_id=topic.session_id,
         topic_key=topic.topic_key,
-        title=f"{topic.code}{f' {resolved_name}' if resolved_name else ''}",
+        title=resolved_name if topic.asset_type == "market" else f"{topic.code}{f' {resolved_name}' if resolved_name else ''}",
         market=topic.market,
         asset_type=topic.asset_type,
         code=topic.code,
@@ -480,11 +483,45 @@ def _prepare_chat_session(request: ChatRequest) -> PreparedChatSession:
             "asset_code": asset_code,
             "asset_name": resolved_name,
         })
-        if asset_type == "fund":
+        if asset_type == "market":
+            ctx.pop("stock_code", None)
+            ctx.pop("stock_name", None)
+            ctx.pop("fund_code", None)
+            ctx.pop("fund_name", None)
+        elif asset_type == "fund":
             ctx.update({"fund_code": asset_code, "fund_name": resolved_name})
         else:
             ctx.update({"stock_code": asset_code, "stock_name": resolved_name})
         return PreparedChatSession(session_id=session_id, context=ctx)
+
+    if requested_asset_type == "market":
+        requested_market = str(ctx.get("market") or "cn").strip().lower() or "cn"
+        topic = resolve_chat_topic(" ".join((requested_market, "market", "大盘")))
+        if topic is None:
+            return PreparedChatSession(session_id=session_id, context=ctx, reject_message="请先从市场入口进入 AI 问答。")
+        resolved_name = requested_name or ("A股市场" if topic.market == "cn" else topic.title)
+        db.upsert_agent_chat_topic(
+            topic_key=topic.topic_key,
+            session_id=topic.session_id,
+            market=topic.market,
+            asset_type=topic.asset_type,
+            code=topic.code,
+            name=resolved_name,
+            title=topic.title,
+        )
+        ctx.update({
+            "topic_key": topic.topic_key,
+            "topic_session_id": topic.session_id,
+            "market": topic.market,
+            "asset_type": "market",
+            "asset_code": topic.code,
+            "asset_name": resolved_name,
+        })
+        ctx.pop("stock_code", None)
+        ctx.pop("stock_name", None)
+        ctx.pop("fund_code", None)
+        ctx.pop("fund_name", None)
+        return PreparedChatSession(session_id=topic.session_id, context=ctx)
 
     if not requested_code:
         return PreparedChatSession(

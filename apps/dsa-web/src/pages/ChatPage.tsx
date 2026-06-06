@@ -24,6 +24,12 @@ import {
 } from '../utils/chatFollowUp';
 import { isNearBottom } from '../utils/chatScroll';
 import { getReportText } from '../utils/reportLanguage';
+import {
+  buildChatTopicContext,
+  FUND_CHAT_PROFILE_ID,
+  getDefaultChatProfileId,
+  type ActiveChatTopic,
+} from './chatPageHelpers';
 
 type QuickQuestion = { label: string; skill?: string };
 
@@ -46,35 +52,21 @@ const FUND_QUICK_QUESTIONS: QuickQuestion[] = [
   { label: '同类基金有哪些' },
 ];
 
+const MARKET_QUICK_QUESTIONS: QuickQuestion[] = [
+  { label: '现在大盘环境怎么样' },
+  { label: '宽基指数谁更强' },
+  { label: '热点板块持续性如何' },
+  { label: '资金偏向哪些方向' },
+  { label: '当前适合加仓还是控制仓位' },
+];
+
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
-const DEFAULT_CHAT_PROFILE_ID = 'stock_chat_auto';
-const FUND_CHAT_PROFILE_ID = 'fund_analysis';
+const MARKET_DEEP_PROFILE_ID = 'market_review';
 const STOCK_SPECIALIST_PROFILE_ID = 'stock_specialist';
 const STOCK_SPECIALIST_PROMPT = '请对当前个股进行专家分析，结合已选策略技能，覆盖行情位置、技术结构、情报风险、策略条件和操作建议。';
 const FUND_DEEP_ANALYSIS_PROMPT = '请对当前基金进行深度分析，覆盖基金档案、基金经理、投资风格、持仓结构、行业配置、业绩表现、回撤风险、持有体验、费用和适合人群，并给出是否适合继续持有或新买入的建议。';
-
-export const getDefaultChatProfileId = (assetType?: string | null) => (
-  assetType === 'fund' ? FUND_CHAT_PROFILE_ID : DEFAULT_CHAT_PROFILE_ID
-);
-
-type ActiveChatTopic = { market: string; assetType: string; code: string; name: string; sessionId: string };
-
-export const buildChatTopicContext = (
-  topic: ActiveChatTopic,
-  followUpContext?: ChatFollowUpContext | null,
-) => ({
-  ...(followUpContext ?? {}),
-  agent_chat_mode: true,
-  stock_code: topic.assetType === 'stock' ? topic.code : undefined,
-  stock_name: topic.assetType === 'stock' ? topic.name || undefined : undefined,
-  fund_code: topic.assetType === 'fund' ? topic.code : undefined,
-  fund_name: topic.assetType === 'fund' ? topic.name || undefined : undefined,
-  asset_code: topic.code,
-  asset_name: topic.name || undefined,
-  market: topic.market,
-  asset_type: topic.assetType,
-});
+const MARKET_DEEP_ANALYSIS_PROMPT = '请对当前 A 股大盘进行深度分析，覆盖宽基指数强弱、市场趋势、热点板块持续性、风险雷达、资金偏好、权益仓位参考和下一步观察清单。';
 
 const MARKET_OPTIONS = [
   { value: 'cn', label: 'A股' },
@@ -85,7 +77,7 @@ const MARKET_OPTIONS = [
 const ASSET_TYPE_OPTIONS = [
   { value: 'stock', label: '股票' },
   { value: 'fund', label: '基金' },
-  { value: 'index', label: '指数' },
+  { value: 'market', label: '市场' },
   { value: 'bond', label: '债券' },
 ];
 
@@ -308,12 +300,15 @@ const ChatPage: React.FC = () => {
 
   const activeAssetType = activeTopic?.assetType ?? topicForm.assetType;
   const isFundMode = activeAssetType === 'fund';
+  const isMarketMode = activeAssetType === 'market';
   const availableSkillIds = new Set(skills.map((skill) => skill.id));
-  const quickQuestions = isFundMode
+  const quickQuestions = isMarketMode
+    ? MARKET_QUICK_QUESTIONS
+    : isFundMode
     ? FUND_QUICK_QUESTIONS
     : STOCK_QUICK_QUESTIONS.filter((question) => !question.skill || availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
 
-  const canStartTopic = Boolean(topicForm.market && topicForm.assetType && topicForm.code.trim());
+  const canStartTopic = Boolean(topicForm.market && topicForm.assetType && (topicForm.assetType === 'market' || topicForm.code.trim()));
   const canSendMessage = Boolean(activeTopic && input.trim() && !loading);
   const buildTopicContext = useCallback((topic: ActiveChatTopic) => (
     buildChatTopicContext(topic, followUpContextRef.current)
@@ -342,7 +337,7 @@ const ChatPage: React.FC = () => {
     if (!canStartTopic || topicResolving) return;
     setTopicResolving(true);
     setTopicError(null);
-    const code = topicForm.code.trim();
+    const code = topicForm.assetType === 'market' ? '' : topicForm.code.trim();
     const name = topicForm.name.trim();
     try {
       const topic = await agentApi.resolveChatTopic(code, name || undefined, {
@@ -350,7 +345,7 @@ const ChatPage: React.FC = () => {
         assetType: topicForm.assetType,
       });
       if (!topic.found || !topic.session_id || !topic.market || !topic.asset_type || !topic.code) {
-        setTopicError('无法识别该标的，请检查市场、大类和代码。');
+        setTopicError(topicForm.assetType === 'market' ? '无法进入市场问答，请检查市场选择。' : '无法识别该标的，请检查市场、大类和代码。');
         return;
       }
       applyTopicSelection(topic);
@@ -477,16 +472,20 @@ const ChatPage: React.FC = () => {
       if (!msgText || loading || !activeTopic) return;
       const usedSkillIds = activeTopic.assetType === 'fund'
         ? []
+        : activeTopic.assetType === 'market'
+        ? []
         : normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
       const usedSkillNames = activeTopic.assetType === 'fund'
         ? ['基金问答']
+        : activeTopic.assetType === 'market'
+        ? ['市场问答']
         : usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
 
       const payload = {
         message: msgText,
         session_id: activeTopic.sessionId,
         profile_id: overrideProfileId ?? getDefaultChatProfileId(activeTopic.assetType),
-        ...(activeTopic.assetType === 'fund' || usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
+        ...(activeTopic.assetType === 'fund' || activeTopic.assetType === 'market' || usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
         context: buildTopicContext(activeTopic),
       };
       followUpHydrationTokenRef.current += 1;
@@ -540,6 +539,10 @@ const ChatPage: React.FC = () => {
 
   const handleFundDeepAnalysis = useCallback(() => {
     void handleSend(FUND_DEEP_ANALYSIS_PROMPT, [], FUND_CHAT_PROFILE_ID);
+  }, [handleSend]);
+
+  const handleMarketDeepAnalysis = useCallback(() => {
+    void handleSend(MARKET_DEEP_ANALYSIS_PROMPT, [], MARKET_DEEP_PROFILE_ID);
   }, [handleSend]);
 
   const toggleThinking = (msgId: string) => {
@@ -865,7 +868,12 @@ const ChatPage: React.FC = () => {
             大类
             <select
               value={topicForm.assetType}
-              onChange={(event) => setTopicForm((prev) => ({ ...prev, assetType: event.target.value }))}
+              onChange={(event) => setTopicForm((prev) => ({
+                ...prev,
+                assetType: event.target.value,
+                code: event.target.value === 'market' ? '' : prev.code,
+                name: event.target.value === 'market' ? '' : prev.name,
+              }))}
               className="input-surface input-focus-glow h-8 rounded-lg border bg-transparent px-2 text-sm text-foreground"
             >
               {ASSET_TYPE_OPTIONS.map((option) => (
@@ -873,24 +881,32 @@ const ChatPage: React.FC = () => {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
-            代码
-            <input
-              value={topicForm.code}
-              onChange={(event) => setTopicForm((prev) => ({ ...prev, code: event.target.value.trim() }))}
-              placeholder="600519 / 00700 / AAPL"
-              className="input-surface input-focus-glow h-8 w-[130px] rounded-lg border bg-transparent px-2 text-sm text-foreground"
-            />
-          </label>
-          <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
-            名称
-            <input
-              value={topicForm.name}
-              onChange={(event) => setTopicForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="可选"
-              className="input-surface input-focus-glow h-8 w-[110px] rounded-lg border bg-transparent px-2 text-sm text-foreground"
-            />
-          </label>
+          {topicForm.assetType === 'market' ? (
+            <span className="rounded-lg border border-white/8 bg-elevated/45 px-2.5 py-1.5 text-xs text-secondary-text">
+              市场问答将固定分析 A 股大盘，无需输入代码和名称。
+            </span>
+          ) : (
+            <>
+              <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
+                代码
+                <input
+                  value={topicForm.code}
+                  onChange={(event) => setTopicForm((prev) => ({ ...prev, code: event.target.value.trim() }))}
+                  placeholder="600519 / 00700 / AAPL"
+                  className="input-surface input-focus-glow h-8 w-[130px] rounded-lg border bg-transparent px-2 text-sm text-foreground"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-text">
+                名称
+                <input
+                  value={topicForm.name}
+                  onChange={(event) => setTopicForm((prev) => ({ ...prev, name: event.target.value }))}
+                  placeholder="可选"
+                  className="input-surface input-focus-glow h-8 w-[110px] rounded-lg border bg-transparent px-2 text-sm text-foreground"
+                />
+              </label>
+            </>
+          )}
           <Button
             variant="primary"
             size="sm"
@@ -925,11 +941,21 @@ const ChatPage: React.FC = () => {
                 >
                   基金深度分析
                 </Button>
+              ) : activeTopic?.assetType === 'market' ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleMarketDeepAnalysis}
+                  disabled={loading}
+                  className="ml-auto h-8 whitespace-nowrap"
+                >
+                  大盘深度分析
+                </Button>
               ) : null}
             <label
               className={cn(
                 'inline-flex items-center gap-1.5 text-xs',
-                activeTopic?.assetType !== 'stock' ? 'ml-auto' : '',
+                activeTopic?.assetType !== 'stock' && activeTopic?.assetType !== 'fund' && activeTopic?.assetType !== 'market' ? 'ml-auto' : '',
                 contextCompressionLoaded && !contextCompressionSaving
                   ? 'cursor-pointer text-secondary-text'
                   : 'cursor-not-allowed text-muted-text',
@@ -1151,12 +1177,12 @@ const ChatPage: React.FC = () => {
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
               ) : null}
-              {isFundMode ? (
+              {isFundMode || isMarketMode ? (
                 <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
                   <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
                     快捷问答
                   </span>
-                  {FUND_QUICK_QUESTIONS.map((q) => (
+                  {quickQuestions.map((q) => (
                     <button
                       key={q.label}
                       type="button"

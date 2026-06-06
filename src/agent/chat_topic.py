@@ -83,6 +83,23 @@ def resolve_chat_topic(
 ) -> Optional[ChatTopic]:
     """Resolve a stable topic for stock/fund/index chat messages."""
     source_text = " ".join(part for part in (stock_code, stock_name, message) if part)
+    lower_source = source_text.lower()
+    if "market" in lower_source or any(word in source_text for word in ("市场", "大盘")):
+        market = "cn"
+        if "hk" in lower_source or "港股" in source_text:
+            market = "hk"
+        elif "us" in lower_source or "美股" in source_text:
+            market = "us"
+        topic_key = f"{market}:market:overview"
+        digest = hashlib.sha1(topic_key.encode("utf-8")).hexdigest()[:16]
+        return ChatTopic(
+            topic_key=topic_key,
+            session_id=f"topic:{digest}",
+            market=market,
+            asset_type="market",
+            code="overview",
+            title=f"{market.upper()} market overview",
+        )
     resolved = _normalize_code(source_text, allow_us_without_hint=allow_us_without_hint)
     if resolved is None:
         return None

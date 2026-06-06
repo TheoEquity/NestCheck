@@ -118,3 +118,51 @@ def test_prepare_chat_session_accepts_fund_context(tmp_path: Path) -> None:
     assert prepared.context["asset_name"] == "兴业收益增强债券A"
     assert prepared.context["fund_code"] == "001258"
     assert prepared.context["fund_name"] == "兴业收益增强债券A"
+
+
+def test_resolve_chat_topic_accepts_market_without_code(tmp_path: Path) -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{tmp_path / 'market-topic.db'}")
+
+    with patch("api.middlewares.auth.is_auth_enabled", return_value=False):
+        client = TestClient(create_app(static_dir=tmp_path / "static"))
+        response = client.get(
+            "/api/v1/agent/chat/topics/resolve",
+            params={"market": "cn", "asset_type": "market"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["found"] is True
+    assert payload["market"] == "cn"
+    assert payload["asset_type"] == "market"
+    assert payload["code"] == "overview"
+    assert payload["name"] == "A股市场"
+    assert payload["title"] == "A股市场"
+
+
+def test_prepare_chat_session_accepts_market_context(tmp_path: Path) -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{tmp_path / 'prepare-market.db'}")
+
+    prepared = _prepare_chat_session(ChatRequest(
+        message="现在大盘环境怎么样？",
+        context={
+            "agent_chat_mode": True,
+            "market": "cn",
+            "asset_type": "market",
+            "asset_code": "overview",
+            "asset_name": "A股市场",
+        },
+    ))
+
+    assert prepared.reject_message is None
+    assert prepared.session_id.startswith("topic:")
+    assert prepared.context["market"] == "cn"
+    assert prepared.context["asset_type"] == "market"
+    assert prepared.context["asset_code"] == "overview"
+    assert prepared.context["asset_name"] == "A股市场"
+    assert "stock_code" not in prepared.context
+    assert "fund_code" not in prepared.context

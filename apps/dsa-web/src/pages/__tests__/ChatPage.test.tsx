@@ -4,7 +4,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createParsedApiError } from '../../api/error';
 import { historyApi } from '../../api/history';
 import type { Message } from '../../stores/agentChatStore';
-import ChatPage, { buildChatTopicContext, getDefaultChatProfileId } from '../ChatPage';
+import ChatPage from '../ChatPage';
+import { buildChatTopicContext, getDefaultChatProfileId } from '../chatPageHelpers';
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -447,7 +448,26 @@ describe('ChatPage', () => {
 
   it('uses the fund analysis profile for fund topics', () => {
     expect(getDefaultChatProfileId('fund')).toBe('fund_analysis');
+    expect(getDefaultChatProfileId('market')).toBe('market_analysis');
     expect(getDefaultChatProfileId('stock')).toBe('stock_chat_auto');
+  });
+
+  it('builds market-specific context from the fixed chat topic', () => {
+    expect(buildChatTopicContext({
+      market: 'cn',
+      assetType: 'market',
+      code: 'overview',
+      name: 'A股市场',
+      sessionId: 'session-market',
+    })).toEqual(expect.objectContaining({
+      agent_chat_mode: true,
+      stock_code: undefined,
+      fund_code: undefined,
+      asset_code: 'overview',
+      asset_name: 'A股市场',
+      market: 'cn',
+      asset_type: 'market',
+    }));
   });
 
   it('builds fund-specific context from the fixed chat topic', () => {
@@ -636,6 +656,105 @@ describe('ChatPage', () => {
         }),
         expect.objectContaining({
           skillName: '基金问答',
+        }),
+      );
+    });
+  });
+
+  it('starts a market topic without code and sends through market profile', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-market',
+      topic_key: 'cn:market:overview',
+      title: 'A股市场',
+      market: 'cn',
+      asset_type: 'market',
+      code: 'overview',
+      name: 'A股市场',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'market' } });
+    expect(screen.queryByLabelText('代码')).not.toBeInTheDocument();
+    expect(screen.getByText('市场问答将固定分析 A 股大盘，无需输入代码和名称。')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+
+    await waitFor(() => {
+      expect(mockResolveChatTopic).toHaveBeenCalledWith('', undefined, {
+        market: 'cn',
+        assetType: 'market',
+      });
+      expect(mockSwitchSession).toHaveBeenCalledWith('session-market');
+    });
+
+    const marketQuestionButtons = await screen.findAllByRole('button', { name: '现在大盘环境怎么样' });
+    const enabledButton = marketQuestionButtons.find((button) => !button.hasAttribute('disabled'));
+    expect(enabledButton).toBeTruthy();
+    fireEvent.click(enabledButton!);
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '现在大盘环境怎么样',
+          profile_id: 'market_analysis',
+          skills: [],
+          context: expect.objectContaining({
+            asset_code: 'overview',
+            asset_name: 'A股市场',
+            asset_type: 'market',
+            market: 'cn',
+          }),
+        }),
+        expect.objectContaining({
+          skillName: '市场问答',
+        }),
+      );
+    });
+  });
+
+  it('sends market deep analysis through the market review profile', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-market',
+      topic_key: 'cn:market:overview',
+      title: 'A股市场',
+      market: 'cn',
+      asset_type: 'market',
+      code: 'overview',
+      name: 'A股市场',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'market' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+    fireEvent.click(await screen.findByRole('button', { name: '大盘深度分析' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('请对当前 A 股大盘进行深度分析'),
+          profile_id: 'market_review',
+          skills: [],
+          context: expect.objectContaining({
+            asset_type: 'market',
+            asset_code: 'overview',
+          }),
+        }),
+        expect.objectContaining({
+          skillName: '市场问答',
         }),
       );
     });

@@ -5,13 +5,61 @@ Market tools — wraps DataFetcherManager market-level methods as agent tools.
 Tools:
 - get_market_indices: major market index data
 - get_sector_rankings: sector performance rankings
+- get_a_share_market_context: compact A-share market dashboard context
 """
 
 import logging
+from typing import Any
 
 from src.agent.tools.registry import ToolParameter, ToolDefinition
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_slice(value: Any, limit: int = 5) -> list:
+    if isinstance(value, list):
+        return value[:limit]
+    return []
+
+
+def _compact_trend(payload: dict) -> dict:
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    compact = []
+    for key, item in data.items():
+        if not isinstance(item, dict):
+            continue
+        compact.append({
+            "key": key,
+            "label": item.get("label"),
+            "code": item.get("code"),
+            "close": item.get("daily_close") or item.get("close"),
+            "daily_pct_chg": item.get("daily_pct_chg"),
+            "ma10": item.get("ma10"),
+            "ma20": item.get("ma20"),
+            "ma50": item.get("ma50"),
+            "trend_label": item.get("trend_label") or item.get("trend"),
+            "support_distance_pct": item.get("support_distance_pct"),
+            "volatility_label": item.get("volatility_label"),
+        })
+    return {
+        "snapshot_date": payload.get("snapshot_date"),
+        "indices": compact[:12],
+        "cache": payload.get("_cache", {}),
+    }
+
+
+def _compact_sector_dashboard(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "snapshot_date": payload.get("snapshot_date"),
+        "benchmark": payload.get("benchmark"),
+        "top_gainers": _safe_slice(payload.get("top_gainers"), 5),
+        "top_losers": _safe_slice(payload.get("top_losers"), 5),
+        "monthly_rankings": _safe_slice(payload.get("monthly_rankings"), 10),
+    }
 
 
 def _get_fetcher_manager():
@@ -102,7 +150,53 @@ get_sector_rankings_tool = ToolDefinition(
 )
 
 
+# ============================================================
+# get_a_share_market_context
+# ============================================================
+
+def _handle_get_a_share_market_context() -> dict:
+    """Get compact A-share market context from cached dashboard services."""
+    from src.services.market_cache_service import get_market_cache_payload
+    from src.services.sector_etf_service import get_sector_etf_dashboard
+
+    payload: dict[str, Any] = {"region": "cn", "market": "A股"}
+    for cache_key in ("trend", "risk", "radar", "correlation", "equity_ratio"):
+        try:
+            value = get_market_cache_payload(cache_key, force_refresh=False)
+            if cache_key == "trend":
+                payload[cache_key] = _compact_trend(value)
+            elif cache_key == "correlation":
+                payload[cache_key] = {
+                    "labels": _safe_slice(value.get("labels"), 12),
+                    "matrix": _safe_slice(value.get("matrix"), 12),
+                    "cache": value.get("_cache", {}),
+                }
+            else:
+                payload[cache_key] = value
+        except Exception as exc:
+            payload[cache_key] = {"status": "failed", "error": str(exc)}
+
+    try:
+        payload["sector_etf"] = _compact_sector_dashboard(get_sector_etf_dashboard(force_refresh=False))
+    except Exception as exc:
+        payload["sector_etf"] = {"status": "failed", "error": str(exc)}
+    return payload
+
+
+get_a_share_market_context_tool = ToolDefinition(
+    name="get_a_share_market_context",
+    description=(
+        "Get compact China A-share market context, including broad index trends, "
+        "risk radar, correlation, equity ratio and sector ETF temperature."
+    ),
+    parameters=[],
+    handler=_handle_get_a_share_market_context,
+    category="market",
+)
+
+
 ALL_MARKET_TOOLS = [
     get_market_indices_tool,
     get_sector_rankings_tool,
+    get_a_share_market_context_tool,
 ]

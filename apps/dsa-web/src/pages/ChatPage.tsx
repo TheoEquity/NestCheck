@@ -975,7 +975,7 @@ const ChatPage: React.FC = () => {
             <label
               className={cn(
                 'inline-flex items-center gap-1.5 text-xs',
-                activeTopic?.assetType !== 'stock' && activeTopic?.assetType !== 'fund' && activeTopic?.assetType !== 'market' && activeTopic?.assetType !== 'bond' ? 'ml-auto' : '',
+                activeTopic?.assetType === 'bond' || (activeTopic?.assetType !== 'stock' && activeTopic?.assetType !== 'fund' && activeTopic?.assetType !== 'market') ? 'ml-auto' : '',
                 contextCompressionLoaded && !contextCompressionSaving
                   ? 'cursor-pointer text-secondary-text'
                   : 'cursor-not-allowed text-muted-text',

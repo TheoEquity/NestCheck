@@ -66,7 +66,7 @@ export function getHealthDeductions(
     buckets.set('风险资产占比', 20);
   } else {
     const actual = risk.concentration?.r4R5ActualPct ?? risk.concentration?.topWeightPct ?? 0;
-    const plan = risk.concentration?.r4R5PlannedPct ?? risk.thresholds?.concentrationAlertPct ?? 35;
+    const plan = risk.concentration?.r4R5PlannedPct ?? risk.thresholds?.concentrationAlertPct ?? 30;
     if (plan > 0 && actual / plan > 0.7) {
       buckets.set('风险资产占比', 10);
     }
@@ -127,7 +127,7 @@ export function computeHealthScore(
     score -= 20;
   } else {
     const actualPct = risk.concentration?.r4R5ActualPct ?? risk.concentration?.topWeightPct ?? 0;
-    const plannedPct = risk.concentration?.r4R5PlannedPct ?? risk.thresholds?.concentrationAlertPct ?? 35;
+      const plannedPct = risk.concentration?.r4R5PlannedPct ?? risk.thresholds?.concentrationAlertPct ?? 30;
     if (plannedPct > 0 && actualPct / plannedPct > 0.7) score -= 10;
   }
 

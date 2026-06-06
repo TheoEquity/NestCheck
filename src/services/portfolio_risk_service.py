@@ -110,7 +110,7 @@ class PortfolioRiskService:
 
         Computes the actual R4+R5 weight from current positions and compares
         with the planned R4+R5 ratio. Returns the planned ratio as threshold.
-        When no active plan exists, defaults to 35.0.
+        When no active plan exists, defaults to 30.0.
         """
         from src.storage import get_db, AssetAllocationPlan
 
@@ -124,7 +124,7 @@ class PortfolioRiskService:
                     return float(active_plan.r4_ratio or 0.0) + float(active_plan.r5_ratio or 0.0)
         except Exception:
             pass
-        return 35.0
+        return 30.0
 
     def _ensure_drawdown_snapshot_window(
         self,

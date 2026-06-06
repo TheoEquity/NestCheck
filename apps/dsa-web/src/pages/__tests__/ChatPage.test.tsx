@@ -546,9 +546,56 @@ describe('ChatPage', () => {
 
     expect(await screen.findByText('快捷问答')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '分析这只基金的持仓结构' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: '同类基金有哪些' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('策略')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '趋势分析' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '个股专家分析' })).not.toBeInTheDocument();
+  });
+
+  it('sends the similar fund quick question through the fund profile', async () => {
+    mockResolveChatTopic.mockResolvedValueOnce({
+      found: true,
+      session_id: 'session-fund',
+      topic_key: 'cn:fund:001258',
+      title: '001258 兴业收益增强债券A',
+      market: 'cn',
+      asset_type: 'fund',
+      code: '001258',
+      name: '兴业收益增强债券A',
+      has_messages: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(await screen.findByLabelText('大类'), { target: { value: 'fund' } });
+    fireEvent.change(screen.getByLabelText('代码'), { target: { value: '001258' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始问答' }));
+
+    const similarFundButtons = await screen.findAllByRole('button', { name: '同类基金有哪些' });
+    const enabledButton = similarFundButtons.find((button) => !button.hasAttribute('disabled'));
+    expect(enabledButton).toBeTruthy();
+    fireEvent.click(enabledButton!);
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '同类基金有哪些',
+          profile_id: 'fund_analysis',
+          skills: [],
+          context: expect.objectContaining({
+            fund_code: '001258',
+            asset_type: 'fund',
+          }),
+        }),
+        expect.objectContaining({
+          skillName: '基金问答',
+        }),
+      );
+    });
   });
 
   it('sends fund deep analysis through the fund profile without strategy skills', async () => {

@@ -214,36 +214,12 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
             try:
                 if task_name == "market_cache_refresh":
                     from src.services.portfolio_service import PortfolioService
-                    from src.storage import get_db, PortfolioPosition, StockDaily
-                    from src.services.portfolio_service import EPS
+                    from src.storage import get_db, StockDaily
                     import akshare as ak
                     import yfinance as yf
 
                     svc = PortfolioService()
                     result = svc.refresh_all_prices(refresh_fx=True)
-
-                    # R2/R3 holdings
-                    try:
-                        db = get_db()
-                        with db.get_session() as s:
-                            r2r3_positions = s.query(PortfolioPosition).filter(
-                                PortfolioPosition.quantity > EPS,
-                                PortfolioPosition.asset_risk_class.in_({"R2", "R3"}),
-                            ).all()
-                        for position in r2r3_positions:
-                            symbol = svc._normalize_symbol_for_position(position.symbol)
-                            quote = svc._resolve_latest_price_with_name(symbol, position.asset_category)
-                            if quote is not None and quote.price > 0:
-                                with db.get_session() as s2:
-                                    s2.query(PortfolioPosition).filter_by(id=position.id).update({
-                                        PortfolioPosition.last_price: quote.price,
-                                        PortfolioPosition.price_change_pct: quote.change_pct,
-                                        PortfolioPosition.name: quote.name or position.name,
-                                        PortfolioPosition.updated_at: datetime.now(),
-                                    })
-                                    s2.commit()
-                    except Exception as exc:
-                        logger.warning("R2/R3 price refresh failed: %s", exc)
 
                     # cn_vix / us_vix / bond
                     try:

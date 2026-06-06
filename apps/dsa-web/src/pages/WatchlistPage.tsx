@@ -495,19 +495,15 @@ function WatchCard({
 }) {
   return (
     <div className="rounded-xl border border-subtle bg-surface/60 p-3.5 transition-colors hover:border-subtle-hover">
-      <div className="mb-2 flex justify-end gap-1">
-        <CardActionButton label="上移" disabled={!canMoveUp || actionLoading} onClick={() => onMove?.(item, 'up')}>
-          <ArrowUp className="h-3.5 w-3.5" />
-        </CardActionButton>
-        <CardActionButton label="下移" disabled={!canMoveDown || actionLoading} onClick={() => onMove?.(item, 'down')}>
-          <ArrowDown className="h-3.5 w-3.5" />
-        </CardActionButton>
-        <CardActionButton label="取消关注" disabled={actionLoading} danger onClick={() => onDelete?.(item)}>
-          <Trash2 className="h-3.5 w-3.5" />
-        </CardActionButton>
-      </div>
       <div className={compact ? 'grid gap-3' : 'grid gap-3 xl:grid-cols-[minmax(7rem,0.55fr)_minmax(0,1.85fr)]'}>
-        <InstrumentBlock item={item} />
+        <InstrumentBlock
+          item={item}
+          actionLoading={actionLoading}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
+          onMove={onMove}
+          onDelete={onDelete}
+        />
         <TrafficLights item={item} />
       </div>
     </div>
@@ -529,16 +525,44 @@ function CardActionButton({ label, disabled = false, danger = false, onClick, ch
   );
 }
 
-function InstrumentBlock({ item }: { item: WatchlistItem }) {
+function InstrumentBlock({
+  item,
+  actionLoading = false,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMove,
+  onDelete,
+}: {
+  item: WatchlistItem;
+  actionLoading?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMove?: (item: WatchlistItem, direction: 'up' | 'down') => void;
+  onDelete?: (item: WatchlistItem) => void;
+}) {
   const changeTone = getChangeTone(item.latestChangePct);
   const displaySymbol = item.displaySymbol || item.symbol;
   return (
     <div className="min-w-0">
-      <div className="truncate text-sm font-semibold text-foreground">{item.name || item.symbol}</div>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-sm font-semibold text-foreground">{item.name || item.symbol}</span>
+        {item.signalVerdictCode ? <span className="shrink-0 rounded-full border border-subtle bg-background/70 px-2 py-0.5 text-[10px] font-semibold text-foreground">{item.signalVerdictCode}</span> : null}
+      </div>
       <div className="mt-0.5 text-[11px] text-muted-text">{displaySymbol}</div>
       <div className="mt-2 flex items-baseline gap-2 text-[11px]">
         <span className="font-mono text-base font-semibold text-foreground">{formatPrice(item.latestPrice)}</span>
         <span className={`font-mono font-semibold ${changeTone.className}`}>{formatChangePct(item.latestChangePct)}</span>
+      </div>
+      <div className="mt-2 flex gap-1">
+        <CardActionButton label="上移" disabled={!canMoveUp || actionLoading} onClick={() => onMove?.(item, 'up')}>
+          <ArrowUp className="h-3.5 w-3.5" />
+        </CardActionButton>
+        <CardActionButton label="下移" disabled={!canMoveDown || actionLoading} onClick={() => onMove?.(item, 'down')}>
+          <ArrowDown className="h-3.5 w-3.5" />
+        </CardActionButton>
+        <CardActionButton label="取消关注" disabled={actionLoading} danger onClick={() => onDelete?.(item)}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </CardActionButton>
       </div>
     </div>
   );
@@ -552,23 +576,22 @@ function TrafficLights({ item }: { item: WatchlistItem }) {
         <div className="text-xs text-muted-text">红绿灯待刷新</div>
       ) : (
         <>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold text-foreground">{item.signalVerdictCode || 'WATCH'}</span>
-            <span className="truncate text-[10px] text-muted-text">{item.signalAsOfDate || '--'}</span>
-          </div>
           <div className="grid grid-cols-5 gap-1.5">
             {lights.map((light) => (
               <div key={light.code} title={light.reason} className="flex min-w-0 flex-col items-center gap-1 rounded-lg border border-subtle bg-surface/70 px-1.5 py-1.5">
                 <div className={cn(
                   'h-4 w-4 shrink-0 rounded-full shadow-sm',
-                  light.status === 'G' ? 'bg-green-500' : light.status === 'R' ? 'bg-red-500' : 'bg-yellow-500'
+                  light.status === 'G' ? 'bg-green-500' : light.status === 'R' ? 'bg-red-500' : light.status === 'Y' ? 'bg-yellow-500' : 'bg-slate-400'
                 )} />
                 <span className="text-[9px] font-bold leading-none text-foreground">{light.status}</span>
                 <span className="max-w-full truncate text-[10px] font-medium text-secondary-text">{light.label}</span>
               </div>
             ))}
           </div>
-          {item.signalReason ? <div className="mt-2 line-clamp-2 text-[10px] text-muted-text">{item.signalReason}</div> : null}
+          <div className="mt-2 flex items-start justify-between gap-2 text-[10px] text-muted-text">
+            <span className="line-clamp-2 min-w-0 flex-1">{item.signalReason || '红绿灯已刷新'}</span>
+            <span className="shrink-0 whitespace-nowrap">{item.signalAsOfDate || '--'}</span>
+          </div>
         </>
       )}
     </div>

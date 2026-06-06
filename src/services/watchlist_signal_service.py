@@ -683,19 +683,24 @@ class WatchlistSignalService:
         risk_class = (indicator.get("risk_class") or "").upper()
         
         if risk_class == "R2":
-            max_dd_g = 3.0
+            max_dd_g = 1.0
+            max_dd_y = 2.0
             dd_type = "R2纯债"
         elif risk_class == "R3":
-            max_dd_g = 8.0
+            max_dd_g = 3.0
+            max_dd_y = 5.0
             dd_type = "R3固收+"
         elif risk_class == "R4":
-            max_dd_g = 15.0
+            max_dd_g = 5.0
+            max_dd_y = 10.0
             dd_type = "R4股混"
         elif risk_class == "R5":
-            max_dd_g = 20.0
+            max_dd_g = 10.0
+            max_dd_y = 20.0
             dd_type = "R5高波"
         else:
-            max_dd_g = 20.0
+            max_dd_g = 10.0
+            max_dd_y = 20.0
             dd_type = "基金"
             
         lights = []
@@ -756,11 +761,13 @@ class WatchlistSignalService:
         dd = _safe_float(indicator.get("max_drawdown_1y"))
         if dd is not None and dd >= 0:
             if dd < max_dd_g:
-                lights.append(_fund_light("F_DRAWDOWN", "G", f"{dd_type}回撤{dd:.1f}% < {max_dd_g}%"))
+                lights.append(_fund_light("F_DRAWDOWN", "G", f"{dd_type}回撤{dd:.1f}% < {max_dd_g}%", dd))
+            elif dd <= max_dd_y:
+                lights.append(_fund_light("F_DRAWDOWN", "Y", f"{dd_type}回撤{dd:.1f}% 介于 {max_dd_g}%-{max_dd_y}%", dd))
             else:
-                lights.append(_fund_light("F_DRAWDOWN", "R", f"{dd_type}回撤{dd:.1f}% >= {max_dd_g}%"))
+                lights.append(_fund_light("F_DRAWDOWN", "R", f"{dd_type}回撤{dd:.1f}% > {max_dd_y}%", dd))
         else:
-            lights.append(_fund_light("F_DRAWDOWN", "Y", "近1年回撤数据缺失"))
+            lights.append(_fund_light("F_DRAWDOWN", "N", "近1年回撤数据缺失"))
             
         return lights
 

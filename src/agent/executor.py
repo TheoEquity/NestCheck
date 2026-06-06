@@ -585,6 +585,16 @@ class AgentExecutor:
         # Inject previous analysis context if provided (data reuse from report follow-up)
         if context:
             context_parts = []
+            if context.get("asset_type"):
+                context_parts.append(f"标的类型: {context['asset_type']}")
+            if context.get("fund_code"):
+                context_parts.append(f"基金代码: {context['fund_code']}")
+            if context.get("fund_name"):
+                context_parts.append(f"基金名称: {context['fund_name']}")
+            if context.get("asset_code") and not context.get("fund_code") and not context.get("stock_code"):
+                context_parts.append(f"标的代码: {context['asset_code']}")
+            if context.get("asset_name") and not context.get("fund_name") and not context.get("stock_name"):
+                context_parts.append(f"标的名称: {context['asset_name']}")
             if context.get("stock_code"):
                 context_parts.append(f"股票代码: {context['stock_code']}")
             if context.get("stock_name"):
@@ -604,7 +614,7 @@ class AgentExecutor:
             if context_parts:
                 context_msg = "[系统提供的历史分析上下文，可供参考对比]\n" + "\n".join(context_parts)
                 messages.append({"role": "user", "content": context_msg})
-                messages.append({"role": "assistant", "content": "好的，我已了解该股票的历史分析数据。请告诉我你想了解什么？"})
+                messages.append({"role": "assistant", "content": "好的，我已了解该标的的上下文。请告诉我你想了解什么？"})
 
         messages.append({"role": "user", "content": message})
         baseline_len = len(messages)

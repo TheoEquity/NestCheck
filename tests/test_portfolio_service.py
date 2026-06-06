@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from src.config import Config
 from src.repositories.portfolio_repo import PortfolioBusyError, PortfolioRepository
-from src.services.portfolio_service import _AvgState, PortfolioConflictError, PortfolioOversellError, PortfolioService
+from src.services.portfolio_service import _AvgState, _RealtimePositionQuote, PortfolioConflictError, PortfolioOversellError, PortfolioService
 from src.storage import DatabaseManager, PortfolioDailySnapshot, PortfolioPosition, PortfolioPositionLot, PortfolioTrade
 
 
@@ -951,6 +951,142 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertEqual(actions["total"], 1)
         self.assertEqual(trades["items"][0]["symbol"], "SH600519")
         self.assertEqual(actions["items"][0]["symbol"], "SH600519")
+
+    def test_refresh_all_prices_uses_asset_category_not_risk_class(self) -> None:
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        rows = [
+            PortfolioPosition(
+                account_id=aid,
+                symbol="600519",
+                name="Stock",
+                market="cn",
+                currency="CNY",
+                quantity=10,
+                avg_cost=100,
+                total_cost=1000,
+                last_price=100,
+                asset_category="stock",
+                asset_risk_class="R3",
+            ),
+            PortfolioPosition(
+                account_id=aid,
+                symbol="110022",
+                name="Fund R5",
+                market="cn",
+                currency="CNY",
+                quantity=100,
+                avg_cost=1,
+                total_cost=100,
+                last_price=1,
+                asset_category="fund",
+                asset_risk_class="R5",
+            ),
+            PortfolioPosition(
+                account_id=aid,
+                symbol="CASH_CNY",
+                name="Cash",
+                market="cn",
+                currency="CNY",
+                quantity=1000,
+                avg_cost=1,
+                total_cost=1000,
+                last_price=1,
+                asset_category="cash",
+                asset_risk_class="R1",
+            ),
+        ]
+        with self.db.get_session() as session:
+            session.add_all(rows)
+            session.commit()
+
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=_RealtimePositionQuote(123.0, "test", "Stock New", 1.5)) as realtime_mock, \
+             patch.object(PortfolioService, "_fetch_fund_nav", return_value=(1.2345, "Fund New")) as fund_mock:
+            result = self.service.refresh_all_prices(refresh_indices=False, refresh_fx=False)
+
+        self.assertEqual(result["positions"]["refreshed"], 2)
+        self.assertEqual(result["positions"]["failed"], 0)
+        realtime_mock.assert_called_once_with("600519")
+        fund_mock.assert_called_once_with("110022")
+
+        with self.db.get_session() as session:
+            stock = session.execute(select(PortfolioPosition).where(PortfolioPosition.symbol == "600519")).scalar_one()
+            fund = session.execute(select(PortfolioPosition).where(PortfolioPosition.symbol == "110022")).scalar_one()
+            cash = session.execute(select(PortfolioPosition).where(PortfolioPosition.symbol == "CASH_CNY")).scalar_one()
+
+        self.assertEqual(stock.last_price, 123.0)
+        self.assertEqual(stock.name, "Stock New")
+        self.assertEqual(fund.last_price, 1.2345)
+        self.assertEqual(fund.name, "Fund New")
+        self.assertEqual(cash.last_price, 1.0)
+
+    def test_realtime_revalue_positions_only_refreshes_stocks(self) -> None:
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        rows = [
+            PortfolioPosition(
+                account_id=aid,
+                symbol="600519",
+                name="Stock",
+                market="cn",
+                currency="CNY",
+                quantity=10,
+                avg_cost=100,
+                total_cost=1000,
+                last_price=100,
+                market_value_base=1000,
+                asset_category="stock",
+                asset_risk_class="R3",
+            ),
+            PortfolioPosition(
+                account_id=aid,
+                symbol="110022",
+                name="Fund",
+                market="cn",
+                currency="CNY",
+                quantity=100,
+                avg_cost=1,
+                total_cost=100,
+                last_price=1,
+                market_value_base=100,
+                asset_category="fund",
+                asset_risk_class="R5",
+            ),
+            PortfolioPosition(
+                account_id=aid,
+                symbol="CASH_CNY",
+                name="Cash",
+                market="cn",
+                currency="CNY",
+                quantity=1000,
+                avg_cost=1,
+                total_cost=1000,
+                last_price=1,
+                market_value_base=1000,
+                asset_category="cash",
+                asset_risk_class="R1",
+            ),
+        ]
+        with self.db.get_session() as session:
+            session.add_all(rows)
+            session.commit()
+
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=_RealtimePositionQuote(123.0, "test", "Stock New", 1.5)) as realtime_mock, \
+             patch.object(PortfolioService, "_fetch_fund_nav", return_value=(1.2345, "Fund New")) as fund_mock:
+            result = self.service.realtime_revalue_positions(cost_method="fifo")
+
+        self.assertEqual(result["refreshed"], 1)
+        self.assertEqual(result["failed"], 0)
+        realtime_mock.assert_called_once_with("600519")
+        fund_mock.assert_not_called()
+        by_symbol = {item["symbol"]: item for item in result["items"]}
+
+        self.assertEqual(by_symbol["600519"]["last_price"], 123.0)
+        self.assertEqual(by_symbol["600519"]["name"], "Stock New")
+        self.assertEqual(by_symbol["600519"]["price_source"], "realtime_quote")
+        self.assertEqual(by_symbol["110022"]["last_price"], 1.0)
+        self.assertEqual(by_symbol["110022"]["name"], "Fund")
+        self.assertEqual(by_symbol["CASH_CNY"]["last_price"], 1.0)
 
     def test_event_symbol_filters_match_legacy_suffix_symbols(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")

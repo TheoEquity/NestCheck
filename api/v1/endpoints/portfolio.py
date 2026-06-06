@@ -428,7 +428,7 @@ def list_positions(
     "/positions/realtime-revalue",
     response_model=PortfolioPositionListResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Realtime revalue R4/R5 positions without persisting cached prices",
+    summary="Realtime revalue stock positions without persisting cached prices",
 )
 def realtime_revalue_positions(
     account_id: Optional[int] = Query(None, description="Optional account id"),

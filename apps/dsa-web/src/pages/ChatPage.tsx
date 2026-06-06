@@ -43,6 +43,7 @@ const FUND_QUICK_QUESTIONS: QuickQuestion[] = [
   { label: '适合长期持有吗' },
   { label: '基金经理和风格是什么' },
   { label: '申购赎回和费用情况如何' },
+  { label: '同类基金有哪些' },
 ];
 
 const MAX_SELECTED_SKILLS = 3;

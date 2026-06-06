@@ -76,7 +76,7 @@ def test_resolve_chat_topic_overwrites_fund_name_from_code(tmp_path: Path) -> No
         response = client.get(
             "/api/v1/agent/chat/topics/resolve",
             params={
-                "stock_code": "000001",
+                "stock_code": "470018",
                 "stock_name": "用户手填名称",
                 "market": "cn",
                 "asset_type": "fund",
@@ -87,10 +87,10 @@ def test_resolve_chat_topic_overwrites_fund_name_from_code(tmp_path: Path) -> No
     payload = response.json()
     assert payload["found"] is True
     assert payload["asset_type"] == "fund"
-    assert payload["code"] == "000001"
+    assert payload["code"] == "470018"
     assert payload["name"] == "华夏成长混合"
-    assert payload["title"] == "000001 华夏成长混合"
-    resolver.assert_called_once_with("000001")
+    assert payload["title"] == "470018 华夏成长混合"
+    resolver.assert_called_once_with("470018")
 
 
 def test_prepare_chat_session_accepts_fund_context(tmp_path: Path) -> None:

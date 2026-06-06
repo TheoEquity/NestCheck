@@ -13,6 +13,7 @@ import logging
 import hashlib
 import json
 import math
+import re
 from datetime import date, datetime, timedelta
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
@@ -441,6 +442,85 @@ def _fund_performance_from_nav(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "monthly_win_rate_12m_pct": _monthly_win_rate(rows, 12),
         "data_points": len(rows),
     }
+
+
+def _map_fund_rank_category(fund_type: Optional[str]) -> str:
+    text = str(fund_type or "").upper()
+    if "QDII" in text:
+        return "QDII"
+    if "FOF" in text:
+        return "FOF"
+    if "指数" in text:
+        return "指数型"
+    if "债" in text:
+        return "债券型"
+    if "股票" in text:
+        return "股票型"
+    if "混合" in text:
+        return "混合型"
+    return "全部"
+
+
+def _rank_bucket_label(rank: int, total: int, bucket_size_pct: int = 20) -> str:
+    if total <= 0:
+        return "unknown"
+    bucket_count = max(1, int(100 / bucket_size_pct))
+    bucket_index = min(bucket_count - 1, int(((max(1, rank) - 1) / total) * bucket_count))
+    start = bucket_index * bucket_size_pct
+    end = min(100, start + bucket_size_pct)
+    return f"{start}-{end}%"
+
+
+def _fund_rank_profiles(records: List[Dict[str, Any]], periods: List[str]) -> Dict[str, Dict[str, Any]]:
+    profiles: Dict[str, Dict[str, Any]] = {}
+    for period in periods:
+        valid_rows = []
+        for row in records:
+            value = _safe_float(row.get(period))
+            code = _normalize_fund_code(row.get("基金代码"))
+            if code and value is not None:
+                valid_rows.append((code, value))
+        valid_rows.sort(key=lambda item: item[1], reverse=True)
+        total = len(valid_rows)
+        for rank, (code, value) in enumerate(valid_rows, start=1):
+            profiles.setdefault(code, {})[period] = {
+                "return_pct": value,
+                "rank": rank,
+                "total": total,
+                "percentile_bucket": _rank_bucket_label(rank, total),
+            }
+    return profiles
+
+
+def _parse_chinese_amount_yi(value: Any) -> Optional[float]:
+    text = _clean_text(value)
+    if not text:
+        return None
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", text.replace(",", ""))
+    number = _safe_float(match.group(0)) if match else None
+    if number is None:
+        return None
+    if "万" in text:
+        return round(number / 10000, 4)
+    if "亿" in text:
+        return round(number, 4)
+    return round(number, 4)
+
+
+def _fund_scale_yi_from_overview(row: Dict[str, Any], unit_nav: Optional[float]) -> Optional[float]:
+    share_yi = _parse_chinese_amount_yi(row.get("份额规模"))
+    if share_yi is not None and unit_nav is not None:
+        return round(share_yi * unit_nav, 2)
+    return _parse_chinese_amount_yi(row.get("净资产规模"))
+
+
+def _fund_one_year_drawdown_from_analysis(records: List[Dict[str, Any]]) -> Optional[float]:
+    for row in records:
+        period = _clean_text(row.get("周期"))
+        drawdown = _safe_float(row.get("最大回撤"))
+        if period == "近1年":
+            return abs(drawdown) if drawdown is not None else None
+    return None
 
 
 # ============================================================
@@ -1054,6 +1134,211 @@ get_fund_analysis_context_tool = ToolDefinition(
 
 
 # ============================================================
+# get_similar_funds_by_rank_profile
+# ============================================================
+
+def _handle_get_similar_funds_by_rank_profile(fund_code: str, limit: int = 10, min_scale_yi: float = 5.0) -> dict:
+    """Find open-end funds with the same category and similar return-rank profile."""
+    code = _normalize_fund_code(fund_code)
+    if not code:
+        return {"status": "failed", "error": "fund_code is required"}
+
+    result_limit = max(1, min(int(limit or 10), 20))
+    min_scale = max(0.0, float(min_scale_yi if min_scale_yi is not None else 5.0))
+    periods = ["近3月", "近1年", "近3年"]
+    flags: List[str] = []
+
+    try:
+        import akshare as ak
+    except Exception as exc:
+        return {"status": "failed", "fund_code": code, "error": f"akshare unavailable: {exc}"}
+
+    fund_type = None
+    fund_name = None
+    try:
+        overview = _df_records(ak.fund_overview_em(symbol=code), limit=1)
+        if overview:
+            fund_type = _clean_text(overview[0].get("基金类型"))
+            fund_name = _clean_text(overview[0].get("基金简称")) or _clean_text(overview[0].get("基金全称"))
+    except Exception as exc:
+        flags.append(f"fund_overview_failed: {exc}")
+
+    category = _map_fund_rank_category(fund_type)
+    try:
+        rank_df = ak.fund_open_fund_rank_em(symbol=category)
+        records = _df_records(rank_df)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "fund_code": code,
+            "fund_name": fund_name,
+            "fund_type": fund_type,
+            "rank_category": category,
+            "error": f"fund rank fetch failed: {exc}",
+            "data_flags": flags,
+        }
+
+    current_row = None
+    normalized_records = []
+    for row in records:
+        row_code = _normalize_fund_code(row.get("基金代码"))
+        if not row_code:
+            continue
+        normalized = dict(row)
+        normalized["基金代码"] = row_code
+        normalized_records.append(normalized)
+        if row_code == code:
+            current_row = normalized
+
+    if current_row is None:
+        return {
+            "status": "empty",
+            "fund_code": code,
+            "fund_name": fund_name,
+            "fund_type": fund_type,
+            "rank_category": category,
+            "message": "current fund not found in open fund rank table",
+            "data_flags": flags,
+        }
+
+    profiles = _fund_rank_profiles(normalized_records, periods)
+    current_profile = profiles.get(code, {})
+    matched_periods = [period for period in periods if period in current_profile]
+    missing_periods = [period for period in periods if period not in current_profile]
+    for period in missing_periods:
+        flags.append(f"current_{period}_rank_missing")
+
+    if not matched_periods:
+        return {
+            "status": "empty",
+            "fund_code": code,
+            "fund_name": fund_name or _clean_text(current_row.get("基金简称")),
+            "fund_type": fund_type,
+            "rank_category": category,
+            "rank_profile": {},
+            "similar_funds": [],
+            "data_flags": flags,
+        }
+
+    current_buckets = {
+        period: current_profile[period]["percentile_bucket"]
+        for period in matched_periods
+    }
+    candidate_pool = []
+    for row in normalized_records:
+        row_code = row.get("基金代码")
+        if row_code == code:
+            continue
+        profile = profiles.get(row_code, {})
+        if not all(profile.get(period, {}).get("percentile_bucket") == bucket for period, bucket in current_buckets.items()):
+            continue
+        diff = sum(
+            abs((profile[period].get("return_pct") or 0.0) - (current_profile[period].get("return_pct") or 0.0))
+            for period in matched_periods
+        )
+        candidate_pool.append({
+            "fund_code": row_code,
+            "fund_name": _clean_text(row.get("基金简称")),
+            "date": _clean_text(row.get("日期")),
+            "unit_nav": _safe_float(row.get("单位净值")),
+            "period_returns_pct": {
+                period: profile[period]["return_pct"]
+                for period in matched_periods
+                if period in profile
+            },
+            "rank_profile": {
+                period: profile[period]
+                for period in matched_periods
+                if period in profile
+            },
+            "fee": _clean_text(row.get("手续费")),
+            "matched_periods": len(matched_periods),
+            "return_diff_sum_pct": round(diff, 2),
+        })
+
+    candidate_pool.sort(key=lambda item: (item["return_diff_sum_pct"], item["fund_code"]))
+    candidates = []
+    filtered_small_scale = 0
+    scale_checked = 0
+    for item in candidate_pool:
+        if len(candidates) >= result_limit:
+            break
+        scale_yi = None
+        try:
+            overview_rows = _df_records(ak.fund_overview_em(symbol=item["fund_code"]), limit=1)
+            if overview_rows:
+                scale_yi = _fund_scale_yi_from_overview(overview_rows[0], item.get("unit_nav"))
+        except Exception as exc:
+            flags.append(f"candidate_scale_failed_{item['fund_code']}: {exc}")
+        scale_checked += 1
+        item["estimated_scale_yi"] = scale_yi
+        if scale_yi is not None and scale_yi < min_scale:
+            filtered_small_scale += 1
+            continue
+        try:
+            analysis_rows = _df_records(ak.fund_individual_analysis_xq(symbol=item["fund_code"], timeout=15))
+            item["max_drawdown_1y_pct"] = _fund_one_year_drawdown_from_analysis(analysis_rows)
+        except Exception as exc:
+            item["max_drawdown_1y_pct"] = None
+            flags.append(f"candidate_drawdown_failed_{item['fund_code']}: {exc}")
+        candidates.append(item)
+
+    return {
+        "status": "ok",
+        "fund_code": code,
+        "fund_name": fund_name or _clean_text(current_row.get("基金简称")),
+        "fund_type": fund_type,
+        "rank_category": category,
+        "bucket_size_pct": 20,
+        "min_scale_yi": min_scale,
+        "matched_periods": matched_periods,
+        "rank_profile": current_profile,
+        "display_only_fields": ["max_drawdown_1y_pct"],
+        "similar_count": len(candidates),
+        "candidate_pool_count": len(candidate_pool),
+        "scale_checked_count": scale_checked,
+        "filtered_small_scale_count": filtered_small_scale,
+        "similar_funds": candidates,
+        "data_flags": flags,
+    }
+
+
+get_similar_funds_by_rank_profile_tool = ToolDefinition(
+    name="get_similar_funds_by_rank_profile",
+    description=(
+        "Find funds similar to the current open-end fund by category and 20-percentile return-rank buckets. "
+        "Use only when the user asks for peer funds, similar funds, alternatives, or comparable funds. "
+        "It compares same-category funds across available 3-month, 1-year and 3-year return rankings, "
+        "excludes funds with estimated scale below 500M CNY by default, and includes 1-year max drawdown "
+        "for display only."
+    ),
+    parameters=[
+        ToolParameter(
+            name="fund_code",
+            type="string",
+            description="6-digit fund code, e.g., '000001'.",
+        ),
+        ToolParameter(
+            name="limit",
+            type="integer",
+            description="Maximum number of similar funds to return, default 10, max 20.",
+            required=False,
+            default=10,
+        ),
+        ToolParameter(
+            name="min_scale_yi",
+            type="number",
+            description="Minimum estimated fund scale in 100M CNY, default 5. Funds below this scale are excluded.",
+            required=False,
+            default=5.0,
+        ),
+    ],
+    handler=_handle_get_similar_funds_by_rank_profile,
+    category="data",
+)
+
+
+# ============================================================
 # Export all data tools
 # ============================================================
 
@@ -1065,6 +1350,7 @@ ALL_DATA_TOOLS = [
     get_stock_info_tool,
     get_portfolio_snapshot_tool,
     get_fund_analysis_context_tool,
+    get_similar_funds_by_rank_profile_tool,
 ]
 
 

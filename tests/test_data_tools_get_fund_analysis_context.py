@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.agent.tools.data_tools import _handle_get_fund_analysis_context
+from src.agent.tools.data_tools import _handle_get_fund_analysis_context, _handle_get_similar_funds_by_rank_profile
 
 
 class FundAnalysisContextToolTestCase(unittest.TestCase):
@@ -106,6 +106,61 @@ class FundAnalysisContextToolTestCase(unittest.TestCase):
         self.assertEqual(result["holdings"]["top_stocks"][0]["股票名称"], "贵州茅台")
         self.assertEqual(result["holdings"]["top_stock_weight_pct"], 5.0)
         self.assertNotIn("rating", result)
+
+    def test_get_similar_funds_by_rank_profile_matches_same_20_percentile_buckets(self) -> None:
+        overview = pd.DataFrame([
+            {"基金简称": "测试成长混合", "基金类型": "混合型-偏股"}
+        ])
+        rank = pd.DataFrame([
+            {"基金代码": "000001", "基金简称": "测试成长混合", "日期": "2026-06-05", "单位净值": 1.10, "近3月": 90, "近1年": 90, "近3年": 90, "手续费": "0.15%"},
+            {"基金代码": "000002", "基金简称": "相似混合A", "日期": "2026-06-05", "单位净值": 1.20, "近3月": 89, "近1年": 88, "近3年": 87, "手续费": "0.15%"},
+            {"基金代码": "000003", "基金简称": "相似混合B", "日期": "2026-06-05", "单位净值": 1.30, "近3月": 88, "近1年": 87, "近3年": 86, "手续费": "0.20%"},
+            {"基金代码": "000004", "基金简称": "一年不相似", "日期": "2026-06-05", "单位净值": 1.40, "近3月": 87, "近1年": 10, "近3年": 85, "手续费": "0.20%"},
+            {"基金代码": "000005", "基金简称": "三月不相似", "日期": "2026-06-05", "单位净值": 1.50, "近3月": 10, "近1年": 86, "近3年": 84, "手续费": "0.20%"},
+            {"基金代码": "000006", "基金简称": "样本6", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 9, "近1年": 9, "近3年": 9, "手续费": "0.20%"},
+            {"基金代码": "000007", "基金简称": "样本7", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 8, "近1年": 8, "近3年": 8, "手续费": "0.20%"},
+            {"基金代码": "000008", "基金简称": "样本8", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 7, "近1年": 7, "近3年": 7, "手续费": "0.20%"},
+            {"基金代码": "000009", "基金简称": "样本9", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 6, "近1年": 6, "近3年": 6, "手续费": "0.20%"},
+            {"基金代码": "000010", "基金简称": "样本10", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 5, "近1年": 5, "近3年": 5, "手续费": "0.20%"},
+            {"基金代码": "000011", "基金简称": "样本11", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 4, "近1年": 4, "近3年": 4, "手续费": "0.20%"},
+            {"基金代码": "000012", "基金简称": "样本12", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 3, "近1年": 3, "近3年": 3, "手续费": "0.20%"},
+            {"基金代码": "000013", "基金简称": "样本13", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 2, "近1年": 2, "近3年": 2, "手续费": "0.20%"},
+            {"基金代码": "000014", "基金简称": "样本14", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 1, "近1年": 1, "近3年": 1, "手续费": "0.20%"},
+            {"基金代码": "000015", "基金简称": "样本15", "日期": "2026-06-05", "单位净值": 1.00, "近3月": 0, "近1年": 0, "近3年": 0, "手续费": "0.20%"},
+        ])
+
+        fake_ak = MagicMock()
+        fake_ak.fund_overview_em.return_value = overview
+        fake_ak.fund_open_fund_rank_em.return_value = rank
+
+        def overview_by_code(symbol):
+            if symbol == "000002":
+                return pd.DataFrame([{"基金简称": "相似混合A", "份额规模": "2.00亿份", "净资产规模": "2.40亿元"}])
+            if symbol == "000003":
+                return pd.DataFrame([{"基金简称": "相似混合B", "份额规模": "6.00亿份", "净资产规模": "7.80亿元"}])
+            return overview
+
+        fake_ak.fund_overview_em.side_effect = overview_by_code
+        fake_ak.fund_individual_analysis_xq.return_value = pd.DataFrame([
+            {"周期": "近1年", "最大回撤": "6.10"},
+            {"周期": "近3年", "最大回撤": "12.30"},
+        ])
+
+        with patch.dict("sys.modules", {"akshare": fake_ak}):
+            result = _handle_get_similar_funds_by_rank_profile("1", limit=10)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["fund_code"], "000001")
+        self.assertEqual(result["rank_category"], "混合型")
+        self.assertEqual(result["bucket_size_pct"], 20)
+        self.assertEqual(result["min_scale_yi"], 5.0)
+        self.assertEqual(result["rank_profile"]["近3月"]["percentile_bucket"], "0-20%")
+        self.assertEqual([item["fund_code"] for item in result["similar_funds"]], ["000003"])
+        self.assertEqual(result["filtered_small_scale_count"], 1)
+        self.assertEqual(result["similar_funds"][0]["estimated_scale_yi"], 7.8)
+        self.assertEqual(result["display_only_fields"], ["max_drawdown_1y_pct"])
+        self.assertEqual(result["similar_funds"][0]["max_drawdown_1y_pct"], 6.1)
+        self.assertNotIn("max_drawdown_pct", result["similar_funds"][0])
 
 
 if __name__ == "__main__":

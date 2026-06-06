@@ -131,6 +131,44 @@ class TestAgentExecutor(unittest.TestCase):
         assert messages[4]["role"] == "assistant"
         assert messages[-1] == {"role": "user", "content": "当前问题"}
 
+    def test_chat_injects_fund_context_before_current_user_message(self):
+        registry = _make_registry_with_echo()
+        adapter = _make_mock_adapter()
+        adapter._config = MagicMock()
+        executor = AgentExecutor(registry, adapter, max_steps=2)
+        captured = {}
+
+        def fake_run_loop(messages, tool_decls, parse_dashboard, progress_callback=None):
+            captured["messages"] = messages
+            return AgentResult(success=True, content="assistant reply")
+
+        with patch.object(executor, "_run_loop", side_effect=fake_run_loop):
+            with patch(
+                "src.agent.executor.build_agent_chat_context_bundle",
+                return_value=SimpleNamespace(context_messages=[], diagnostics={}),
+            ):
+                with patch("src.agent.conversation.conversation_manager.get_or_create"):
+                    with patch("src.agent.conversation.conversation_manager.add_message"):
+                        executor.chat(
+                            "请对当前基金进行深度分析",
+                            "session-fund",
+                            context={
+                                "agent_chat_mode": True,
+                                "asset_type": "fund",
+                                "asset_code": "001258",
+                                "asset_name": "兴业收益增强债券A",
+                                "fund_code": "001258",
+                                "fund_name": "兴业收益增强债券A",
+                            },
+                        )
+
+        context_message = captured["messages"][1]
+        assert context_message["role"] == "user"
+        assert "标的类型: fund" in context_message["content"]
+        assert "基金代码: 001258" in context_message["content"]
+        assert "基金名称: 兴业收益增强债券A" in context_message["content"]
+        assert captured["messages"][-1] == {"role": "user", "content": "请对当前基金进行深度分析"}
+
     def test_prompt_omits_hardcoded_trend_baseline_when_default_policy_is_empty(self):
         """Explicit skill runs should not silently keep the legacy trend baseline."""
         registry = _make_registry_with_echo()

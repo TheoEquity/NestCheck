@@ -1171,8 +1171,8 @@ class PortfolioService:
         today = date.today()
 
         for item in data["items"]:
-            risk_class = (item.get("asset_risk_class") or "").strip().upper()
-            if risk_class not in REALTIME_ASSET_RISK_CLASSES:
+            asset_category = (item.get("asset_category") or "").strip().lower()
+            if asset_category != "stock":
                 items.append(item)
                 continue
 
@@ -2592,7 +2592,7 @@ class PortfolioService:
         refresh_indices: bool = True,
         refresh_fx: bool = False,
     ) -> Dict[str, Any]:
-        """Refresh realtime R4/R5 positions and dashboard market quotes."""
+        """Refresh non-cash position prices and dashboard market quotes."""
         results: Dict[str, Any] = {}
 
         if refresh_positions:
@@ -2613,7 +2613,7 @@ class PortfolioService:
         with db.get_session() as s:
             positions = s.query(PortfolioPosition).filter(
                 PortfolioPosition.quantity > EPS,
-                PortfolioPosition.asset_risk_class.in_(REALTIME_ASSET_RISK_CLASSES),
+                PortfolioPosition.asset_category.in_(("stock", "fund")),
             ).all()
 
         refreshed = 0

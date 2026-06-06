@@ -19,12 +19,19 @@ class ChatTopic:
 
 _HK_RE = re.compile(r"(?<![A-Z0-9])(?:HK)?(0\d{4}|[1-9]\d{4})(?!\d)", re.IGNORECASE)
 _CN_RE = re.compile(r"(?<!\d)(?:SH|SZ)?([036]\d{5}|[159]\d{5})(?!\d)", re.IGNORECASE)
+_FUND_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
 _US_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{1,5}(?:[.-][A-Z])?)(?![A-Z0-9])")
 
 
 def _normalize_code(message: str, *, allow_us_without_hint: bool = False) -> Optional[tuple[str, str]]:
     text = message or ""
     lower = text.lower()
+
+    fund_hint = "fund" in lower or any(word in text for word in ("基金", "ETF", "etf", "货基", "固收"))
+    if fund_hint:
+        fund = _FUND_RE.search(text)
+        if fund:
+            return "cn", fund.group(1)
 
     cn = _CN_RE.search(lower)
     if cn:

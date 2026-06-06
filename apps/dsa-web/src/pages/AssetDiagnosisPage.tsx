@@ -11,14 +11,14 @@ const benchmarkRows = [
 ];
 
 const AssetDiagnosisPage: React.FC = () => {
-  const { positions, snapshot, risk, isLoading, error, isRefreshing, refreshPrices } = usePortfolioOverview();
+  const { positions, risk, isLoading, error, isRefreshing, refreshPrices } = usePortfolioOverview();
 
   useEffect(() => {
     document.title = '资产诊断 - NestCheck';
   }, []);
 
-  const totalMarketValue = snapshot?.totalMarketValue ?? positions.reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0);
-  const totalPnl = snapshot?.unrealizedPnl ?? positions.reduce((sum, item) => sum + Number(item.unrealizedPnlBase || 0), 0);
+  const totalMarketValue = positions.reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0);
+  const totalPnl = positions.reduce((sum, item) => sum + Number(item.unrealizedPnlBase || 0), 0);
   const totalCost = positions.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
 

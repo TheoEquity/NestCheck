@@ -168,6 +168,7 @@ export interface PortfolioDrawdownBlock {
 export interface PortfolioStopLossItem {
   accountId: number;
   symbol: string;
+  assetCategory?: string;
   avgCost: number;
   lastPrice: number;
   lossPct: number;
@@ -186,21 +187,28 @@ export interface PortfolioRiskResponse {
     topWeightPct: number;
     alert: boolean;
     topPositions: PortfolioConcentrationItem[];
+    r4R5PlannedPct: number;
+    r4R5ActualPct: number;
   };
-  sectorConcentration: {
-    totalMarketValue: number;
-    topWeightPct: number;
+  singleNameConcentration: {
     alert: boolean;
-    topSectors: PortfolioSectorConcentrationItem[];
-    coverage: Record<string, number>;
-    errors: string[];
+    stockBreachCount: number;
+    fundBreachCount: number;
+    thresholds: Record<string, number>;
+    items: Array<{
+      symbol: string;
+      assetCategory: string;
+      marketValueBase: number;
+      weightPct: number;
+      thresholdPct: number;
+      isAlert: boolean;
+    }>;
   };
   drawdown: PortfolioDrawdownBlock;
   stopLoss: {
-    nearAlert: boolean;
     triggeredCount: number;
     nearCount: number;
-    items: PortfolioStopLossItem[];
+    items: Array<PortfolioStopLossItem & { assetCategory?: string }>;
   };
 }
 

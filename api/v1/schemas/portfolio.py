@@ -342,7 +342,7 @@ class PortfolioRiskResponse(BaseModel):
     currency: str
     thresholds: Dict[str, Any] = Field(default_factory=dict)
     concentration: Dict[str, Any] = Field(default_factory=dict)
-    sector_concentration: Dict[str, Any] = Field(default_factory=dict)
+    single_name_concentration: Dict[str, Any] = Field(default_factory=dict)
     drawdown: Dict[str, Any] = Field(default_factory=dict)
     stop_loss: Dict[str, Any] = Field(default_factory=dict)
 

@@ -24,8 +24,6 @@ class PortfolioRiskService:
         self.repo = repo or PortfolioRepository()
         self.portfolio_service = portfolio_service or PortfolioService(repo=self.repo)
         self.config = config or get_config()
-        self._data_manager = None
-        self._data_manager_init_error = ""
 
     def get_risk_report(
         self,
@@ -42,8 +40,8 @@ class PortfolioRiskService:
         )
 
         thresholds = {
-            "concentration_alert_pct": float(getattr(self.config, "portfolio_risk_concentration_alert_pct", 35.0)),
-            "drawdown_alert_pct": float(getattr(self.config, "portfolio_risk_drawdown_alert_pct", 15.0)),
+            "concentration_alert_pct": self._resolve_concentration_threshold(snapshot, as_of_date),
+            "drawdown_alert_pct": self._resolve_drawdown_threshold(),
             "stop_loss_alert_pct": float(getattr(self.config, "portfolio_risk_stop_loss_alert_pct", 10.0)),
             "stop_loss_near_ratio": float(getattr(self.config, "portfolio_risk_stop_loss_near_ratio", 0.8)),
             "lookback_days": int(getattr(self.config, "portfolio_risk_lookback_days", 180)),
@@ -54,9 +52,8 @@ class PortfolioRiskService:
             thresholds["concentration_alert_pct"],
             as_of_date=as_of_date,
         )
-        sector_concentration = self._build_sector_concentration(
+        single_name_concentration = self._build_single_name_concentration(
             snapshot,
-            thresholds["concentration_alert_pct"],
             as_of_date=as_of_date,
         )
         self._ensure_drawdown_snapshot_window(
@@ -81,10 +78,53 @@ class PortfolioRiskService:
             "currency": snapshot["currency"],
             "thresholds": thresholds,
             "concentration": concentration,
-            "sector_concentration": sector_concentration,
+            "single_name_concentration": single_name_concentration,
             "drawdown": drawdown,
             "stop_loss": stop_loss,
         }
+
+    @staticmethod
+    def _resolve_drawdown_threshold() -> float:
+        """Resolve drawdown alert threshold from active allocation plan.
+
+        Returns max_drawdown * 0.9 from the active plan, or defaults to 6.0 (%)
+        when no active plan exists.
+        """
+        from src.storage import get_db, AssetAllocationPlan
+
+        db = get_db()
+        try:
+            with db.get_session() as session:
+                active_plan = session.query(AssetAllocationPlan).filter(
+                    AssetAllocationPlan.is_active == True
+                ).first()
+                if active_plan and active_plan.max_drawdown is not None:
+                    return float(active_plan.max_drawdown) * 90.0
+        except Exception:
+            pass
+        return 6.0
+
+    @staticmethod
+    def _resolve_concentration_threshold(snapshot: Dict[str, Any], as_of_date: date) -> float:
+        """Resolve concentration alert threshold from active allocation plan.
+
+        Computes the actual R4+R5 weight from current positions and compares
+        with the planned R4+R5 ratio. Returns the planned ratio as threshold.
+        When no active plan exists, defaults to 35.0.
+        """
+        from src.storage import get_db, AssetAllocationPlan
+
+        db = get_db()
+        try:
+            with db.get_session() as session:
+                active_plan = session.query(AssetAllocationPlan).filter(
+                    AssetAllocationPlan.is_active == True
+                ).first()
+                if active_plan:
+                    return float(active_plan.r4_ratio or 0.0) + float(active_plan.r5_ratio or 0.0)
+        except Exception:
+            pass
+        return 35.0
 
     def _ensure_drawdown_snapshot_window(
         self,
@@ -163,8 +203,15 @@ class PortfolioRiskService:
         return max(window_start, min(first_activity_candidates))
 
     def _build_concentration(self, snapshot: Dict[str, Any], threshold_pct: float, *, as_of_date: date) -> Dict[str, Any]:
-        total_mv = float(snapshot.get("total_market_value", 0.0) or 0.0)
+        """Build concentration risk block based on R4+R5 equity allocation.
+
+        Compares actual R4+R5 weight against the planned ratio from active
+        allocation plan. Alert triggers when actual exceeds planned.
+        """
+        total_mv = float(snapshot.get("total_equity", 0.0) or 0.0)
+        r4_r5_exposure = 0.0
         exposure_by_symbol: Dict[str, float] = {}
+
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
                 symbol = str(pos.get("symbol") or "").strip().upper()
@@ -180,50 +227,61 @@ class PortfolioRiskService:
                 )
                 exposure_by_symbol[symbol] = exposure_by_symbol.get(symbol, 0.0) + converted
 
+                risk_class = str(pos.get("asset_risk_class") or "").strip().upper()
+                if risk_class in ("R4", "R5"):
+                    r4_r5_exposure += converted
+
+        r4_r5_weight = (r4_r5_exposure / total_mv * 100.0) if total_mv > 0 else 0.0
+
         rows = []
-        for symbol, exposure in exposure_by_symbol.items():
+        for symbol, exposure in sorted(exposure_by_symbol.items(), key=lambda item: item[1], reverse=True):
             weight = (exposure / total_mv * 100.0) if total_mv > 0 else 0.0
             rows.append(
                 {
                     "symbol": symbol,
                     "market_value_base": round(exposure, 6),
                     "weight_pct": round(weight, 4),
-                    "is_alert": bool(weight >= threshold_pct),
+                    "is_alert": False,
                 }
             )
-        rows.sort(key=lambda item: item["market_value_base"], reverse=True)
 
-        top_weight = rows[0]["weight_pct"] if rows else 0.0
         return {
             "total_market_value": round(total_mv, 6),
-            "top_weight_pct": round(float(top_weight), 4),
-            "alert": bool(top_weight >= threshold_pct),
+            "top_weight_pct": round(r4_r5_weight, 4),
+            "alert": bool(threshold_pct > 0 and r4_r5_weight > threshold_pct),
             "top_positions": rows[:10],
+            "r4_r5_planned_pct": round(threshold_pct, 4),
+            "r4_r5_actual_pct": round(r4_r5_weight, 4),
         }
 
-    def _build_sector_concentration(
+    def _build_single_name_concentration(
         self,
         snapshot: Dict[str, Any],
-        threshold_pct: float,
         *,
         as_of_date: date,
     ) -> Dict[str, Any]:
-        total_mv = float(snapshot.get("total_market_value", 0.0) or 0.0)
-        sector_exposure: Dict[str, float] = {}
-        sector_symbols: Dict[str, set] = {}
-        coverage = {
-            "classified_count": 0,
-            "unclassified_count": 0,
-            "failed_count": 0,
+        """Build single-name concentration risk block.
+
+        Alerts when:
+        - Any single stock exceeds 50% of total stock assets
+        - Any single fund exceeds 30% of total fund assets
+        Returns count of breached items separately for stocks and funds.
+        """
+        thresholds = {
+            "stock_alert_pct": 50.0,
+            "fund_alert_pct": 30.0,
         }
-        errors: List[str] = []
-        board_cache: Dict[Tuple[str, str], str] = {}
+
+        total_by_category: Dict[str, float] = {}
+        exposure_by_name: Dict[str, Dict[str, float]] = {}
 
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
+                category = str(pos.get("asset_category") or "").strip().lower()
                 symbol = str(pos.get("symbol") or "").strip().upper()
-                market = str(pos.get("market") or account.get("market") or "").strip().lower()
-                if not symbol:
+                if not category or not symbol:
+                    continue
+                if category not in ("stock", "fund"):
                     continue
 
                 market_value = float(pos.get("market_value_base") or 0.0)
@@ -235,116 +293,45 @@ class PortfolioRiskService:
                     as_of_date=as_of_date,
                 )
 
-                sector = self._resolve_primary_sector(
-                    symbol=symbol,
-                    market=market,
-                    board_cache=board_cache,
-                    coverage=coverage,
-                    errors=errors,
-                )
-                sector_exposure[sector] = sector_exposure.get(sector, 0.0) + converted
-                sector_symbols.setdefault(sector, set()).add(symbol)
+                total_by_category[category] = total_by_category.get(category, 0.0) + converted
+                if category not in exposure_by_name:
+                    exposure_by_name[category] = {}
+                exposure_by_name[category][symbol] = exposure_by_name[category].get(symbol, 0.0) + converted
 
-        rows = []
-        for sector, exposure in sector_exposure.items():
-            weight = (exposure / total_mv * 100.0) if total_mv > 0 else 0.0
-            rows.append(
-                {
-                    "sector": sector,
-                    "market_value_base": round(exposure, 6),
-                    "weight_pct": round(weight, 4),
-                    "symbol_count": len(sector_symbols.get(sector, set())),
-                    "is_alert": bool(weight >= threshold_pct),
-                }
-            )
-        rows.sort(key=lambda item: item["market_value_base"], reverse=True)
-        top_weight = rows[0]["weight_pct"] if rows else 0.0
+        stock_breach_count = 0
+        fund_breach_count = 0
+        alerts: List[Dict[str, Any]] = []
+
+        for category, names in exposure_by_name.items():
+            total = total_by_category.get(category, 0.0)
+            threshold = thresholds.get(f"{category}_alert_pct", 50.0)
+
+            for symbol, exposure in sorted(names.items(), key=lambda item: item[1], reverse=True):
+                weight = (exposure / total * 100.0) if total > 0 else 0.0
+                is_alert = weight > threshold
+                if is_alert:
+                    if category == "stock":
+                        stock_breach_count += 1
+                    else:
+                        fund_breach_count += 1
+                alerts.append(
+                    {
+                        "symbol": symbol,
+                        "asset_category": category,
+                        "market_value_base": round(exposure, 6),
+                        "weight_pct": round(weight, 4),
+                        "threshold_pct": threshold,
+                        "is_alert": is_alert,
+                    }
+                )
 
         return {
-            "total_market_value": round(total_mv, 6),
-            "top_weight_pct": round(float(top_weight), 4),
-            "alert": bool(top_weight >= threshold_pct),
-            "top_sectors": rows[:10],
-            "coverage": coverage,
-            "errors": errors[:20],
+            "alert": stock_breach_count > 0 or fund_breach_count > 0,
+            "stock_breach_count": stock_breach_count,
+            "fund_breach_count": fund_breach_count,
+            "thresholds": thresholds,
+            "items": alerts[:20],
         }
-
-    def _resolve_primary_sector(
-        self,
-        *,
-        symbol: str,
-        market: str,
-        board_cache: Dict[Tuple[str, str], str],
-        coverage: Dict[str, int],
-        errors: List[str],
-    ) -> str:
-        cache_key = (symbol, market)
-        if cache_key in board_cache:
-            return board_cache[cache_key]
-
-        if market != "cn":
-            coverage["unclassified_count"] += 1
-            board_cache[cache_key] = "UNCLASSIFIED"
-            return board_cache[cache_key]
-
-        try:
-            boards = self._fetch_belong_boards(symbol)
-            sector_name = self._pick_primary_board_name(boards)
-            if sector_name:
-                coverage["classified_count"] += 1
-                board_cache[cache_key] = sector_name
-                return board_cache[cache_key]
-        except Exception as exc:
-            coverage["failed_count"] += 1
-            errors.append(f"{symbol}: {exc}")
-
-        coverage["unclassified_count"] += 1
-        board_cache[cache_key] = "UNCLASSIFIED"
-        return board_cache[cache_key]
-
-    def _fetch_belong_boards(self, symbol: str) -> List[Dict[str, Any]]:
-        manager = self._get_data_manager()
-        if manager is None:
-            return []
-        result = manager.get_belong_boards(symbol)
-        if isinstance(result, list):
-            return result
-        return []
-
-    @staticmethod
-    def _pick_primary_board_name(boards: List[Dict[str, Any]]) -> Optional[str]:
-        if not boards:
-            return None
-
-        preferred: Optional[str] = None
-        fallback: Optional[str] = None
-        for item in boards:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name") or "").strip()
-            if not name:
-                continue
-            if fallback is None:
-                fallback = name
-            type_text = str(item.get("type") or "").strip().lower()
-            if "行业" in type_text or "industry" in type_text:
-                preferred = name
-                break
-        return preferred or fallback
-
-    def _get_data_manager(self):
-        if self._data_manager is not None:
-            return self._data_manager
-        if self._data_manager_init_error:
-            return None
-        try:
-            from data_provider import DataFetcherManager
-
-            self._data_manager = DataFetcherManager()
-            return self._data_manager
-        except Exception as exc:  # pragma: no cover - fail-open initialization
-            self._data_manager_init_error = str(exc)
-            return None
 
     def _build_drawdown(
         self,
@@ -407,8 +394,6 @@ class PortfolioRiskService:
     @staticmethod
     def _build_stop_loss(snapshot: Dict[str, Any], thresholds: Dict[str, Any]) -> Dict[str, Any]:
         stop_loss_pct = float(thresholds["stop_loss_alert_pct"])
-        near_ratio = float(thresholds["stop_loss_near_ratio"])
-        near_threshold = stop_loss_pct * near_ratio
 
         warnings: List[Dict[str, Any]] = []
         for account in snapshot.get("accounts", []):
@@ -418,24 +403,23 @@ class PortfolioRiskService:
                 if avg_cost <= 0:
                     continue
                 loss_pct = max(0.0, (avg_cost - last_price) / avg_cost * 100.0)
-                if loss_pct < near_threshold:
+                if loss_pct <= 0:
                     continue
                 warnings.append(
                     {
                         "account_id": account.get("account_id"),
                         "symbol": pos.get("symbol"),
+                        "asset_category": str(pos.get("asset_category") or "").strip().lower(),
                         "avg_cost": round(avg_cost, 8),
                         "last_price": round(last_price, 8),
                         "loss_pct": round(loss_pct, 4),
-                        "near_threshold_pct": round(near_threshold, 4),
                         "is_triggered": bool(loss_pct >= stop_loss_pct),
                     }
                 )
 
         warnings.sort(key=lambda item: item["loss_pct"], reverse=True)
         return {
-            "near_alert": len(warnings) > 0,
-            "triggered_count": sum(1 for item in warnings if item["is_triggered"]),
-            "near_count": len(warnings),
+            "triggered_count": sum(1 for w in warnings if w["is_triggered"]),
+            "near_count": len([w for w in warnings if not w["is_triggered"] and w["loss_pct"] > 0]),
             "items": warnings[:20],
         }

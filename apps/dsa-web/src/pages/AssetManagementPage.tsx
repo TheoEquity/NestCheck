@@ -11,7 +11,10 @@ import {
   getPositionRiskLevel,
   getMarketLabel,
   localizeAssetCategory,
-  // localizeAssetSubcategory, // reserved for future use
+  getHealthTone,
+  getHealthLabel,
+  getHealthDeductions,
+  computeHealthScore,
   usePortfolioOverview,
 } from './assetsShared';
 
@@ -59,37 +62,6 @@ const PIE_TOOLTIP_STYLE = {
   border: '1px solid rgba(148, 163, 184, 0.18)',
   borderRadius: '12px',
   color: '#e2e8f0',
-};
-
-const getStaticHealthTone = (score: number): 'success' | 'warning' | 'danger' => {
-  if (score >= 80) return 'success';
-  if (score >= 60) return 'warning';
-  return 'danger';
-};
-
-const getStaticHealthLabel = (score: number): string => {
-  const tone = getStaticHealthTone(score);
-  if (tone === 'success') return '健康';
-  if (tone === 'warning') return '关注';
-  return '预警';
-};
-
-const getHealthScore = (positions: PortfolioPositionRecordItem[]) => {
-  if (positions.length === 0) return 60;
-  const totalMarketValue = positions.reduce((sum, item) => sum + Number(item.marketValueBase || 0), 0);
-  const highRiskValue = positions.reduce((sum, item) => {
-    const riskClass = normalizeAssetRiskClass(item.assetRiskClass);
-    return riskClass === 'R4' || riskClass === 'R5' ? sum + Number(item.marketValueBase || 0) : sum;
-  }, 0);
-  const topPositionValue = positions.reduce((max, item) => Math.max(max, Number(item.marketValueBase || 0)), 0);
-  const highRiskPct = totalMarketValue > 0 ? (highRiskValue / totalMarketValue) * 100 : 0;
-  const topPositionPct = totalMarketValue > 0 ? (topPositionValue / totalMarketValue) * 100 : 0;
-  let score = 90;
-  if (highRiskPct > 35) score -= 28;
-  else if (highRiskPct > 20) score -= 14;
-  if (topPositionPct > 35) score -= 22;
-  else if (topPositionPct > 25) score -= 10;
-  return Math.max(18, Math.min(96, score));
 };
 
 const getLocalMarketValue = (position: PortfolioPositionRecordItem) => Number(position.quantity || 0) * Number(position.lastPrice || 0);
@@ -313,7 +285,7 @@ const AssetManagementPage: React.FC = () => {
     document.title = '资产管理 - NestCheck';
   }, []);
 
-  const { accounts, positions, error, reload, syncData, isRefreshing } = usePortfolioOverview();
+  const { accounts, risk, positions, error, reload, syncData, isRefreshing } = usePortfolioOverview();
   const [fxRates, setFxRates] = useState<PortfolioLatestFxRateItem[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [accountFilter, setAccountFilter] = useState('全部');
@@ -388,8 +360,9 @@ const AssetManagementPage: React.FC = () => {
     return (highRiskValue / totalMarketValue) * 100;
   }, [positions, totalMarketValue]);
 
-  const healthScore = getHealthScore(positions);
-  const healthTone = getStaticHealthTone(healthScore);
+  const healthScore = computeHealthScore(risk, positions);
+  const healthTone = getHealthTone(risk);
+  const deductions = getHealthDeductions(risk, positions);
 
   const riskAllocationData = useMemo(() => {
     const buckets = { 基座: 0, 主体: 0, 机会仓: 0 };
@@ -548,8 +521,16 @@ const AssetManagementPage: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-xs uppercase tracking-[0.22em] text-secondary-text">健康度</div>
-              <div className="mt-1 text-2xl font-semibold text-foreground">{getStaticHealthLabel(healthScore)}</div>
-              <div className="mt-1 text-sm text-secondary-text">高风险仓位 {formatPct(highRiskPositionPct)}</div>
+              <div className="mt-1 text-2xl font-semibold text-foreground">{getHealthLabel(risk)}</div>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-secondary-text">
+                {deductions.length > 0 ? (
+                  deductions.map((d, i) => (
+                    <span key={i} className={d.points > 15 ? 'font-bold text-destructive' : 'font-medium'}>{d.label} <span className="font-bold tabular-nums">-{d.points}</span></span>
+                  ))
+                ) : (
+                  <span>高风险仓位 {formatPct(highRiskPositionPct)}</span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <HealthGauge score={healthScore} tone={healthTone} />

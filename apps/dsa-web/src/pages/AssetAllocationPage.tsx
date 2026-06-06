@@ -14,6 +14,10 @@ const formatPlanDate = (value: string) => {
   return date.toLocaleString('zh-CN', { hour12: false });
 };
 
+const formatPlanMetric = (value?: number | null) => (
+  value == null ? '--' : `${(value * 100).toFixed(1)}%`
+);
+
 type SolverResult = {
   expectedReturn: number;
   maxDrawdown: number;
@@ -270,6 +274,19 @@ const AssetAllocationPage: React.FC = () => {
     } finally {
       setPlanSaving(false);
     }
+  };
+
+  const handleManualAllocationEvaluate = () => {
+    const allocation = Object.fromEntries(
+      definitions.map(item => [item.assetRiskClass, getDraftRatio(item.assetRiskClass)]),
+    );
+    const totalRatio = Object.values(allocation).reduce((sum, value) => sum + value, 0);
+    if (Math.abs(totalRatio - 100) > 0.05) {
+      setSolverError('R1-R5 配置比例合计需为 100%');
+      return;
+    }
+
+    calculatePortfolioResult(allocation);
   };
 
   const handleTogglePlanActive = async (plan: AssetAllocationPlanItem) => {
@@ -599,7 +616,7 @@ const AssetAllocationPage: React.FC = () => {
             </div>
           </Card>
 
-          <Card>
+          <Card className="flex h-full flex-col">
             <div className="mb-4">
               <h3 className={CARD_TITLE_CLASS}>配置比例</h3>
               <p className={CARD_DESC_CLASS}>按 R1-R5 输入目标资产配置比例。</p>
@@ -643,7 +660,10 @@ const AssetAllocationPage: React.FC = () => {
               </table>
             </div>
 
-            <div className="mt-4 flex justify-end">
+            <div className="mt-auto flex justify-between gap-2 pt-4">
+              <Button type="button" onClick={handleManualAllocationEvaluate}>
+                倒算回撤收益
+              </Button>
               <Button type="button" variant="outline" onClick={handleCreatePlan} disabled={planSaving}>
                 {planSaving ? '生成中...' : '生成计划'}
               </Button>
@@ -681,6 +701,8 @@ const AssetAllocationPage: React.FC = () => {
                   <th className="py-2 text-right font-medium text-secondary-text">R3</th>
                   <th className="py-2 text-right font-medium text-secondary-text">R4</th>
                   <th className="py-2 text-right font-medium text-secondary-text">R5</th>
+                  <th className="py-2 text-right font-medium text-secondary-text">预期收益</th>
+                  <th className="py-2 text-right font-medium text-secondary-text">最高回撤</th>
                   <th className="w-28 py-2 text-right font-medium text-secondary-text">操作</th>
                 </tr>
               </thead>
@@ -698,6 +720,8 @@ const AssetAllocationPage: React.FC = () => {
                     <td className="py-2 text-right text-foreground">{Math.round(plan.r3Ratio)}%</td>
                     <td className="py-2 text-right text-foreground">{Math.round(plan.r4Ratio)}%</td>
                     <td className="py-2 text-right text-foreground">{Math.round(plan.r5Ratio)}%</td>
+                    <td className="py-2 text-right text-foreground">{formatPlanMetric(plan.expectedReturn)}</td>
+                    <td className="py-2 text-right text-foreground">{formatPlanMetric(plan.maxDrawdown)}</td>
                     <td className="py-2">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -723,7 +747,7 @@ const AssetAllocationPage: React.FC = () => {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={8} className="py-6 text-center text-sm text-secondary-text">暂无配置计划</td>
+                    <td colSpan={10} className="py-6 text-center text-sm text-secondary-text">暂无配置计划</td>
                   </tr>
                 )}
               </tbody>

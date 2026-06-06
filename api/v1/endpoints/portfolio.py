@@ -786,7 +786,30 @@ def _build_allocation_plan_item(plan) -> AssetAllocationPlanItem:
         r3_ratio=float(plan.r3_ratio or 0.0),
         r4_ratio=float(plan.r4_ratio or 0.0),
         r5_ratio=float(plan.r5_ratio or 0.0),
+        expected_return=float(plan.expected_return) if plan.expected_return is not None else None,
+        max_drawdown=float(plan.max_drawdown) if plan.max_drawdown is not None else None,
     )
+
+
+def _calculate_allocation_plan_metrics(session, ratios: list[float]) -> tuple[float, float]:
+    from src.storage import AssetRiskDefinition
+
+    required_classes = ["R1", "R2", "R3", "R4", "R5"]
+    definitions = {
+        item.asset_risk_class.upper(): item
+        for item in session.query(AssetRiskDefinition).filter(AssetRiskDefinition.is_active == True).all()
+    }
+    if not all(code in definitions for code in required_classes):
+        raise ValueError("风险等级定义不完整，需包含 R1-R5")
+
+    expected_return = 0.0
+    max_drawdown = 0.0
+    for code, ratio in zip(required_classes, ratios):
+        definition = definitions[code]
+        weight = ratio / 100.0
+        expected_return += weight * float(definition.expected_return or 0.0)
+        max_drawdown += weight * float(definition.max_drawdown or 0.0)
+    return expected_return, max_drawdown
 
 
 @router.get(
@@ -829,6 +852,7 @@ def create_asset_allocation_plan(request: AssetAllocationPlanCreateRequest) -> A
 
         db = get_db()
         with db.get_session() as session:
+            expected_return, max_drawdown = _calculate_allocation_plan_metrics(session, ratios)
             plan = AssetAllocationPlan(
                 is_active=False,
                 generated_at=datetime.now(),
@@ -837,6 +861,8 @@ def create_asset_allocation_plan(request: AssetAllocationPlanCreateRequest) -> A
                 r3_ratio=request.r3_ratio,
                 r4_ratio=request.r4_ratio,
                 r5_ratio=request.r5_ratio,
+                expected_return=expected_return,
+                max_drawdown=max_drawdown,
             )
             session.add(plan)
             session.commit()

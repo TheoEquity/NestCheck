@@ -479,6 +479,8 @@ export interface AssetAllocationPlanItem {
   r3Ratio: number;
   r4Ratio: number;
   r5Ratio: number;
+  expectedReturn?: number | null;
+  maxDrawdown?: number | null;
 }
 
 export interface AssetAllocationPlanListResponse {

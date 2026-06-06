@@ -459,6 +459,8 @@ class AssetAllocationPlanItem(BaseModel):
     r3_ratio: float
     r4_ratio: float
     r5_ratio: float
+    expected_return: Optional[float] = None
+    max_drawdown: Optional[float] = None
 
 
 class AssetAllocationPlanListResponse(BaseModel):

@@ -719,6 +719,8 @@ class AssetAllocationPlan(Base):
     r3_ratio = Column(Float, nullable=False, default=0.0)
     r4_ratio = Column(Float, nullable=False, default=0.0)
     r5_ratio = Column(Float, nullable=False, default=0.0)
+    expected_return = Column(Float, nullable=True)
+    max_drawdown = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
 
@@ -1424,6 +1426,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             },
             "watchlist_items": {
                 "sort_order": "INTEGER DEFAULT 0",
+            },
+            "asset_allocation_plans": {
+                "expected_return": "FLOAT",
+                "max_drawdown": "FLOAT",
             },
         }
 

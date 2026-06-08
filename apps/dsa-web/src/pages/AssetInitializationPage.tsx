@@ -640,6 +640,7 @@ const AssetInitializationPage: React.FC = () => {
                           fund: 'R3',
                           stock: 'R3',
                           bond: 'R2',
+                          wealth: 'R2',
                         };
                         updateRow(row.id, {
                           assetCategory: nextCategory,

@@ -15,7 +15,7 @@ import type {
 
 type AccountMarket = 'cn' | 'hk' | 'us';
 type CurrencyCode = 'CNY' | 'HKD' | 'USD';
-type AssetCategory = 'fund' | 'stock' | 'bond';
+type AssetCategory = 'fund' | 'stock' | 'bond' | 'wealth';
 type AssetSubcategory = '' | 'pure_bond_fund' | 'fixed_income_plus' | 'index_fund' | 'equity_fund';
 type AssetRiskClass = 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
 type LedgerEventType = 'all' | 'trade' | 'cash' | 'cash_dividend';
@@ -49,6 +49,7 @@ const ASSET_CATEGORY_OPTIONS: Array<{ value: AssetCategory; label: string }> = [
   { value: 'fund', label: '基金' },
   { value: 'stock', label: '股票' },
   { value: 'bond', label: '债券' },
+  { value: 'wealth', label: '理财' },
 ];
 
 const FUND_SUBCATEGORY_OPTIONS: Array<{ value: AssetSubcategory; label: string }> = [
@@ -463,7 +464,7 @@ const AssetEventsPage: React.FC = () => {
               <label className="text-xs text-secondary">资产大类
                 <select className={`${SELECT_CLASS} mt-1`} value={tradeForm.assetCategory} onChange={(e) => {
                   const nextCategory = e.target.value as AssetCategory;
-                  const defaultRiskClass: Record<AssetCategory, AssetRiskClass> = { fund: 'R3', stock: 'R3', bond: 'R2' };
+                  const defaultRiskClass: Record<AssetCategory, AssetRiskClass> = { fund: 'R3', stock: 'R3', bond: 'R2', wealth: 'R2' };
                   updateTradeForm({ assetCategory: nextCategory, assetSubcategory: nextCategory === 'fund' ? tradeForm.assetSubcategory : '', assetRiskClass: defaultRiskClass[nextCategory] });
                 }}>
                   {ASSET_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}

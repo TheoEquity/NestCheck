@@ -14,7 +14,7 @@ from src.storage import AlertRuleRecord, AlertTriggerRecord, WatchlistItem
 
 
 VALID_MARKETS = {"cn", "hk", "us"}
-VALID_ASSET_CATEGORIES = {"fund", "stock"}
+VALID_ASSET_CATEGORIES = {"fund", "stock", "wealth"}
 VALID_PRIORITIES = {"low", "medium", "high"}
 VALID_FREQUENCIES = {"daily", "weekly", "manual"}
 logger = logging.getLogger(__name__)

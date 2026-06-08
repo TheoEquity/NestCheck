@@ -2763,7 +2763,11 @@ class PortfolioService:
         return (result.price, result.provider or "realtime_quote") if result is not None else (None, "missing")
 
     def _resolve_latest_price_with_name(self, symbol: str, asset_category: Optional[str]) -> Optional[_RealtimePositionQuote]:
-        if (asset_category or "").lower() == "fund":
+        cat = (asset_category or "").lower()
+        if cat in ("bond", "wealth", "other"):
+            return None
+
+        if cat == "fund":
             fund_nav, fund_name = self._fetch_fund_nav(symbol)
             if fund_nav is not None and fund_nav > 0:
                 return _RealtimePositionQuote(fund_nav, "fund_nav", fund_name, None)

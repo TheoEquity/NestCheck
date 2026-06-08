@@ -9,7 +9,7 @@ import { loadStockIndex } from '../utils/stockIndexLoader';
 import { toDateInputValue } from '../utils/format';
 
 type AccountMarket = 'cn' | 'hk' | 'us';
-type AssetCategory = 'cash' | 'fund' | 'stock' | 'bond';
+type AssetCategory = 'cash' | 'fund' | 'stock' | 'bond' | 'wealth';
 type AssetSubcategory = '' | 'pure_bond_fund' | 'fixed_income_plus' | 'index_fund' | 'equity_fund';
 type AssetRiskClass = '' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
 
@@ -49,6 +49,7 @@ const ASSET_CATEGORY_OPTIONS: Array<{ value: AssetCategory; label: string }> = [
   { value: 'fund', label: '基金' },
   { value: 'stock', label: '股票' },
   { value: 'bond', label: '债券' },
+  { value: 'wealth', label: '理财' },
 ];
 
 const FUND_SUBCATEGORY_OPTIONS: Array<{ value: AssetSubcategory; label: string }> = [

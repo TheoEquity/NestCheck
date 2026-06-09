@@ -7,10 +7,11 @@ import type { PortfolioAccountItem } from '../types/portfolio';
 import type { StockIndexItem } from '../types/stockIndex';
 import { loadStockIndex } from '../utils/stockIndexLoader';
 import { toDateInputValue } from '../utils/format';
+import type { AssetCategoryDefinitionItem } from '../types/portfolio';
 
 type AccountMarket = 'cn' | 'hk' | 'us';
-type AssetCategory = 'cash' | 'fund' | 'stock' | 'bond' | 'wealth';
-type AssetSubcategory = '' | 'pure_bond_fund' | 'fixed_income_plus' | 'index_fund' | 'equity_fund';
+type AssetCategory = string;
+type AssetSubcategory = string;
 type AssetRiskClass = '' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
 
 type AccountFormState = {
@@ -32,6 +33,7 @@ type AssetRow = {
   market: AccountMarket;
   quantity: string;
   price: string;
+  lastPrice: string;
   currency: CurrencyCode;
   note: string;
 };
@@ -42,22 +44,6 @@ const CURRENCY_OPTIONS: Array<{ value: CurrencyCode; label: string }> = [
   { value: 'CNY', label: '人民币 CNY' },
   { value: 'HKD', label: '港币 HKD' },
   { value: 'USD', label: '美元 USD' },
-];
-
-const ASSET_CATEGORY_OPTIONS: Array<{ value: AssetCategory; label: string }> = [
-  { value: 'cash', label: '现金' },
-  { value: 'fund', label: '基金' },
-  { value: 'stock', label: '股票' },
-  { value: 'bond', label: '债券' },
-  { value: 'wealth', label: '理财' },
-];
-
-const FUND_SUBCATEGORY_OPTIONS: Array<{ value: AssetSubcategory; label: string }> = [
-  { value: '', label: '请选择' },
-  { value: 'pure_bond_fund', label: '纯债基金' },
-  { value: 'fixed_income_plus', label: '固收+' },
-  { value: 'index_fund', label: '指数基金' },
-  { value: 'equity_fund', label: '股票基金' },
 ];
 
 const ASSET_RISK_CLASS_OPTIONS: AssetRiskClass[] = ['', 'R1', 'R2', 'R3', 'R4', 'R5'];
@@ -99,6 +85,7 @@ const createEmptyRow = (market: AccountMarket = 'cn', currency: CurrencyCode = '
   market,
   quantity: '',
   price: '',
+  lastPrice: '',
   currency,
   note: '',
 });
@@ -199,6 +186,7 @@ const AssetInitializationPage: React.FC = () => {
         market: pos.market as AccountMarket,
         quantity: isCash ? '' : String(pos.quantity || ''),
         price: String(isCash ? (pos.totalCost || pos.quantity) : (pos.avgCost || '')),
+        lastPrice: isCash ? '1' : String(pos.lastPrice || ''),
         currency: pos.currency as CurrencyCode,
         note: '',
       };
@@ -460,6 +448,7 @@ const AssetInitializationPage: React.FC = () => {
           market: row.market,
           quantity: Number(row.quantity),
           avgCost: Number(row.price),
+          lastPrice: Number(row.lastPrice) || Number(row.price),
           currency: currentAccount.baseCurrency,
           note: buildAssetNote(row),
         };
@@ -496,22 +485,47 @@ const AssetInitializationPage: React.FC = () => {
     }
   };
 
-  const totalPositionCost = assetRows.reduce((sum, row) => {
+  const totalPositionValue = assetRows.reduce((sum, row) => {
     if (isCashCategory(row.assetCategory)) return sum;
-    return sum + Number(row.quantity || 0) * Number(row.price || 0);
+    const lastPriceVal = row.lastPrice || row.price;
+    return sum + Number(row.quantity || 0) * Number(lastPriceVal || 0);
   }, 0);
 
   const totalCashAmount = assetRows.reduce((sum, row) => {
     if (!isCashCategory(row.assetCategory)) return sum;
     return sum + Number(row.price || 0);
   }, 0);
-  const totalAssetAmount = totalPositionCost + totalCashAmount;
+  const totalAssetAmount = totalPositionValue + totalCashAmount;
+
+  const [categoryDefinitions, setCategoryDefinitions] = useState<AssetCategoryDefinitionItem[]>([]);
+
+  const categoryByCode = useMemo(() => {
+    const map = new Map<string, AssetCategoryDefinitionItem>();
+    categoryDefinitions.forEach((definition) => map.set(definition.code, definition));
+    return map;
+  }, [categoryDefinitions]);
+
+  useEffect(() => {
+    let active = true;
+    const loadCategories = async () => {
+      try {
+        const resp = await portfolioApi.getAssetCategoryDefinitions();
+        if (!active) return;
+        setCategoryDefinitions(resp.definitions || []);
+      } catch (err) {
+        if (!active) return;
+        setPageError(getParsedApiError(err));
+      }
+    };
+    void loadCategories();
+    return () => { active = false; };
+  }, []);
 
   return (
     <AppPage className="max-w-[1600px] space-y-3">
       <PageHeader
-        eyebrow="Asset Onboarding"
-        title="资产初始化"
+        eyebrow="Account Onboarding"
+        title="账户初始化"
         description="先建账户，再按表格录入初始证券和现金。保存后数据会直接进入资产库，并在资产管理页展示。"
         className="!rounded-xl !px-4 !py-3"
       />
@@ -551,7 +565,7 @@ const AssetInitializationPage: React.FC = () => {
         <Card className="!rounded-xl" padding="sm">
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <h2 className="text-base font-semibold text-foreground">1. 建账户</h2>
+              <h2 className="text-base font-semibold text-foreground">1. 新建账户</h2>
               <p className="mt-0.5 text-xs text-secondary-text">先创建当前账户，再在下方一次性录入该账户的初始资产。</p>
             </div>
             <div className="relative">
@@ -596,7 +610,7 @@ const AssetInitializationPage: React.FC = () => {
         <div className="mb-2 flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
           <div>
              <h2 className="mt-1.5 text-base font-semibold text-foreground">2. {viewingOnly ? '查看初始资产' : '表格录入初始资产'}</h2>
-             <p className="mt-0.5 text-xs text-secondary-text">{viewingOnly ? '已初始化账户的资产清单为只读模式。如需修改，请删除本账户后重新录入。' : '按资产大类、细类和风险等级录入。现金按合计金额入账，其它资产按数量和成本价建仓。'}</p>
+             <p className="mt-0.5 text-xs text-secondary-text">{viewingOnly ? '已初始化账户的资产清单为只读模式。如需修改，请删除本账户后重新录入。' : '按资产大类、细类和风险等级录入。现金按合计金额入账，其它资产按数量和成本价建仓，现价可按成本价估算。'}</p>
           </div>
            <div className="grid gap-2 md:grid-cols-[180px_120px]">
              <div className="flex items-center rounded-lg border border-border/60 bg-background/50 px-3 text-xs text-secondary-text">资产总计 {formatMoney(totalAssetAmount, selectedAccount?.baseCurrency || 'CNY')}</div>
@@ -607,22 +621,23 @@ const AssetInitializationPage: React.FC = () => {
         {saveFeedback ? <InlineAlert variant="success" className="mb-2 rounded-lg px-3 py-2 text-xs shadow-none" message={saveFeedback} /> : null}
 
         <div className="overflow-x-auto rounded-lg border border-border/50 bg-background/20">
-          <table className="w-full min-w-[1450px] table-fixed text-[13px]">
-            <thead className="bg-surface/60 text-xs text-secondary-text">
-              <tr>
-                <th className="w-[52px] px-3 py-2 text-left">行</th>
-                <th className="w-[120px] px-3 py-2 text-left">资产大类</th>
-                <th className="w-[168px] px-3 py-2 text-left">资产细类</th>
-                 <th className="w-[108px] px-3 py-2 text-left">风险分类</th>
-                <th className="w-[132px] px-3 py-2 text-left">代码</th>
-                <th className="w-[180px] px-3 py-2 text-left">名称</th>
-                <th className="w-[98px] px-3 py-2 text-right">数量</th>
-                <th className="w-[98px] px-3 py-2 text-right">成本价</th>
-                <th className="w-[126px] px-3 py-2 text-right">合计</th>
-                <th className="w-[180px] px-3 py-2 text-left">备注</th>
-                <th className="w-[84px] px-3 py-2 text-right">操作</th>
-              </tr>
-            </thead>
+           <table className="w-full min-w-[1550px] table-fixed text-[13px]">
+             <thead className="bg-surface/60 text-xs text-secondary-text">
+               <tr>
+                 <th className="w-[52px] px-3 py-2 text-left">行</th>
+                 <th className="w-[120px] px-3 py-2 text-left">资产大类</th>
+                 <th className="w-[168px] px-3 py-2 text-left">资产细类</th>
+                  <th className="w-[108px] px-3 py-2 text-left">风险分类</th>
+                 <th className="w-[132px] px-3 py-2 text-left">代码</th>
+                 <th className="w-[180px] px-3 py-2 text-left">名称</th>
+                 <th className="w-[98px] px-3 py-2 text-right">数量</th>
+                 <th className="w-[98px] px-3 py-2 text-right">成本价</th>
+                 <th className="w-[98px] px-3 py-2 text-right">现价</th>
+                 <th className="w-[126px] px-3 py-2 text-right">合计</th>
+                 <th className="w-[180px] px-3 py-2 text-left">备注</th>
+                 <th className="w-[84px] px-3 py-2 text-right">操作</th>
+               </tr>
+             </thead>
              <tbody className={viewingOnly ? 'opacity-50 pointer-events-none' : ''}>
               {assetRows.map((row, index) => (
                 <tr key={row.id} className="border-t border-border/50 align-top odd:bg-background/70 even:bg-surface/20">
@@ -635,17 +650,11 @@ const AssetInitializationPage: React.FC = () => {
                       value={row.assetCategory}
                       onChange={(e) => {
                         const nextCategory = e.target.value as AssetCategory;
-                        const defaultRiskClass: Record<AssetCategory, AssetRiskClass> = {
-                          cash: 'R1',
-                          fund: 'R3',
-                          stock: 'R3',
-                          bond: 'R2',
-                          wealth: 'R2',
-                        };
+                        const definition = categoryByCode.get(nextCategory);
                         updateRow(row.id, {
                           assetCategory: nextCategory,
-                          assetSubcategory: nextCategory === 'fund' ? row.assetSubcategory : '',
-                          assetRiskClass: defaultRiskClass[nextCategory],
+                          assetSubcategory: '',
+                          assetRiskClass: (definition?.defaultRiskClass || 'R3') as AssetRiskClass,
                           market: selectedAccount?.market || accountForm.market,
                           currency: normalizeCurrencyCode(selectedAccount?.baseCurrency || accountForm.baseCurrency),
                           quantity: '',
@@ -653,13 +662,13 @@ const AssetInitializationPage: React.FC = () => {
                         });
                       }}
                     >
-                      {ASSET_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      {categoryDefinitions.map((cat) => <option key={cat.code} value={cat.code}>{cat.name}</option>)}
                     </select>
                   </td>
                   <td className="px-3 py-2">
-                    <select className={SELECT_CLASS} value={row.assetSubcategory} disabled={row.assetCategory !== 'fund'} onChange={(e) => updateRow(row.id, { assetSubcategory: e.target.value as AssetSubcategory })}>
-                      {row.assetCategory === 'fund' ? (
-                        FUND_SUBCATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)
+                    <select className={SELECT_CLASS} value={row.assetSubcategory} disabled={(categoryByCode.get(row.assetCategory)?.subcategories || []).length === 0} onChange={(e) => updateRow(row.id, { assetSubcategory: e.target.value as AssetSubcategory })}>
+                      {(categoryByCode.get(row.assetCategory)?.subcategories || []).length > 0 ? (
+                        categoryByCode.get(row.assetCategory)!.subcategories.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)
                       ) : (
                         <option value="">--</option>
                       )}
@@ -701,10 +710,21 @@ const AssetInitializationPage: React.FC = () => {
                     />
                   </td>
                   <td className="px-3 py-2">
+                    <input
+                      className={INPUT_CLASS}
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      placeholder={isCashCategory(row.assetCategory) ? '1' : '现价'}
+                      value={row.lastPrice}
+                      onChange={(e) => updateRow(row.id, { lastPrice: e.target.value })}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
                     {isCashCategory(row.assetCategory) ? (
                       <div className="flex h-9 items-center justify-end rounded-lg border border-border/40 bg-background/40 px-3 text-sm font-medium text-foreground">{formatMoney(Number(row.price || 0), row.currency || selectedAccount?.baseCurrency || 'CNY')}</div>
                     ) : (
-                      <div className="flex h-9 items-center justify-end rounded-lg border border-border/40 bg-background/40 px-3 text-sm font-medium text-foreground">{formatMoney(Number(row.quantity || 0) * Number(row.price || 0), selectedAccount?.baseCurrency || 'CNY')}</div>
+                      <div className="flex h-9 items-center justify-end rounded-lg border border-border/40 bg-background/40 px-3 text-sm font-medium text-foreground">{formatMoney(Number(row.quantity || 0) * Number(row.lastPrice || row.price || 0), selectedAccount?.baseCurrency || 'CNY')}</div>
                     )}
                   </td>
                   <td className="px-3 py-2">

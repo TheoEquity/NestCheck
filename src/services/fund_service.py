@@ -19,6 +19,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import pandas as pd
 
 from src.repositories.fund_repo import FundRepository
+from src.services.portfolio_service import round_asset_price
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +214,8 @@ class FundService:
                 records.append({
                     "fund_code": fund_code,
                     "nav_date": nav_date,
-                    "unit_nav": self._safe_float(row.get("单位净值") or row.get("unit_nav")),
-                    "accumulated_nav": self._safe_float(row.get("累计净值") or row.get("accumulated_nav")),
+                    "unit_nav": self._round_nav(self._safe_float(row.get("单位净值") or row.get("unit_nav")), fund_code),
+                    "accumulated_nav": self._round_nav(self._safe_float(row.get("累计净值") or row.get("accumulated_nav")), fund_code),
                     "daily_return": self._safe_float(row.get("日增长率") or row.get("daily_return")),
                     "daily_change": None,
                 })
@@ -247,7 +248,7 @@ class FundService:
                         "fund_code": fund_code,
                         "nav_date": nav_date,
                         "unit_nav": None,
-                        "accumulated_nav": acc_nav,
+                        "accumulated_nav": self._round_nav(acc_nav, fund_code),
                         "daily_return": None,
                         "daily_change": None,
                     }])
@@ -317,6 +318,12 @@ class FundService:
             return float(val)
         except (ValueError, TypeError):
             return None
+
+    @staticmethod
+    def _round_nav(value: Optional[float], fund_code: str) -> Optional[float]:
+        if value is None:
+            return None
+        return round_asset_price(value, symbol=fund_code, asset_category="fund")
 
     @staticmethod
     def _safe_int(val) -> Optional[int]:

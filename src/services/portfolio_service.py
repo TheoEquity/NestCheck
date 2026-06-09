@@ -35,10 +35,60 @@ VALID_MARKETS = {"cn", "hk", "us"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
-VALID_CORPORATE_ACTIONS = {"cash_dividend"}
+VALID_CORPORATE_ACTIONS = {"cash_dividend", "stock_split"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
+MONEY_DECIMALS = 2
+SHARE_DECIMALS = 2
+INTERNAL_FUND_NAV_DECIMALS = 4
+OPEN_FUND_NAV_DECIMALS = 4
+STOCK_PRICE_DECIMALS = 2
+EXCHANGE_FUND_PRICE_DECIMALS = 3
 
 REALTIME_ASSET_RISK_CLASSES = {"R4", "R5"}
+
+
+def round_money(value: float) -> float:
+    return round(float(value or 0.0), MONEY_DECIMALS)
+
+
+def round_share(value: float) -> float:
+    return round(float(value or 0.0), SHARE_DECIMALS)
+
+
+def round_internal_fund_nav(value: float) -> float:
+    return round(float(value or 0.0), INTERNAL_FUND_NAV_DECIMALS)
+
+
+def is_exchange_traded_fund(
+    *,
+    symbol: Optional[str] = None,
+    asset_category: Optional[str] = None,
+    asset_subcategory: Optional[str] = None,
+) -> bool:
+    category = (asset_category or "").strip().lower()
+    subcategory = (asset_subcategory or "").strip().lower()
+    code = (symbol or "").strip().upper()
+    if "etf" in category or "lof" in category or "etf" in subcategory or "lof" in subcategory:
+        return True
+    normalized = code.split(".")[0]
+    return normalized.startswith(("510", "511", "512", "513", "515", "516", "517", "518", "159", "160", "161", "162", "163", "164", "165"))
+
+
+def round_asset_price(
+    value: float,
+    *,
+    symbol: Optional[str] = None,
+    asset_category: Optional[str] = None,
+    asset_subcategory: Optional[str] = None,
+) -> float:
+    category = (asset_category or "").strip().lower()
+    if category == "cash":
+        return round(float(value or 0.0), MONEY_DECIMALS)
+    if is_exchange_traded_fund(symbol=symbol, asset_category=asset_category, asset_subcategory=asset_subcategory):
+        return round(float(value or 0.0), EXCHANGE_FUND_PRICE_DECIMALS)
+    if category == "fund":
+        return round(float(value or 0.0), OPEN_FUND_NAV_DECIMALS)
+    return round(float(value or 0.0), STOCK_PRICE_DECIMALS)
 
 
 class PortfolioConflictError(Exception):
@@ -111,6 +161,83 @@ class PortfolioService:
     def __init__(self, repo: Optional[PortfolioRepository] = None):
         self.repo = repo or PortfolioRepository()
 
+    def _recalculate_fund_shares_from_management_total(self) -> None:
+        """Recalculate global fund shares from the asset management total equity."""
+        from datetime import date as date_type
+
+        from src.storage import get_db, PortfolioFundValue
+
+        current_total_cny = self.get_management_total_equity()
+
+        db = get_db()
+        with db.get_session() as session:
+            latest = (
+                session.query(PortfolioFundValue)
+                .order_by(PortfolioFundValue.record_date.desc())
+                .first()
+            )
+
+            if not latest or latest.fund_shares == 0.0:
+                return
+
+            current_nav = round_internal_fund_nav(latest.fund_nav)
+            if current_nav <= 0:
+                return
+
+            new_shares = current_total_cny / current_nav
+
+            if new_shares < 0:
+                new_shares = 0.0
+
+            record = PortfolioFundValue(
+                record_date=date_type.today(),
+                fund_shares=round_share(new_shares),
+                fund_nav=round_internal_fund_nav(current_nav),
+                total_equity=round_money(current_total_cny),
+            )
+            session.add(record)
+            session.commit()
+
+    def _recalculate_fund_nav_from_management_total(self) -> Optional[Dict[str, Any]]:
+        """Recalculate global fund NAV from total equity while keeping shares fixed."""
+        from datetime import date as date_type
+
+        from src.storage import get_db, PortfolioFundValue
+
+        current_total_cny = round_money(self.get_management_total_equity())
+
+        db = get_db()
+        with db.get_session() as session:
+            latest = (
+                session.query(PortfolioFundValue)
+                .order_by(PortfolioFundValue.record_date.desc())
+                .first()
+            )
+
+            if not latest or latest.fund_shares == 0.0:
+                return None
+
+            current_shares = round_share(latest.fund_shares)
+            if current_shares <= 0:
+                return None
+
+            new_nav = round_internal_fund_nav(current_total_cny / current_shares)
+            record = PortfolioFundValue(
+                record_date=date_type.today(),
+                fund_shares=current_shares,
+                fund_nav=new_nav,
+                total_equity=current_total_cny,
+            )
+            session.add(record)
+            session.commit()
+
+            return {
+                "fund_nav": new_nav,
+                "fund_shares": current_shares,
+                "total_equity": current_total_cny,
+                "record_date": record.record_date.isoformat(),
+            }
+
     # ------------------------------------------------------------------
     # Account CRUD
     # ------------------------------------------------------------------
@@ -180,7 +307,12 @@ class PortfolioService:
         return self.repo.deactivate_account(account_id)
 
     def delete_account(self, account_id: int) -> bool:
-        return self.repo.delete_account(account_id)
+        result = self.repo.delete_account(account_id)
+
+        if result:
+            self._recalculate_fund_shares_from_management_total()
+
+        return result
 
     # ------------------------------------------------------------------
     # Initialization (direct write to asset tables, bypassing event replay)
@@ -238,11 +370,23 @@ class PortfolioService:
             if avg_cost <= 0:
                 raise ValueError(f"Asset avg_cost must be > 0 for {symbol}")
 
+            asset_category = (asset.get("asset_category") or "stock").strip() or "stock"
+            asset_subcategory = (asset.get("asset_subcategory") or "").strip() or None
+            asset_risk_class = asset.get("asset_risk_class")
+            avg_cost = round_asset_price(
+                avg_cost,
+                symbol=symbol,
+                asset_category=asset_category,
+                asset_subcategory=asset_subcategory,
+            )
+            last_price = round_asset_price(
+                float(asset.get("last_price", avg_cost)),
+                symbol=symbol,
+                asset_category=asset_category,
+                asset_subcategory=asset_subcategory,
+            )
             total_cost = quantity * avg_cost
             name = (asset.get("name") or "").strip() or None
-            asset_category = (asset.get("asset_category") or "").strip() or None
-            asset_subcategory = (asset.get("asset_subcategory") or "").strip() or None
-            asset_risk_class = (asset.get("asset_risk_class") or "").strip().upper() or None
 
             position_rows.append({
                 "symbol": symbol,
@@ -252,7 +396,7 @@ class PortfolioService:
                 "quantity": quantity,
                 "avg_cost": avg_cost,
                 "total_cost": total_cost,
-                "last_price": 0.0,
+                "last_price": last_price,
                 "market_value_base": 0.0,
                 "unrealized_pnl_base": 0.0,
                 "asset_category": asset_category,
@@ -316,6 +460,8 @@ class PortfolioService:
             valuation_currency=account.base_currency,
         )
 
+        self._recalculate_fund_shares_from_management_total()
+
         return {
             "account_id": account_id,
             "asset_count": len(position_rows) - cash_written,
@@ -337,9 +483,10 @@ class PortfolioService:
         symbol: str,
         name: Optional[str] = None,
         trade_date: date,
-        side: str,
-        quantity: float,
-        price: float,
+        available_date: Optional[date] = None,
+        side: str = "buy",
+        quantity: float = 0.0,
+        price: float = 0.0,
         fee: float = 0.0,
         tax: float = 0.0,
         market: Optional[str] = None,
@@ -383,6 +530,7 @@ class PortfolioService:
                     market=market_norm,
                     currency=currency_norm,
                     trade_date=trade_date,
+                    available_date=available_date,
                     side=side_norm,
                     quantity=float(quantity),
                     price=float(price),
@@ -404,6 +552,7 @@ class PortfolioService:
                     market=market_norm,
                     currency=currency_norm,
                     trade_date=trade_date,
+                    available_date=available_date,
                     side=side_norm,
                     quantity=float(quantity),
                     price=float(price),
@@ -459,6 +608,8 @@ class PortfolioService:
                 currency=currency_norm,
                 note=(note or "").strip() or None,
             )
+            self._recalculate_fund_shares_from_management_total()
+
             return {"id": int(row.id)}
 
     def record_corporate_action(
@@ -473,14 +624,17 @@ class PortfolioService:
         market: Optional[str] = None,
         currency: Optional[str] = None,
         dividend_amount: Optional[float] = None,
+        split_ratio: Optional[float] = None,
         note: Optional[str] = None,
     ) -> Dict[str, Any]:
         action_type_norm = (action_type or "").strip().lower()
         if action_type_norm not in VALID_CORPORATE_ACTIONS:
             raise ValueError("action_type must be cash_dividend")
 
-        if dividend_amount is None or dividend_amount <= 0:
+        if action_type_norm == "cash_dividend" and (dividend_amount is None or dividend_amount <= 0):
             raise ValueError("dividend_amount must be > 0 for cash_dividend")
+        if action_type_norm == "stock_split" and (split_ratio is None or split_ratio <= 0):
+            raise ValueError("split_ratio must be > 0 for stock_split")
         with self.repo.portfolio_write_session() as session:
             account = self._require_active_account_in_session(session=session, account_id=account_id)
             market_norm = self._normalize_market(market or account.market)
@@ -488,24 +642,36 @@ class PortfolioService:
             symbol_norm = self._normalize_symbol_for_storage(symbol)
             if not symbol_norm:
                 raise ValueError("symbol is required")
-            dividend_amount_value = float(dividend_amount)
-            self._apply_cash_delta(
-                session=session,
-                account=account,
-                market=market_norm,
-                currency=currency_norm,
-                trade_date=effective_date,
-                amount_delta=dividend_amount_value,
-            )
-            self._apply_realized_pnl_to_position(
-                session=session,
-                account=account,
-                symbol=symbol_norm,
-                market=market_norm,
-                currency=currency_norm,
-                event_date=effective_date,
-                realized_pnl=dividend_amount_value,
-            )
+            dividend_amount_value = float(dividend_amount or 0.0)
+            split_ratio_value = float(split_ratio or 0.0) if action_type_norm == "stock_split" else None
+            if action_type_norm == "cash_dividend":
+                self._apply_cash_delta(
+                    session=session,
+                    account=account,
+                    market=market_norm,
+                    currency=currency_norm,
+                    trade_date=effective_date,
+                    amount_delta=dividend_amount_value,
+                )
+                self._apply_realized_pnl_to_position(
+                    session=session,
+                    account=account,
+                    symbol=symbol_norm,
+                    market=market_norm,
+                    currency=currency_norm,
+                    event_date=effective_date,
+                    realized_pnl=dividend_amount_value,
+                )
+            else:
+                self._apply_stock_split_to_position(
+                    session=session,
+                    account=account,
+                    symbol=symbol_norm,
+                    market=market_norm,
+                    currency=currency_norm,
+                    effective_date=effective_date,
+                    split_ratio=split_ratio_value or 0.0,
+                )
             row = self.repo.add_corporate_action_in_session(
                 session=session,
                 account_id=account_id,
@@ -516,8 +682,9 @@ class PortfolioService:
                 asset_subcategory=(asset_subcategory or "").strip() or None,
                 effective_date=effective_date,
                 action_type=action_type_norm,
-                cash_dividend_per_share=dividend_amount_value,
-                realized_pnl=dividend_amount_value,
+                cash_dividend_per_share=dividend_amount_value if action_type_norm == "cash_dividend" else None,
+                realized_pnl=dividend_amount_value if action_type_norm == "cash_dividend" else 0.0,
+                split_ratio=split_ratio_value,
                 note=(note or "").strip() or None,
             )
             return {"id": int(row.id)}
@@ -532,6 +699,7 @@ class PortfolioService:
         market: str,
         currency: str,
         trade_date: date,
+        available_date: Optional[date],
         side: str,
         quantity: float,
         price: float,
@@ -550,6 +718,7 @@ class PortfolioService:
             symbol=symbol,
             market=market,
             currency=currency,
+            available_date=None,
             cost_method=method,
         )
         old_quantity = float(position.quantity or 0.0) if position else 0.0
@@ -568,6 +737,8 @@ class PortfolioService:
                     name=name,
                     market=market,
                     currency=currency,
+                    available_date=None,
+                    open_watch_enabled=True,
                     quantity=total_quantity,
                     avg_cost=next_avg_cost,
                     total_cost=total_quantity * next_avg_cost,
@@ -656,6 +827,7 @@ class PortfolioService:
             symbol=cash_symbol,
             market=market,
             currency=currency,
+            available_date=None,
             cost_method=method,
         )
         if cash_position is None:
@@ -707,6 +879,7 @@ class PortfolioService:
             symbol=symbol,
             market=market,
             currency=currency,
+            available_date=None,
             cost_method="fifo",
         )
         if position is None:
@@ -718,6 +891,57 @@ class PortfolioService:
             as_of_date=event_date,
         )
         position.realized_pnl_base = float(position.realized_pnl_base or 0.0) + realized_pnl_base
+        position.updated_at = datetime.now()
+
+    def _apply_stock_split_to_position(
+        self,
+        *,
+        session: Any,
+        account: Any,
+        symbol: str,
+        market: str,
+        currency: str,
+        effective_date: date,
+        split_ratio: float,
+    ) -> None:
+        position = self.repo.get_position_in_session(
+            session=session,
+            account_id=int(account.id),
+            symbol=symbol,
+            market=market,
+            currency=currency,
+            available_date=None,
+            cost_method="fifo",
+        )
+        if position is None or float(position.quantity or 0.0) <= EPS:
+            raise PortfolioOversellError(
+                symbol=symbol,
+                trade_date=effective_date,
+                requested_quantity=0.0,
+                available_quantity=0.0,
+            )
+        factor = (10.0 + float(split_ratio)) / 10.0
+        if factor <= 1.0:
+            raise ValueError("stock_split factor must be > 1")
+        position.quantity = float(position.quantity or 0.0) * factor
+        position.avg_cost = float(position.avg_cost or 0.0) / factor
+        position.last_price = float(position.last_price or 0.0) / factor
+        position.total_cost = position.quantity * position.avg_cost
+        market_value = position.quantity * position.last_price
+        market_value_base, _, _ = self._convert_amount(
+            amount=market_value,
+            from_currency=currency,
+            to_currency="CNY",
+            as_of_date=effective_date,
+        )
+        total_cost_base, _, _ = self._convert_amount(
+            amount=position.total_cost,
+            from_currency=currency,
+            to_currency="CNY",
+            as_of_date=effective_date,
+        )
+        position.market_value_base = market_value_base
+        position.unrealized_pnl_base = market_value_base - total_cost_base
         position.updated_at = datetime.now()
 
     def list_trade_events(
@@ -1050,6 +1274,18 @@ class PortfolioService:
             qty = float(position.quantity or 0.0)
             avg_cost_val = float(position.avg_cost or 0.0)
             last_price = float(position.last_price or 0.0)
+            avg_cost_val = round_asset_price(
+                avg_cost_val,
+                symbol=position.symbol,
+                asset_category=position.asset_category,
+                asset_subcategory=position.asset_subcategory,
+            )
+            last_price = round_asset_price(
+                last_price,
+                symbol=position.symbol,
+                asset_category=position.asset_category,
+                asset_subcategory=position.asset_subcategory,
+            )
             total_cost = float(position.total_cost or 0.0)
             local_market_value = qty * last_price
             market_base, stale_market, _ = self._convert_amount(
@@ -1080,14 +1316,16 @@ class PortfolioService:
                     "name": position.name or None,
                     "market": position.market,
                     "currency": position.currency,
+                    "available_date": position.available_date.isoformat() if position.available_date else None,
+                    "open_watch_enabled": bool(position.open_watch_enabled),
                     "quantity": qty,
                     "avg_cost": avg_cost_val,
-                    "total_cost": total_cost,
-                    "last_price": round(last_price, 8),
+                    "total_cost": round_money(total_cost),
+                    "last_price": last_price,
                     "price_change_pct": round(float(position.price_change_pct), 8) if position.price_change_pct is not None else None,
-                    "market_value_base": round(market_base, 8),
-                    "unrealized_pnl_base": round(unrealized, 8),
-                    "realized_pnl_base": round(float(position.realized_pnl_base or 0.0), 8),
+                    "market_value_base": round_money(market_base),
+                    "unrealized_pnl_base": round_money(unrealized),
+                    "realized_pnl_base": round_money(float(position.realized_pnl_base or 0.0)),
                     "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
                     "asset_category": position.asset_category,
                     "asset_subcategory": position.asset_subcategory,
@@ -1102,6 +1340,94 @@ class PortfolioService:
                 }
             )
         return {"items": items, "total": len(items)}
+
+    def list_open_date_positions(self) -> Dict[str, Any]:
+        rows = self.repo.list_open_date_trades()
+        items: List[Dict[str, Any]] = []
+        valuation_currency = "CNY"
+        as_of_date = date.today()
+        for trade, account in rows:
+            qty = float(trade.quantity or 0.0)
+            avg_cost_val = round_asset_price(
+                float(trade.price or 0.0),
+                symbol=trade.symbol,
+                asset_category=trade.asset_category,
+                asset_subcategory=trade.asset_subcategory,
+            )
+            price_info = self._resolve_cached_position_price(
+                symbol=trade.symbol,
+                market=trade.market,
+                currency=trade.currency,
+                account_base_currency=account.base_currency,
+                as_of_date=as_of_date,
+                asset_category=trade.asset_category,
+            )
+            last_price = price_info["price"] if price_info["available"] else trade.price
+            last_price = round_asset_price(
+                float(last_price or trade.price or 0.0),
+                symbol=trade.symbol,
+                asset_category=trade.asset_category,
+                asset_subcategory=trade.asset_subcategory,
+            )
+            total_cost = qty * float(trade.price or 0.0) + float(trade.fee or 0.0) + float(trade.tax or 0.0)
+            market_base, stale_market, _ = self._convert_amount(
+                amount=qty * last_price,
+                from_currency=trade.currency,
+                to_currency=valuation_currency,
+                as_of_date=as_of_date,
+            )
+            cost_base, stale_cost, _ = self._convert_amount(
+                amount=total_cost,
+                from_currency=trade.currency,
+                to_currency=valuation_currency,
+                as_of_date=as_of_date,
+            )
+            unrealized = market_base - cost_base
+            unrealized_pct = (unrealized / cost_base * 100.0) if abs(cost_base) > EPS else None
+            items.append({
+                "id": int(trade.id),
+                "account_id": int(account.id),
+                "account_name": account.name,
+                "owner_id": account.owner_id,
+                "base_currency": account.base_currency,
+                "cost_method": "fifo",
+                "symbol": trade.symbol,
+                "name": trade.name or None,
+                "market": trade.market,
+                "currency": trade.currency,
+                "available_date": trade.available_date.isoformat() if trade.available_date else None,
+                "open_watch_enabled": bool(trade.open_watch_enabled),
+                "quantity": qty,
+                "avg_cost": avg_cost_val,
+                "total_cost": round_money(total_cost),
+                "last_price": last_price,
+                "price_change_pct": None,
+                "market_value_base": round_money(market_base),
+                "unrealized_pnl_base": round_money(unrealized),
+                "realized_pnl_base": round_money(float(trade.realized_pnl or 0.0)),
+                "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                "asset_category": trade.asset_category,
+                "asset_subcategory": trade.asset_subcategory,
+                "asset_risk_class": trade.asset_risk_class,
+                "valuation_currency": valuation_currency,
+                "price_source": "cached",
+                "price_provider": None,
+                "price_date": trade.created_at.isoformat() if trade.created_at else None,
+                "price_stale": last_price <= 0 or stale_market or stale_cost or bool(price_info["stale"]),
+                "price_available": last_price > 0,
+                "updated_at": trade.created_at.isoformat() if trade.created_at else None,
+            })
+        return {"items": items, "total": len(items)}
+
+    def disable_open_date_watch(self, position_id: int) -> Dict[str, int]:
+        row = self.repo.disable_open_date_watch(position_id)
+        if row is None:
+            raise ValueError(f"Position not found: {position_id}")
+        return {"id": int(row.id)}
+
+    def get_management_total_equity(self, *, cost_method: str = "fifo") -> float:
+        positions = self.list_positions(cost_method=cost_method).get("items", [])
+        return round_money(sum(float(item.get("market_value_base") or 0.0) for item in positions))
 
     def _sync_realized_pnl_base_from_events(
         self,
@@ -1203,12 +1529,18 @@ class PortfolioService:
             unrealized = market_base - cost_base
             unrealized_pct = (unrealized / cost_base * 100.0) if abs(cost_base) > EPS else None
             updated_item = dict(item)
+            quote_price = round_asset_price(
+                float(quote.price),
+                symbol=symbol,
+                asset_category=item.get("asset_category"),
+                asset_subcategory=item.get("asset_subcategory"),
+            )
             updated_item.update({
                 "name": quote.name or item.get("name"),
-                "last_price": round(float(quote.price), 8),
+                "last_price": quote_price,
                 "price_change_pct": round(float(quote.change_pct), 8) if quote.change_pct is not None else None,
-                "market_value_base": round(market_base, 8),
-                "unrealized_pnl_base": round(unrealized, 8),
+                "market_value_base": round_money(market_base),
+                "unrealized_pnl_base": round_money(unrealized),
                 "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
                 "price_source": "realtime_quote",
                 "price_provider": quote.provider,
@@ -1862,7 +2194,12 @@ class PortfolioService:
 
             if pos and pos.last_price and pos.last_price > 0:
                 return {
-                    "price": float(pos.last_price),
+                    "price": round_asset_price(
+                        float(pos.last_price),
+                        symbol=pos.symbol,
+                        asset_category=pos.asset_category,
+                        asset_subcategory=pos.asset_subcategory,
+                    ),
                     "source": "cached",
                     "provider": None,
                     "price_date": pos.updated_at.isoformat() if pos.updated_at else None,
@@ -1892,7 +2229,7 @@ class PortfolioService:
             fund_nav, fund_date = self._fetch_fund_nav(symbol)
             if fund_nav is not None and fund_nav > 0:
                 return _ResolvedPositionPrice(
-                    price=float(fund_nav),
+                    price=round_asset_price(fund_nav, symbol=symbol, asset_category=asset_category),
                     source="fund_nav",
                     price_date=fund_date,
                     is_stale=(fund_date < as_of_date if fund_date else True),
@@ -1905,7 +2242,7 @@ class PortfolioService:
                 close_price, close_date = close
                 if close_price > 0:
                     return _ResolvedPositionPrice(
-                        price=float(close_price),
+                        price=round_asset_price(close_price, symbol=symbol, asset_category=asset_category),
                         source="history_close",
                         price_date=close_date,
                         is_stale=close_date < as_of_date,
@@ -1923,7 +2260,7 @@ class PortfolioService:
             realtime_quote = self._fetch_realtime_position_price(symbol)
             if realtime_quote is not None and realtime_quote.price > 0:
                 return _ResolvedPositionPrice(
-                    price=float(realtime_quote.price),
+                    price=round_asset_price(realtime_quote.price, symbol=symbol, asset_category=asset_category),
                     source="realtime_quote",
                     price_date=today,
                     is_stale=False,
@@ -1937,7 +2274,7 @@ class PortfolioService:
             close_price, close_date = close
             if close_price > 0:
                 return _ResolvedPositionPrice(
-                    price=float(close_price),
+                    price=round_asset_price(close_price, symbol=symbol, asset_category=asset_category),
                     source="history_close",
                     price_date=close_date,
                     is_stale=close_date < as_of_date,
@@ -2021,8 +2358,7 @@ class PortfolioService:
         if nav is None or nav <= 0:
             return None, name
 
-        return nav, name
-        return numeric_price, provider
+        return round_asset_price(nav, symbol=symbol, asset_category="fund"), name
 
     @staticmethod
     def _normalize_symbol_for_storage(symbol: str) -> str:
@@ -2057,6 +2393,36 @@ class PortfolioService:
 
         if not fields:
             raise ValueError("At least one of quantity, avg_cost, last_price must be provided")
+
+        from src.storage import PortfolioPosition
+
+        with self.repo.db.get_session() as session:
+            stmt = select(PortfolioPosition).where(PortfolioPosition.id == position_id)
+            if account_id is not None:
+                stmt = stmt.where(PortfolioPosition.account_id == account_id)
+            existing = session.execute(stmt.limit(1)).scalar_one_or_none()
+            if existing is not None:
+                metadata = _PositionMetadata(
+                    asset_category=existing.asset_category,
+                    asset_subcategory=existing.asset_subcategory,
+                )
+                existing_symbol = existing.symbol
+        if existing is None:
+            return None
+        if "avg_cost" in fields:
+            fields["avg_cost"] = round_asset_price(
+                fields["avg_cost"],
+                symbol=existing_symbol,
+                asset_category=metadata.asset_category,
+                asset_subcategory=metadata.asset_subcategory,
+            )
+        if "last_price" in fields:
+            fields["last_price"] = round_asset_price(
+                fields["last_price"],
+                symbol=existing_symbol,
+                asset_category=metadata.asset_category,
+                asset_subcategory=metadata.asset_subcategory,
+            )
 
         updated = self.repo.update_position_fields(
             position_id=position_id,
@@ -2498,6 +2864,8 @@ class PortfolioService:
             "market": row.market,
             "currency": row.currency,
             "trade_date": row.trade_date.isoformat() if row.trade_date else "",
+            "available_date": row.available_date.isoformat() if row.available_date else None,
+            "open_watch_enabled": bool(row.open_watch_enabled),
             "side": row.side,
             "quantity": float(row.quantity),
             "price": float(row.price),
@@ -2539,6 +2907,7 @@ class PortfolioService:
             "dividend_amount": (
                 float(row.cash_dividend_per_share) if row.cash_dividend_per_share is not None else None
             ),
+            "split_ratio": float(row.split_ratio) if row.split_ratio is not None else None,
             "realized_pnl": float(row.realized_pnl or 0.0),
             "note": row.note,
             "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -2603,6 +2972,10 @@ class PortfolioService:
 
         if refresh_fx:
             results["fx"] = self._refresh_fx_rates()
+
+        fund_nav_result = self._recalculate_fund_nav_from_management_total()
+        if fund_nav_result is not None:
+            results["fund_nav"] = fund_nav_result
 
         return results
 

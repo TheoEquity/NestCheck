@@ -25,7 +25,7 @@ const PortfolioPage: React.FC = () => {
         <Card className="!rounded-xl" padding="sm">
           <p className="text-xs uppercase tracking-[0.22em] text-secondary">Step 02</p>
           <h2 className="mt-2 text-base font-semibold text-foreground">资产管理</h2>
-          <p className="mt-2 text-sm text-secondary">查看静态持仓快照，并对股票持仓进行页面级实时重估。</p>
+          <p className="mt-2 text-sm text-secondary">查看持仓快照、组合净值、配置占比与开放日跟踪入口。</p>
           <Link className="btn-secondary mt-4 inline-flex !px-3 !py-1.5 !text-xs" to="/assets/manage">
             前往资产管理
           </Link>

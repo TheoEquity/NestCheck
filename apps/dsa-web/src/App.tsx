@@ -13,6 +13,7 @@ import './App.css';
 
 const AssetDashboardPage = lazy(() => import('./pages/AssetDashboardPage'));
 const AssetManagementPage = lazy(() => import('./pages/AssetManagementPage'));
+const AssetOpenDatesPage = lazy(() => import('./pages/AssetOpenDatesPage'));
 const AssetDiagnosisPage = lazy(() => import('./pages/AssetDiagnosisPage'));
 const AssetAllocationPage = lazy(() => import('./pages/AssetAllocationPage'));
 const AssetInitializationPage = lazy(() => import('./pages/AssetInitializationPage'));
@@ -82,6 +83,7 @@ const AppContent: React.FC = () => {
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/analysis" element={<Navigate to="/watchlist" replace />} />
         <Route path="/assets/manage" element={<AssetManagementPage />} />
+        <Route path="/assets/open-dates" element={<AssetOpenDatesPage />} />
         <Route path="/assets/diagnosis" element={<AssetDiagnosisPage />} />
         <Route path="/assets/allocation" element={<AssetAllocationPage />} />
         <Route path="/assets/init" element={<AssetInitializationPage />} />

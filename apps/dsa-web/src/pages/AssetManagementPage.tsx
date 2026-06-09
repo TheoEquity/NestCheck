@@ -1,12 +1,15 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader, StatCard } from '../components/common';
 import { portfolioApi } from '../api/portfolio';
-import type { PortfolioLatestFxRateItem, PortfolioPositionRecordItem } from '../types/portfolio';
+import type { PortfolioLatestFxRateItem, PortfolioFundStatusResponse, PortfolioPositionRecordItem } from '../types/portfolio';
 import {
   formatMoney,
+  formatNav,
   formatPct,
+  formatPrice,
   formatSignedPct,
   getPositionRiskLevel,
   getMarketLabel,
@@ -284,8 +287,10 @@ const AssetManagementPage: React.FC = () => {
   useEffect(() => {
     document.title = '资产管理 - NestCheck';
   }, []);
+  const navigate = useNavigate();
 
-  const { accounts, risk, positions, error, reload, syncData, isRefreshing } = usePortfolioOverview();
+  const { accounts, risk, positions, error, reload } = usePortfolioOverview();
+  const [fundStatus, setFundStatus] = useState<PortfolioFundStatusResponse | null>(null);
   const [fxRates, setFxRates] = useState<PortfolioLatestFxRateItem[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [accountFilter, setAccountFilter] = useState('全部');
@@ -431,19 +436,22 @@ const AssetManagementPage: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    void portfolioApi.getLatestFxRates({ toCurrency: 'CNY' })
-      .then((response) => {
-        if (!active) return;
-        setFxRates(response.items || []);
-      })
-      .catch(() => {
-        if (!active) return;
-        setFxRates([]);
-      });
+    Promise.all([
+      portfolioApi.getFundStatus().catch(() => null),
+      portfolioApi.getLatestFxRates({ toCurrency: 'CNY' }).catch(() => ({ items: [] })),
+    ]).then(([fundResp, fxResp]) => {
+      if (!active) return;
+      if (fundResp) setFundStatus(fundResp);
+      if (fxResp) setFxRates(fxResp.items || []);
+    }).catch(() => {
+      if (!active) return;
+      setFundStatus(null);
+      setFxRates([]);
+    });
     return () => {
       active = false;
     };
-  }, [isRefreshing]);
+  }, []);
 
   const toggleSort = (key: 'marketValueBase' | 'unrealizedPnlPct' | 'currency' | 'symbol') => {
     if (sortKey === key) {
@@ -486,23 +494,28 @@ const AssetManagementPage: React.FC = () => {
         className="!rounded-xl !px-4 !py-3"
         actions={
           <Button
-            onClick={() => void syncData()}
-            disabled={isRefreshing}
+            onClick={() => navigate('/assets/open-dates')}
             variant="primary"
             size="sm"
             className="!px-4 !py-1.5"
           >
-            {isRefreshing ? '实时重估中...' : '实时重估'}
+            开放日跟踪
           </Button>
         }
       />
       {error ? <ApiErrorAlert error={error} /> : null}
 
-      <section className="grid gap-2 xl:grid-cols-[1.1fr_0.9fr_0.9fr_1.2fr]">
+      <section className="grid gap-2 xl:grid-cols-[1.1fr_0.9fr_0.9fr_1.1fr_1.2fr]">
         <StatCard
           label="总资产"
           value={formatMoney(totalMarketValue, 'CNY')}
           hint={<span>账户数 {accounts.length}</span>}
+          className="!rounded-xl !p-3"
+        />
+        <StatCard
+          label="单位净值"
+          value={fundStatus?.latestNav ? formatNav(fundStatus.latestNav) : '—'}
+          hint={fundStatus?.latestShares ? `资产份额：${fundStatus.latestShares.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '资产份额：—'}
           className="!rounded-xl !p-3"
         />
         <StatCard
@@ -512,7 +525,7 @@ const AssetManagementPage: React.FC = () => {
           className="!rounded-xl !p-3"
         />
         <StatCard
-          label="持仓盈亏"
+          label="持仓收益"
           value={formatMoney(totalUnrealizedPnl, 'CNY')}
           hint={formatSignedPct(totalCost > 0 ? (totalUnrealizedPnl / totalCost) * 100 : 0)}
           className="!rounded-xl !p-3"
@@ -608,7 +621,7 @@ const AssetManagementPage: React.FC = () => {
                       市值(CNY) {getSortLabel('marketValueBase')}
                     </button>
                   </th>
-                  <th className="px-2 py-1.5 text-right">未实现盈亏(CNY)</th>
+                  <th className="px-2 py-1.5 text-right">持仓收益(CNY)</th>
                   <th className="px-2 py-1.5 text-right">
                     <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort('unrealizedPnlPct')}>
                       收益率 {getSortLabel('unrealizedPnlPct')}
@@ -635,9 +648,9 @@ const AssetManagementPage: React.FC = () => {
                       </td>
                       <td className="px-1 py-1.5 text-right">{Number(row.quantity || 0).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}</td>
                       <td className="px-1 py-1.5 text-right text-[11px]">{row.currency}</td>
-                      <td className="px-3 py-1.5 text-right" style={{minWidth: '112px'}}>{formatMoney(row.avgCost, row.currency)}</td>
+                      <td className="px-3 py-1.5 text-right" style={{minWidth: '112px'}}>{formatPrice(row.avgCost, row.currency, row)}</td>
                       <td className="px-2 py-1.5 text-right">
-                        <div>{formatMoney(row.lastPrice, row.currency)}</div>
+                        <div>{formatPrice(row.lastPrice, row.currency, row)}</div>
                         <div className={Number(row.priceChangePct || 0) >= 0 ? 'text-[11px] text-red-500' : 'text-[11px] text-green-600'}>
                           {formatSignedPct(row.priceChangePct)}
                         </div>

@@ -1,6 +1,6 @@
 export type WatchlistMarket = 'cn' | 'hk' | 'us';
-export type WatchlistAssetCategory = 'fund' | 'stock' | 'index';
-export type WatchlistAssetSubcategory = '' | 'pure_bond_fund' | 'fixed_income_plus' | 'index_fund' | 'equity_fund';
+export type WatchlistAssetCategory = 'fund' | 'stock';
+export type WatchlistAssetSubcategory = string;
 export type WatchlistPriority = 'low' | 'medium' | 'high';
 export type WatchlistAnalysisFrequency = 'daily' | 'weekly' | 'manual';
 

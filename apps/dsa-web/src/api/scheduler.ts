@@ -9,7 +9,7 @@ export interface SchedulerTask {
   name?: string;
   description?: string;
   scheduleType?: string;
-  scheduleTime?: string | null;
+  scheduleTime?: string | string[] | null;
   intervalSeconds?: number | null;
   enabled?: boolean;
   successRate?: string | null;

@@ -18,9 +18,9 @@ SEED_TASKS: List[Dict] = [
     {
         "task_key": "market_cache_refresh",
         "name": "市场数据刷新",
-        "description": "Web 服务后台托管的市场数据刷新入口：每日 20:30 刷新组合价格、风险指标、板块 ETF、自选信号和首页市场缓存；交易时段另有 5 分钟市场缓存刷新循环。",
+        "description": "Web 服务后台托管的市场数据刷新入口：每日 08:30 和 20:30 刷新组合价格、基金净值、风险指标、板块 ETF、自选信号和首页市场缓存；交易时段另有 5 分钟市场缓存刷新循环。",
         "schedule_type": "daily",
-        "schedule_time": "20:30",
+        "schedule_time": "08:30,20:30",
         "interval_seconds": None,
         "enabled": True,
     },

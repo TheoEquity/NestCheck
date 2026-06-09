@@ -1,14 +1,17 @@
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Settings, Plus, Trash2, X } from 'lucide-react';
+import { portfolioApi } from '../api/portfolio';
 import { watchlistApi } from '../api/watchlist';
 import { marketApi, type SectorEtfConfig, type SectorEtfDashboardResponse } from '../api/market';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { ApiErrorAlert, Badge, Button, Card, Input, Select, Textarea } from '../components/common';
 import type { WatchlistAssetCategory, WatchlistItem, WatchlistItemInput } from '../types/watchlist';
+import type { AssetCategoryDefinitionItem } from '../types/portfolio';
 import { cn } from '../utils/cn';
 
 type FormState = WatchlistItemInput;
+type WatchlistTargetTab = 'stock' | 'fund';
 
 const initialForm: FormState = {
   market: 'cn',
@@ -35,27 +38,16 @@ const marketOptions = [
   { value: 'us', label: '美股' },
 ];
 
-const assetCategoryOptions: Array<{ value: WatchlistAssetCategory; label: string }> = [
-  { value: 'stock', label: '股票' },
-  { value: 'fund', label: '基金' },
-  { value: 'index', label: '指数' },
-];
-
-const fundSubcategoryOptions = [
-  { value: '', label: '请选择' },
-  { value: 'pure_bond_fund', label: '纯债基金' },
-  { value: 'fixed_income_plus', label: '固收+' },
-  { value: 'index_fund', label: '指数基金' },
-  { value: 'equity_fund', label: '股票基金' },
-];
+const WATCHLIST_ALLOWED_CATEGORIES = new Set(['stock', 'fund']);
 
 function splitTags(value: string): string[] {
   return value.split(',').map((tag) => tag.trim()).filter(Boolean);
 }
 
-function formatPrice(value?: number | null): string {
+function formatPrice(value?: number | null, assetCategory?: string | null): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  return Number(value).toFixed(2);
+  const precision = String(assetCategory || '').toLowerCase() === 'fund' ? 4 : 2;
+  return Number(value).toFixed(precision);
 }
 
 function formatChangePct(value?: number | null): string {
@@ -91,6 +83,24 @@ const WatchlistPage: React.FC = () => {
   const [sectorDrafts, setSectorDrafts] = useState<Record<string, SectorEtfConfig>>({});
   const [signalRefreshing, setSignalRefreshing] = useState(false);
   const [actionItemId, setActionItemId] = useState<number | null>(null);
+  const [assetCategoryDefinitions, setAssetCategoryDefinitions] = useState<AssetCategoryDefinitionItem[]>([]);
+  const [targetTab, setTargetTab] = useState<WatchlistTargetTab>('stock');
+
+  const watchlistCategoryDefinitions = useMemo(
+    () => assetCategoryDefinitions.filter((item) => WATCHLIST_ALLOWED_CATEGORIES.has(item.code)),
+    [assetCategoryDefinitions],
+  );
+
+  const categoryByCode = useMemo(() => {
+    const map = new Map<string, AssetCategoryDefinitionItem>();
+    watchlistCategoryDefinitions.forEach((definition) => map.set(definition.code, definition));
+    return map;
+  }, [watchlistCategoryDefinitions]);
+
+  const assetCategoryOptions = useMemo(
+    () => watchlistCategoryDefinitions.map((item) => ({ value: item.code, label: item.name })),
+    [watchlistCategoryDefinitions],
+  );
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -118,14 +128,30 @@ const WatchlistPage: React.FC = () => {
     }
   }, []);
 
+  const loadAssetCategoryDefinitions = useCallback(async () => {
+    try {
+      const response = await portfolioApi.getAssetCategoryDefinitions();
+      setAssetCategoryDefinitions(response.definitions || []);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    }
+  }, []);
+
   useEffect(() => {
     document.title = '关注标的 - NestCheck';
     void loadItems();
     void loadSectorEtfs();
-  }, [loadItems, loadSectorEtfs]);
+    void loadAssetCategoryDefinitions();
+  }, [loadItems, loadSectorEtfs, loadAssetCategoryDefinitions]);
 
   const openCreate = () => {
-    setForm(initialForm);
+    const initialCategory = categoryByCode.get(initialForm.assetCategory) || watchlistCategoryDefinitions[0];
+    setForm({
+      ...initialForm,
+      assetCategory: initialCategory?.code || initialForm.assetCategory,
+      assetSubcategory: '',
+      assetRiskClass: initialCategory?.defaultRiskClass || initialForm.assetRiskClass,
+    });
     setTagInput('');
     setFormOpen(true);
   };
@@ -217,7 +243,7 @@ const WatchlistPage: React.FC = () => {
   };
 
   const indexItems = items.filter(isIndexItem);
-  const targetItems = items.filter((item) => !isIndexItem(item));
+  const targetItems = items.filter((item) => String(item.assetCategory || '').toLowerCase() === targetTab);
   void indexItems;
 
   return (
@@ -245,11 +271,19 @@ const WatchlistPage: React.FC = () => {
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             <Select label="市场" value={form.market} onChange={(value) => updateForm('market', value)} options={marketOptions} />
-            <Select label="资产大类" value={form.assetCategory} onChange={(value) => setForm((prev) => ({ ...prev, assetCategory: value as WatchlistAssetCategory, assetSubcategory: value === 'fund' ? prev.assetSubcategory : '' }))} options={assetCategoryOptions} />
+            <Select label="资产大类" value={form.assetCategory} onChange={(value) => {
+              const definition = categoryByCode.get(value);
+              setForm((prev) => ({
+                ...prev,
+                assetCategory: value as WatchlistAssetCategory,
+                assetSubcategory: '',
+                assetRiskClass: definition?.defaultRiskClass || prev.assetRiskClass,
+              }));
+            }} options={assetCategoryOptions} />
             <Input label="代码" value={form.symbol} onChange={(event) => updateForm('symbol', event.target.value)} placeholder="600519 / 013360" />
             <Input label="名称" value={form.name || ''} onChange={(event) => updateForm('name', event.target.value)} placeholder="贵州茅台" />
             <Input label="币种" value={form.currency} onChange={(event) => updateForm('currency', event.target.value)} placeholder="CNY" />
-            <Select label="资产细类" value={form.assetSubcategory || ''} onChange={(value) => updateForm('assetSubcategory', value)} disabled={form.assetCategory !== 'fund'} options={form.assetCategory === 'fund' ? fundSubcategoryOptions : [{ value: '', label: '--' }]} />
+            <Select label="资产细类" value={form.assetSubcategory || ''} onChange={(value) => updateForm('assetSubcategory', value)} disabled={(categoryByCode.get(form.assetCategory)?.subcategories || []).length === 0} options={(categoryByCode.get(form.assetCategory)?.subcategories || []).length > 0 ? categoryByCode.get(form.assetCategory)!.subcategories.map((item) => ({ value: item.code, label: item.name })) : [{ value: '', label: '--' }]} />
             <Select label="风险分类" value={form.assetRiskClass || ''} onChange={(value) => updateForm('assetRiskClass', value)} options={[{ value: '', label: '未设置' }, { value: 'R1', label: 'R1' }, { value: 'R2', label: 'R2' }, { value: 'R3', label: 'R3' }, { value: 'R4', label: 'R4' }, { value: 'R5', label: 'R5' }]} />
             <Select label="关注优先级" value={form.watchPriority} onChange={(value) => updateForm('watchPriority', value)} options={[{ value: 'high', label: '高' }, { value: 'medium', label: '中' }, { value: 'low', label: '低' }]} />
             <Select label="分析频率" value={form.analysisFrequency} onChange={(value) => updateForm('analysisFrequency', value)} options={[{ value: 'daily', label: '每日' }, { value: 'weekly', label: '每周' }, { value: 'manual', label: '手动' }]} />
@@ -284,11 +318,14 @@ const WatchlistPage: React.FC = () => {
                 onSaveConfig={() => void saveSectorConfig()}
               />
               <WatchSectionCard
-                title="关注标的"
+                activeTab={targetTab}
                 items={targetItems}
-                emptyText="还没有关注标的。"
+                stockCount={items.filter((item) => String(item.assetCategory || '').toLowerCase() === 'stock').length}
+                fundCount={items.filter((item) => String(item.assetCategory || '').toLowerCase() === 'fund').length}
+                emptyText={targetTab === 'stock' ? '还没有关注股票。' : '还没有关注基金。'}
                 refreshing={signalRefreshing}
                 actionItemId={actionItemId}
+                onTabChange={setTargetTab}
                 onRefresh={() => void refreshSignals()}
                 onMove={(item, direction) => void moveItem(item, direction)}
                 onDelete={(item) => void deleteItem(item)}
@@ -416,30 +453,52 @@ function SectorRankingBlock({ title, items, metric, showRs = false }: { title: s
 }
 
 function WatchSectionCard({
-  title,
+  activeTab,
   items,
+  stockCount,
+  fundCount,
   emptyText,
   compact = false,
   refreshing = false,
   actionItemId = null,
+  onTabChange,
   onRefresh,
   onMove,
   onDelete,
 }: {
-  title: string;
+  activeTab: WatchlistTargetTab;
   items: WatchlistItem[];
+  stockCount: number;
+  fundCount: number;
   emptyText: string;
   compact?: boolean;
   refreshing?: boolean;
   actionItemId?: number | null;
+  onTabChange: (tab: WatchlistTargetTab) => void;
   onRefresh?: () => void;
   onMove?: (item: WatchlistItem, direction: 'up' | 'down') => void;
   onDelete?: (item: WatchlistItem) => void;
 }) {
+  const tabs: Array<{ value: WatchlistTargetTab; label: string; count: number }> = [
+    { value: 'stock', label: '股票', count: stockCount },
+    { value: 'fund', label: '基金', count: fundCount },
+  ];
+
   return (
     <Card className="flex min-h-[18rem] flex-col rounded-xl p-4 lg:min-h-full">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="inline-flex w-fit rounded-lg border border-subtle bg-background/60 p-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => onTabChange(tab.value)}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${activeTab === tab.value ? 'bg-primary text-primary-foreground shadow-sm' : 'text-secondary-text hover:bg-hover hover:text-foreground'}`}
+            >
+              {tab.label} {tab.count}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-2">
           {onRefresh ? <Button type="button" variant="secondary" onClick={onRefresh} isLoading={refreshing} loadingText="刷新中" className="h-8 px-2 text-xs">刷新红绿灯</Button> : null}
           <Badge>{items.length}</Badge>
@@ -550,7 +609,7 @@ function InstrumentBlock({
       </div>
       <div className="mt-0.5 text-[11px] text-muted-text">{displaySymbol}</div>
       <div className="mt-2 flex items-baseline gap-2 text-[11px]">
-        <span className="font-mono text-base font-semibold text-foreground">{formatPrice(item.latestPrice)}</span>
+        <span className="font-mono text-base font-semibold text-foreground">{formatPrice(item.latestPrice, item.assetCategory)}</span>
         <span className={`font-mono font-semibold ${changeTone.className}`}>{formatChangePct(item.latestChangePct)}</span>
       </div>
       <div className="mt-2 flex gap-1">

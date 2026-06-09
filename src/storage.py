@@ -512,6 +512,19 @@ class PortfolioAccount(Base):
     )
 
 
+class PortfolioFundValue(Base):
+    """Time-series records of global internal fund: shares, NAV and total_equity."""
+
+    __tablename__ = 'portfolio_fund_values'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    record_date = Column(Date, nullable=False, index=True)
+    fund_shares = Column(Float, nullable=False, default=0.0)
+    fund_nav = Column(Float, nullable=False, default=1.0)
+    total_equity = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, default=datetime.now)
+
+
 class PortfolioTrade(Base):
     """Executed trade events used as the source of truth for replay."""
 
@@ -525,6 +538,8 @@ class PortfolioTrade(Base):
     market = Column(String(8), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     trade_date = Column(Date, nullable=False, index=True)
+    available_date = Column(Date, nullable=True, index=True)
+    open_watch_enabled = Column(Boolean, nullable=False, default=True, index=True)
     side = Column(String(8), nullable=False)  # buy/sell
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
@@ -604,6 +619,8 @@ class PortfolioPosition(Base):
     name = Column(String(64), nullable=True)
     market = Column(String(8), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
+    available_date = Column(Date, nullable=True, index=True)
+    open_watch_enabled = Column(Boolean, nullable=False, default=True, index=True)
     quantity = Column(Float, nullable=False, default=0.0)
     avg_cost = Column(Float, nullable=False, default=0.0)
     total_cost = Column(Float, nullable=False, default=0.0)
@@ -642,6 +659,8 @@ class PortfolioPositionLot(Base):
     market = Column(String(8), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     open_date = Column(Date, nullable=False, index=True)
+    available_date = Column(Date, nullable=True, index=True)
+    open_watch_enabled = Column(Boolean, nullable=False, default=True, index=True)
     remaining_quantity = Column(Float, nullable=False, default=0.0)
     unit_cost = Column(Float, nullable=False, default=0.0)
     source_trade_id = Column(Integer, ForeignKey('portfolio_trades.id'))
@@ -703,6 +722,28 @@ class AssetRiskDefinition(Base):
 
     __table_args__ = (
         Index('ix_risk_def_class_active', 'asset_risk_class', 'is_active'),
+    )
+
+
+class AssetCategoryDefinition(Base):
+    """Definition of portfolio asset categories and subcategories."""
+
+    __tablename__ = 'asset_category_definitions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category_code = Column(String(32), nullable=False, index=True)
+    category_name = Column(String(64), nullable=False)
+    subcategory_code = Column(String(64), nullable=False, default="")
+    subcategory_name = Column(String(64), nullable=False, default="")
+    default_risk_class = Column(String(8))
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('category_code', 'subcategory_code', name='uix_asset_category_subcategory'),
+        Index('ix_asset_category_def_active_order', 'is_active', 'sort_order'),
     )
 
 
@@ -1322,6 +1363,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             # 创建所有表
             Base.metadata.create_all(self._engine)
             self._ensure_portfolio_asset_metadata_columns()
+            self._init_asset_category_definitions()
             self._init_asset_risk_definitions()
             self._init_sector_etfs()
 
@@ -1402,6 +1444,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         required_columns = {
             "portfolio_trades": {
                 "name": "VARCHAR(64)",
+                "available_date": "DATE",
+                "open_watch_enabled": "BOOLEAN DEFAULT 1",
                 "asset_category": "VARCHAR(32)",
                 "asset_subcategory": "VARCHAR(64)",
                 "asset_risk_class": "VARCHAR(8)",
@@ -1418,11 +1462,17 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "realized_pnl": "FLOAT DEFAULT 0",
             },
             "portfolio_positions": {
+                "available_date": "DATE",
+                "open_watch_enabled": "BOOLEAN DEFAULT 1",
                 "asset_category": "VARCHAR(32)",
                 "asset_subcategory": "VARCHAR(64)",
                 "asset_risk_class": "VARCHAR(8)",
                 "price_change_pct": "FLOAT",
                 "realized_pnl_base": "FLOAT DEFAULT 0",
+            },
+            "portfolio_position_lots": {
+                "available_date": "DATE",
+                "open_watch_enabled": "BOOLEAN DEFAULT 1",
             },
             "watchlist_items": {
                 "sort_order": "INTEGER DEFAULT 0",
@@ -1443,6 +1493,62 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     connection.exec_driver_sql(
                         f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
                     )
+
+    def _init_asset_category_definitions(self) -> None:
+        """Initialize portfolio asset category and subcategory definitions."""
+        try:
+            with self._SessionLocal() as session:
+                default_definitions = [
+                    ("cash", "现金", "current", "活期", "R1", 10),
+                    ("cash", "现金", "fixed_deposit", "定期", "R1", 11),
+                    ("fund", "基金", "", "请选择", "R3", 20),
+                    ("fund", "基金", "pure_bond_fund", "纯债基金", "R2", 21),
+                    ("fund", "基金", "fixed_income_plus", "固收+", "R3", 22),
+                    ("fund", "基金", "index_fund", "指数基金", "R4", 23),
+                    ("fund", "基金", "equity_fund", "股票基金", "R4", 24),
+                    ("stock", "股票", "individual_stock", "个股", "R3", 30),
+                    ("stock", "股票", "index", "指数", "R3", 31),
+                    ("stock", "股票", "etf", "ETF", "R3", 32),
+                    ("bond", "债券", "", "", "R2", 40),
+                    ("wealth", "理财", "", "", "R2", 50),
+                ]
+
+                legacy_cash = session.query(AssetCategoryDefinition).filter(
+                    AssetCategoryDefinition.category_code == "cash",
+                    AssetCategoryDefinition.subcategory_code == "",
+                ).first()
+                if legacy_cash:
+                    legacy_cash.is_active = False
+                legacy_stock = session.query(AssetCategoryDefinition).filter(
+                    AssetCategoryDefinition.category_code == "stock",
+                    AssetCategoryDefinition.subcategory_code == "",
+                ).first()
+                if legacy_stock:
+                    legacy_stock.is_active = False
+
+                for category_code, category_name, subcategory_code, subcategory_name, risk_class, sort_order in default_definitions:
+                    exists = session.query(AssetCategoryDefinition).filter(
+                        AssetCategoryDefinition.category_code == category_code,
+                        AssetCategoryDefinition.subcategory_code == subcategory_code,
+                    ).first()
+                    if exists:
+                        continue
+                    session.add(AssetCategoryDefinition(
+                        category_code=category_code,
+                        category_name=category_name,
+                        subcategory_code=subcategory_code,
+                        subcategory_name=subcategory_name,
+                        default_risk_class=risk_class,
+                        sort_order=sort_order,
+                    ))
+
+                session.commit()
+                logger.info("已初始化资产大类/细类定义")
+        except Exception as exc:
+            if "未正确初始化" in str(exc) or "not properly initialized" in str(exc):
+                logger.debug("初始化资产大类/细类定义跳过（类加载顺序问题，可忽略）")
+            else:
+                logger.warning("初始化资产大类/细类定义失败：%s", exc)
 
     def _init_asset_risk_definitions(self) -> None:
         """Initialize default asset risk class definitions (R1-R5) if table is empty."""

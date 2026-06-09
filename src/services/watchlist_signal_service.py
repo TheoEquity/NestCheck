@@ -15,6 +15,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from data_provider.base import DataFetcherManager, normalize_stock_code
 from data_provider.tushare_fetcher import TushareFetcher
+from src.services.portfolio_service import round_asset_price
 from src.storage import (
     DatabaseManager,
     StockDaily,
@@ -263,7 +264,7 @@ class WatchlistSignalService:
         if row is None:
             flags.append("missing_price")
             return {"price": None, "as_of_date": date.today()}
-        return {"price": row.close, "as_of_date": row.date}
+        return {"price": round_asset_price(row.close, symbol=symbol, asset_category="stock"), "as_of_date": row.date}
 
     def _weekly_metrics(self, symbol: str, flags: List[str]) -> Dict[str, Any]:
         with self.db.get_session() as session:
@@ -384,7 +385,8 @@ class WatchlistSignalService:
                 # 取最后一行（最新数据）
                 latest_row = nav_df.iloc[-1]
                 nav_date = latest_row.iloc[0]  # 已经是 date 对象
-                nav_value = _safe_float(latest_row.iloc[1])
+                raw_nav_value = _safe_float(latest_row.iloc[1])
+                nav_value = round_asset_price(raw_nav_value, symbol=fund_code, asset_category="fund") if raw_nav_value is not None else None
                 
                 # 保存到 result，会被 _save_indicator_and_signal 存入数据库
                 result["price"] = nav_value
@@ -393,7 +395,8 @@ class WatchlistSignalService:
                 # 计算涨跌幅（如果有历史数据）
                 if len(nav_df) >= 2:
                     prev_row = nav_df.iloc[-2]
-                    prev_nav = _safe_float(prev_row.iloc[1])
+                    raw_prev_nav = _safe_float(prev_row.iloc[1])
+                    prev_nav = round_asset_price(raw_prev_nav, symbol=fund_code, asset_category="fund") if raw_prev_nav is not None else None
                     if prev_nav and prev_nav > 0 and nav_value:
                         change_pct = (nav_value - prev_nav) / prev_nav * 100
                         result["price_change_pct"] = round(change_pct, 4)

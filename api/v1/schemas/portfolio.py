@@ -50,6 +50,7 @@ class PortfolioTradeCreateRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=16)
     name: Optional[str] = Field(None, max_length=64)
     trade_date: date
+    available_date: Optional[date] = None
     side: Literal["buy", "sell"]
     quantity: float = Field(..., gt=0)
     price: float = Field(..., gt=0)
@@ -79,15 +80,18 @@ class PortfolioCorporateActionCreateRequest(BaseModel):
     asset_category: Optional[str] = Field(None, max_length=32)
     asset_subcategory: Optional[str] = Field(None, max_length=64)
     effective_date: date
-    action_type: Literal["cash_dividend"] = "cash_dividend"
+    action_type: Literal["cash_dividend", "stock_split"] = "cash_dividend"
     market: Optional[Literal["cn", "hk", "us"]] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     dividend_amount: Optional[float] = Field(None, gt=0)
     cash_dividend_per_share: Optional[float] = Field(None, gt=0, exclude=True)
+    split_ratio: Optional[float] = Field(None, gt=0)
     note: Optional[str] = Field(None, max_length=255)
 
     @model_validator(mode="after")
     def normalize_dividend_amount(self) -> "PortfolioCorporateActionCreateRequest":
+        if self.action_type != "cash_dividend":
+            return self
         if self.dividend_amount is None:
             self.dividend_amount = self.cash_dividend_per_share
         if self.dividend_amount is None or self.dividend_amount <= 0:
@@ -115,6 +119,8 @@ class PortfolioTradeListItem(BaseModel):
     market: str
     currency: str
     trade_date: str
+    available_date: Optional[str] = None
+    open_watch_enabled: bool = True
     side: str
     quantity: float
     price: float
@@ -164,6 +170,7 @@ class PortfolioCorporateActionListItem(BaseModel):
     effective_date: str
     action_type: str
     dividend_amount: Optional[float] = None
+    split_ratio: Optional[float] = None
     realized_pnl: float = 0.0
     note: Optional[str] = None
     created_at: Optional[str] = None
@@ -200,6 +207,8 @@ class PortfolioPositionItem(BaseModel):
     price_stale: bool = False
     price_available: bool = True
     name: Optional[str] = None
+    available_date: Optional[str] = None
+    open_watch_enabled: bool = True
 
 
 class PortfolioPositionRecordItem(PortfolioPositionItem):
@@ -374,6 +383,7 @@ class PortfolioInitializeAssetRow(BaseModel):
     market: Literal["cn", "hk", "us"]
     quantity: float = Field(..., gt=0)
     avg_cost: float = Field(..., gt=0)
+    last_price: Optional[float] = Field(None, ge=0)
     currency: str = Field(..., min_length=3, max_length=8)
     note: Optional[str] = Field(None, max_length=255)
 
@@ -417,6 +427,26 @@ class AssetRiskDefinitionItem(BaseModel):
 class AssetRiskDefinitionListResponse(BaseModel):
     """Response for listing asset risk definitions."""
     definitions: List[AssetRiskDefinitionItem] = Field(default_factory=list)
+
+
+class AssetSubcategoryDefinitionItem(BaseModel):
+    """Asset subcategory definition item."""
+    code: str = Field("", max_length=64)
+    name: str = Field("", max_length=64)
+    default_risk_class: Optional[str] = Field(None, max_length=8)
+
+
+class AssetCategoryDefinitionItem(BaseModel):
+    """Asset category definition item."""
+    code: str = Field(..., max_length=32)
+    name: str = Field(..., max_length=64)
+    default_risk_class: Optional[str] = Field(None, max_length=8)
+    subcategories: List[AssetSubcategoryDefinitionItem] = Field(default_factory=list)
+
+
+class AssetCategoryDefinitionListResponse(BaseModel):
+    """Response for listing asset category definitions."""
+    definitions: List[AssetCategoryDefinitionItem] = Field(default_factory=list)
 
 
 class AssetRiskDefinitionUpdateRequest(BaseModel):
@@ -481,3 +511,25 @@ class AssetAllocationPlanActivateResponse(BaseModel):
     """Response for activating an asset allocation plan."""
     active_plan_id: Optional[int] = None
     is_active: bool
+
+
+class PortfolioFundStatusResponse(BaseModel):
+    """Global fund status."""
+    fund_inception_date: Optional[str] = None
+    latest_nav: Optional[float] = None
+    latest_nav_date: Optional[str] = None
+    latest_shares: Optional[float] = None
+    total_equity: float
+
+
+class PortfolioFundResetResponse(BaseModel):
+    """Response for resetting fund NAV."""
+    fund_inception_date: Optional[str] = None
+    fund_shares: float
+    fund_nav: float
+    total_equity: float
+
+
+class PortfolioFundResetRequest(BaseModel):
+    """Request to reset fund NAV."""
+    pass

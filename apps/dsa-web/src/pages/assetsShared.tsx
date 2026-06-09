@@ -18,6 +18,41 @@ export function formatMoney(value: number | undefined | null, currency = 'CNY'):
   })}`;
 }
 
+export function getAssetPriceDecimals(position: { symbol?: string | null; assetCategory?: string | null; assetSubcategory?: string | null }): number {
+  const category = (position.assetCategory || '').trim().toLowerCase();
+  const subcategory = (position.assetSubcategory || '').trim().toLowerCase();
+  const symbol = (position.symbol || '').trim().toUpperCase().split('.')[0];
+  const isExchangeFund = category.includes('etf')
+    || category.includes('lof')
+    || subcategory.includes('etf')
+    || subcategory.includes('lof')
+    || /^(510|511|512|513|515|516|517|518|159|160|161|162|163|164|165)/.test(symbol);
+  if (isExchangeFund) return 3;
+  if (category === 'fund') return 4;
+  return 2;
+}
+
+export function formatPrice(
+  value: number | undefined | null,
+  currency = 'CNY',
+  position?: { symbol?: string | null; assetCategory?: string | null; assetSubcategory?: string | null },
+): string {
+  if (value == null || Number.isNaN(value)) return '--';
+  const decimals = position ? getAssetPriceDecimals(position) : 2;
+  return `${currency} ${Number(value).toLocaleString('zh-CN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })}`;
+}
+
+export function formatNav(value: number | undefined | null): string {
+  if (value == null || Number.isNaN(value)) return '--';
+  return Number(value).toLocaleString('zh-CN', {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
+}
+
 export function formatPct(value: number | undefined | null): string {
   if (value == null || Number.isNaN(value)) return '--';
   return `${value.toFixed(2)}%`;

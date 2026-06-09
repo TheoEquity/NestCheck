@@ -36,6 +36,9 @@ from api.v1.schemas.portfolio import (
     PortfolioSnapshotResponse,
     PortfolioTradeListResponse,
     PortfolioTradeCreateRequest,
+    AssetCategoryDefinitionItem,
+    AssetCategoryDefinitionListResponse,
+    AssetSubcategoryDefinitionItem,
     AssetRiskDefinitionItem,
     AssetRiskDefinitionListResponse,
     AssetRiskDefinitionUpdateRequest,
@@ -45,6 +48,9 @@ from api.v1.schemas.portfolio import (
     AssetAllocationPlanListResponse,
     AssetAllocationPlanCreateRequest,
     AssetAllocationPlanActivateResponse,
+    PortfolioFundStatusResponse,
+    PortfolioFundResetRequest,
+    PortfolioFundResetResponse,
 )
 from src.services.portfolio_import_service import PortfolioImportService
 from src.services.portfolio_risk_service import PortfolioRiskService
@@ -225,6 +231,7 @@ def create_trade(request: PortfolioTradeCreateRequest) -> PortfolioEventCreatedR
             symbol=request.symbol,
             name=request.name,
             trade_date=request.trade_date,
+            available_date=request.available_date,
             side=request.side,
             quantity=request.quantity,
             price=request.price,
@@ -345,7 +352,7 @@ def list_cash_ledger(
     "/corporate-actions",
     response_model=PortfolioEventCreatedResponse,
     responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Record cash dividend event",
+    summary="Record corporate action event",
 )
 def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> PortfolioEventCreatedResponse:
     service = PortfolioService()
@@ -360,6 +367,7 @@ def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> P
             market=request.market,
             currency=request.currency,
             dividend_amount=request.dividend_amount,
+            split_ratio=request.split_ratio,
             note=request.note,
         )
         return PortfolioEventCreatedResponse(**data)
@@ -368,21 +376,21 @@ def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> P
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("Create cash dividend event failed", exc)
+        raise _internal_error("Create corporate action event failed", exc)
 
 
 @router.get(
     "/corporate-actions",
     response_model=PortfolioCorporateActionListResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="List cash dividend events",
+    summary="List corporate action events",
 )
 def list_corporate_actions(
     account_id: Optional[int] = Query(None, description="Optional account id"),
-    date_from: Optional[date] = Query(None, description="Cash dividend effective date from"),
-    date_to: Optional[date] = Query(None, description="Cash dividend effective date to"),
+    date_from: Optional[date] = Query(None, description="Corporate action effective date from"),
+    date_to: Optional[date] = Query(None, description="Corporate action effective date to"),
     symbol: Optional[str] = Query(None, description="Optional stock symbol filter"),
-    action_type: Optional[str] = Query(None, description="Optional dividend event type filter"),
+    action_type: Optional[str] = Query(None, description="Optional corporate action type filter"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> PortfolioCorporateActionListResponse:
@@ -401,7 +409,7 @@ def list_corporate_actions(
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("List cash dividend events failed", exc)
+        raise _internal_error("List corporate action events failed", exc)
 
 
 @router.get(
@@ -422,6 +430,38 @@ def list_positions(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("List positions failed", exc)
+
+
+@router.get(
+    "/positions/open-dates",
+    response_model=PortfolioPositionListResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="List tracked open-date positions",
+)
+def list_open_date_positions() -> PortfolioPositionListResponse:
+    service = PortfolioService()
+    try:
+        data = service.list_open_date_positions()
+        return PortfolioPositionListResponse(**data)
+    except Exception as exc:
+        raise _internal_error("List open-date positions failed", exc)
+
+
+@router.post(
+    "/positions/open-dates/{trade_id}/dismiss",
+    response_model=PortfolioEventCreatedResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Dismiss one open-date watch item",
+)
+def dismiss_open_date_position(trade_id: int) -> PortfolioEventCreatedResponse:
+    service = PortfolioService()
+    try:
+        data = service.disable_open_date_watch(trade_id)
+        return PortfolioEventCreatedResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Dismiss open-date position failed", exc)
 
 
 @router.post(
@@ -1002,3 +1042,142 @@ def update_risk_definition(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Update risk definition failed", exc)
+
+
+def _load_asset_category_definitions() -> AssetCategoryDefinitionListResponse:
+    from src.storage import get_db, AssetCategoryDefinition
+
+    db = get_db()
+    with db.get_session() as session:
+        rows = session.query(AssetCategoryDefinition).filter(
+            AssetCategoryDefinition.is_active == True
+        ).order_by(
+            AssetCategoryDefinition.sort_order.asc(),
+            AssetCategoryDefinition.id.asc(),
+        ).all()
+
+        categories: dict[str, AssetCategoryDefinitionItem] = {}
+        for row in rows:
+            item = categories.get(row.category_code)
+            if item is None:
+                item = AssetCategoryDefinitionItem(
+                    code=row.category_code,
+                    name=row.category_name,
+                    default_risk_class=row.default_risk_class,
+                    subcategories=[],
+                )
+                categories[row.category_code] = item
+
+            if row.subcategory_code or row.subcategory_name:
+                item.subcategories.append(AssetSubcategoryDefinitionItem(
+                    code=row.subcategory_code,
+                    name=row.subcategory_name,
+                    default_risk_class=row.default_risk_class,
+                ))
+
+        return AssetCategoryDefinitionListResponse(definitions=list(categories.values()))
+
+
+@router.get(
+    "/asset-category-definitions",
+    response_model=AssetCategoryDefinitionListResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="Get asset category and subcategory definitions",
+)
+def get_asset_category_definitions() -> AssetCategoryDefinitionListResponse:
+    """Return asset category definitions from asset_category_definitions."""
+    try:
+        return _load_asset_category_definitions()
+    except Exception as exc:
+        raise _internal_error("Get asset category definitions failed", exc)
+
+
+@router.get(
+    "/asset-categories",
+    response_model=dict,
+    responses={500: {"model": ErrorResponse}},
+    summary="Get asset category definitions",
+)
+def get_asset_categories() -> dict:
+    """Return asset category codes from asset_category_definitions."""
+    try:
+        definitions = _load_asset_category_definitions().definitions
+        return {"categories": [item.code for item in definitions]}
+    except Exception as exc:
+        raise _internal_error("Get asset categories failed", exc)
+
+
+@router.get(
+    "/fund-status",
+    response_model=PortfolioFundStatusResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="Get global fund status",
+)
+def get_fund_status() -> PortfolioFundStatusResponse:
+    """Return global fund NAV, shares and total_equity."""
+    from src.storage import get_db, PortfolioFundValue
+    from src.services.portfolio_service import PortfolioService, round_internal_fund_nav, round_money, round_share
+
+    db = get_db()
+    with db.get_session() as session:
+        latest_fv = (
+            session.query(PortfolioFundValue)
+            .order_by(PortfolioFundValue.record_date.desc())
+            .first()
+        )
+
+        service = PortfolioService()
+        total_equity = round_money(service.get_management_total_equity())
+
+        return PortfolioFundStatusResponse(
+            fund_inception_date=latest_fv.record_date.isoformat() if latest_fv else None,
+            latest_nav=round_internal_fund_nav(latest_fv.fund_nav) if latest_fv else None,
+            latest_nav_date=latest_fv.record_date.isoformat() if latest_fv else None,
+            latest_shares=round_share(latest_fv.fund_shares) if latest_fv else None,
+            total_equity=total_equity,
+        )
+
+
+@router.post(
+    "/fund-reset",
+    response_model=PortfolioFundResetResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Reset fund NAV to 1 and set shares to current total equity",
+)
+def reset_fund(_payload: PortfolioFundResetRequest) -> PortfolioFundResetResponse:
+    """Reset fund NAV to 1.0 and set shares = current total_equity."""
+    from datetime import date as date_type
+
+    from src.storage import get_db, PortfolioFundValue
+    from src.services.portfolio_service import PortfolioService, round_internal_fund_nav, round_money, round_share
+
+    db = get_db()
+    try:
+        with db.get_session() as session:
+            service = PortfolioService()
+            total_equity = round_money(service.get_management_total_equity())
+
+            if total_equity <= 0:
+                raise HTTPException(status_code=400, detail={"error": "bad_request", "message": "Total equity must be positive to reset fund"})
+
+            today = date_type.today()
+
+            fv_record = PortfolioFundValue(
+                record_date=today,
+                fund_shares=round_share(total_equity),
+                fund_nav=round_internal_fund_nav(1.0),
+                total_equity=round_money(total_equity),
+            )
+            session.add(fv_record)
+            session.commit()
+
+            return PortfolioFundResetResponse(
+                fund_inception_date=today.isoformat(),
+                fund_shares=round_share(total_equity),
+                fund_nav=round_internal_fund_nav(1.0),
+                total_equity=round_money(total_equity),
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Reset fund failed", exc)

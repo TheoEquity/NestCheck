@@ -155,8 +155,14 @@ class PortfolioRepository:
         symbol: str,
         market: str,
         currency: str,
+        available_date: Optional[date],
         cost_method: str,
     ) -> Optional[PortfolioPosition]:
+        available_date_condition = (
+            PortfolioPosition.available_date.is_(None)
+            if available_date is None
+            else PortfolioPosition.available_date == available_date
+        )
         return session.execute(
             select(PortfolioPosition)
             .where(
@@ -165,6 +171,7 @@ class PortfolioRepository:
                     PortfolioPosition.symbol == symbol,
                     PortfolioPosition.market == market,
                     PortfolioPosition.currency == currency,
+                    available_date_condition,
                     PortfolioPosition.cost_method == cost_method,
                 )
             )
@@ -287,11 +294,12 @@ class PortfolioRepository:
         market: str,
         currency: str,
         trade_date: date,
-        side: str,
-        quantity: float,
-        price: float,
-        fee: float,
-        tax: float,
+        available_date: Optional[date] = None,
+        side: str = "buy",
+        quantity: float = 0.0,
+        price: float = 0.0,
+        fee: float = 0.0,
+        tax: float = 0.0,
         realized_pnl: float = 0.0,
         note: Optional[str] = None,
         dedup_hash: Optional[str] = None,
@@ -309,6 +317,7 @@ class PortfolioRepository:
                 market=market,
                 currency=currency,
                 trade_date=trade_date,
+                available_date=available_date,
                 side=side,
                 quantity=quantity,
                 price=price,
@@ -363,6 +372,7 @@ class PortfolioRepository:
         action_type: str,
         cash_dividend_per_share: Optional[float] = None,
         realized_pnl: float = 0.0,
+        split_ratio: Optional[float] = None,
         note: Optional[str] = None,
     ) -> PortfolioCorporateAction:
         with self.portfolio_write_session() as session:
@@ -439,11 +449,12 @@ class PortfolioRepository:
         market: str,
         currency: str,
         trade_date: date,
-        side: str,
-        quantity: float,
-        price: float,
-        fee: float,
-        tax: float,
+        available_date: Optional[date] = None,
+        side: str = "buy",
+        quantity: float = 0.0,
+        price: float = 0.0,
+        fee: float = 0.0,
+        tax: float = 0.0,
         realized_pnl: float = 0.0,
         note: Optional[str] = None,
         dedup_hash: Optional[str] = None,
@@ -459,6 +470,7 @@ class PortfolioRepository:
             market=market,
             currency=currency,
             trade_date=trade_date,
+            available_date=available_date,
             side=side,
             quantity=quantity,
             price=price,
@@ -485,6 +497,36 @@ class PortfolioRepository:
             ) from exc
         session.refresh(row)
         return row
+
+    def list_open_date_trades(self) -> List[Tuple[PortfolioTrade, PortfolioAccount]]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioTrade, PortfolioAccount)
+                .join(PortfolioAccount, PortfolioTrade.account_id == PortfolioAccount.id)
+                .where(
+                    and_(
+                        PortfolioTrade.available_date.is_not(None),
+                        PortfolioTrade.open_watch_enabled.is_(True),
+                        PortfolioTrade.side == "buy",
+                        PortfolioTrade.quantity > 0,
+                    )
+                )
+                .order_by(PortfolioTrade.available_date.asc(), PortfolioTrade.account_id.asc(), PortfolioTrade.symbol.asc())
+            ).all()
+            return list(rows)
+
+    def disable_open_date_watch(self, trade_id: int) -> Optional[PortfolioTrade]:
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(PortfolioTrade).where(PortfolioTrade.id == trade_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            row.open_watch_enabled = False
+            row.updated_at = datetime.now()
+            session.commit()
+            session.refresh(row)
+            return row
 
     def add_cash_ledger_in_session(
         self,
@@ -548,6 +590,7 @@ class PortfolioRepository:
             action_type=action_type,
             cash_dividend_per_share=cash_dividend_per_share,
             realized_pnl=realized_pnl,
+            split_ratio=split_ratio,
             note=note,
         )
         session.add(row)
@@ -973,6 +1016,8 @@ class PortfolioRepository:
                         name=item.get("name"),
                         market=item["market"],
                         currency=item["currency"],
+                        available_date=item.get("available_date"),
+                        open_watch_enabled=bool(item.get("open_watch_enabled", True)),
                         quantity=float(item["quantity"]),
                         avg_cost=float(item["avg_cost"]),
                         total_cost=float(item["total_cost"]),
@@ -996,6 +1041,8 @@ class PortfolioRepository:
                         market=lot["market"],
                         currency=lot["currency"],
                         open_date=lot["open_date"],
+                        available_date=lot.get("available_date"),
+                        open_watch_enabled=bool(lot.get("open_watch_enabled", True)),
                         remaining_quantity=float(lot["remaining_quantity"]),
                         unit_cost=float(lot["unit_cost"]),
                         source_trade_id=lot.get("source_trade_id"),
@@ -1161,6 +1208,8 @@ class PortfolioRepository:
                         name=item.get("name"),
                         market=item["market"],
                         currency=item["currency"],
+                        available_date=item.get("available_date"),
+                        open_watch_enabled=bool(item.get("open_watch_enabled", True)),
                         quantity=float(item["quantity"]),
                         avg_cost=float(item["avg_cost"]),
                         total_cost=float(item["total_cost"]),
@@ -1184,6 +1233,8 @@ class PortfolioRepository:
                         market=lot["market"],
                         currency=lot["currency"],
                         open_date=lot["open_date"],
+                        available_date=lot.get("available_date"),
+                        open_watch_enabled=bool(lot.get("open_watch_enabled", True)),
                         remaining_quantity=float(lot["remaining_quantity"]),
                         unit_cost=float(lot["unit_cost"]),
                         source_trade_id=lot.get("source_trade_id"),

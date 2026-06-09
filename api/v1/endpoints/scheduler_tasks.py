@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _format_daily_schedule_time(value: Optional[str]) -> str:
+    if not value:
+        return getattr(_get_config(), 'schedule_time', '18:00')
+    parts = [part.strip() for part in str(value).split(",") if part.strip()]
+    return "、".join(parts) if len(parts) > 1 else str(value)
+
+
 @router.get(
     "/tasks",
     response_model=List[Dict[str, Any]],
@@ -62,7 +69,7 @@ def list_scheduler_tasks() -> List[Dict[str, Any]]:
             next_run = "-"
             if task_def["enabled"]:
                 if task_def["schedule_type"] == "daily":
-                    t = task_def.get("schedule_time") or getattr(_get_config(), 'schedule_time', '18:00')
+                    t = _format_daily_schedule_time(task_def.get("schedule_time"))
                     next_run = f"每日 {t}"
                 elif task_def["schedule_type"] == "interval":
                     secs = task_def.get("interval_seconds") or 300
@@ -472,7 +479,7 @@ def get_all_next_run_times() -> Dict[str, Any]:
             key = task["task_key"]
             if task["enabled"]:
                 if task["schedule_type"] == "daily":
-                    t = task.get("schedule_time") or getattr(config, 'schedule_time', '18:00')
+                    t = _format_daily_schedule_time(task.get("schedule_time"))
                     result[key] = {"next_run": f"每日 {t}", "schedule_time": t}
                 elif task["schedule_type"] == "interval":
                     secs = task.get("interval_seconds") or 300

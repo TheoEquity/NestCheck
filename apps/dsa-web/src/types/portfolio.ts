@@ -1,7 +1,7 @@
 export type PortfolioCostMethod = 'fifo' | 'avg';
 export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
-export type PortfolioCorporateActionType = 'cash_dividend';
+export type PortfolioCorporateActionType = 'cash_dividend' | 'stock_split';
 
 export interface PortfolioAccountItem {
   id: number;
@@ -60,6 +60,8 @@ export interface PortfolioPositionItem {
   priceDate?: string | null;
   priceStale?: boolean;
   priceAvailable?: boolean;
+  availableDate?: string | null;
+  openWatchEnabled?: boolean;
 }
 
 export interface PortfolioPositionRecordItem extends PortfolioPositionItem {
@@ -220,6 +222,7 @@ export interface PortfolioTradeCreateRequest {
   symbol: string;
   name?: string;
   tradeDate: string;
+  availableDate?: string | null;
   side: PortfolioSide;
   quantity: number;
   price: number;
@@ -252,7 +255,8 @@ export interface PortfolioCorporateActionCreateRequest {
   actionType: PortfolioCorporateActionType;
   market?: 'cn' | 'hk' | 'us';
   currency?: string;
-  dividendAmount: number;
+  dividendAmount?: number;
+  splitRatio?: number;
   note?: string;
 }
 
@@ -276,6 +280,8 @@ export interface PortfolioTradeListItem {
   market: string;
   currency: string;
   tradeDate: string;
+  availableDate?: string | null;
+  openWatchEnabled?: boolean;
   side: PortfolioSide;
   quantity: number;
   price: number;
@@ -325,6 +331,7 @@ export interface PortfolioCorporateActionListItem {
   effectiveDate: string;
   actionType: PortfolioCorporateActionType;
   dividendAmount?: number | null;
+  splitRatio?: number | null;
   realizedPnl: number;
   note?: string | null;
   createdAt?: string | null;
@@ -460,6 +467,23 @@ export interface AssetRiskDefinitionListResponse {
   definitions: AssetRiskDefinitionItem[];
 }
 
+export interface AssetSubcategoryDefinitionItem {
+  code: string;
+  name: string;
+  defaultRiskClass?: string | null;
+}
+
+export interface AssetCategoryDefinitionItem {
+  code: string;
+  name: string;
+  defaultRiskClass?: string | null;
+  subcategories: AssetSubcategoryDefinitionItem[];
+}
+
+export interface AssetCategoryDefinitionListResponse {
+  definitions: AssetCategoryDefinitionItem[];
+}
+
 export interface AssetAllocationSolveRequest {
   targetReturnMin?: number;
   targetReturnMax?: number;
@@ -506,4 +530,12 @@ export interface AssetAllocationPlanCreateRequest {
 export interface AssetAllocationPlanActivateResponse {
   activePlanId?: number | null;
   isActive: boolean;
+}
+
+export interface PortfolioFundStatusResponse {
+  fundInceptionDate?: string | null;
+  latestNav?: number | null;
+  latestNavDate?: string | null;
+  latestShares?: number | null;
+  totalEquity: number;
 }

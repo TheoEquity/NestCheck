@@ -8,6 +8,7 @@ import type {
   PortfolioCashLedgerCreateRequest,
   PortfolioCashLedgerListResponse,
   PortfolioCorporateActionCreateRequest,
+  PortfolioCorporateActionType,
   PortfolioCorporateActionListResponse,
   PortfolioCostMethod,
   PortfolioDeleteResponse,
@@ -26,6 +27,7 @@ import type {
   PortfolioSnapshotResponse,
   PortfolioTradeCreateRequest,
   PortfolioTradeListResponse,
+  AssetCategoryDefinitionListResponse,
   AssetRiskDefinitionListResponse,
   AssetRiskDefinitionItem,
   AssetAllocationSolveRequest,
@@ -34,6 +36,7 @@ import type {
   AssetAllocationPlanCreateRequest,
   AssetAllocationPlanItem,
   AssetAllocationPlanActivateResponse,
+  PortfolioFundStatusResponse,
 } from '../types/portfolio';
 
 type SnapshotQuery = {
@@ -71,7 +74,7 @@ type CashListQuery = EventQuery & {
 
 type CorporateListQuery = EventQuery & {
   symbol?: string;
-  actionType?: 'cash_dividend';
+  actionType?: PortfolioCorporateActionType;
 };
 
 function buildSnapshotParams(query: SnapshotQuery): Record<string, string | number> {
@@ -180,6 +183,16 @@ export const portfolioApi = {
     return toCamelCase<PortfolioPositionListResponse>(response.data);
   },
 
+  async listOpenDatePositions(): Promise<PortfolioPositionListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/positions/open-dates');
+    return toCamelCase<PortfolioPositionListResponse>(response.data);
+  },
+
+  async dismissOpenDatePosition(tradeId: number): Promise<PortfolioEventCreatedResponse> {
+    const response = await apiClient.post<Record<string, unknown>>(`/api/v1/portfolio/positions/open-dates/${tradeId}/dismiss`);
+    return toCamelCase<PortfolioEventCreatedResponse>(response.data);
+  },
+
   async getRisk(query: SnapshotQuery = {}): Promise<PortfolioRiskResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/risk', {
       params: buildSnapshotParams(query),
@@ -222,9 +235,12 @@ export const portfolioApi = {
       symbol: payload.symbol,
       name: payload.name,
       trade_date: payload.tradeDate,
+      available_date: payload.availableDate || undefined,
       side: payload.side,
       quantity: payload.quantity,
       price: payload.price,
+      fee: payload.fee,
+      tax: payload.tax,
       market: payload.market,
       currency: payload.currency,
       trade_uid: payload.tradeUid,
@@ -259,6 +275,7 @@ export const portfolioApi = {
       market: payload.market,
       currency: payload.currency,
       dividend_amount: payload.dividendAmount,
+      split_ratio: payload.splitRatio,
       note: payload.note,
     });
     return toCamelCase<PortfolioEventCreatedResponse>(response.data);
@@ -425,6 +442,28 @@ export const portfolioApi = {
   async activateAllocationPlan(planId: number): Promise<AssetAllocationPlanActivateResponse> {
     const response = await apiClient.put<Record<string, unknown>>(`/api/v1/portfolio/allocation/plans/${planId}/activate`);
     return toCamelCase<AssetAllocationPlanActivateResponse>(response.data);
+  },
+
+  async getAssetCategories(): Promise<string[]> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/asset-categories');
+    return (response.data.categories as string[]) || [];
+  },
+
+  async getAssetCategoryDefinitions(): Promise<AssetCategoryDefinitionListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/asset-category-definitions');
+    return toCamelCase<AssetCategoryDefinitionListResponse>(response.data);
+  },
+
+  async getFundStatus(): Promise<PortfolioFundStatusResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/fund-status');
+    const data = toCamelCase<PortfolioFundStatusResponse>(response.data);
+    return data;
+  },
+
+  async resetFund(): Promise<Record<string, unknown>> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/fund-reset', {});
+    const data = toCamelCase<Record<string, unknown>>(response.data);
+    return data;
   },
 
   async deleteAllocationPlan(planId: number): Promise<PortfolioDeleteResponse> {

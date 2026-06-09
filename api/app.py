@@ -21,7 +21,7 @@ import os
 import re
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote
 from typing import List, Optional
@@ -32,6 +32,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
+
+PORTFOLIO_PRICE_REFRESH_TASK_KEY = "market_cache_refresh"
+PORTFOLIO_PRICE_REFRESH_TIMES = ((8, 30), (20, 30))
 
 # Match src="/assets/foo.js" / href="/assets/foo.css" produced by the
 # vite build. Used by the startup self-check to surface packaging
@@ -148,7 +151,7 @@ async def app_lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to clean up expired agent data cache")
 
-    # Start background price refresh task (daily at 20:30)
+    # Start background price refresh task (daily at 08:30 and 20:30 Beijing time)
     refresh_task = asyncio.create_task(_daily_portfolio_price_refresh())
     app.state._price_refresh_task = refresh_task
 
@@ -177,11 +180,10 @@ async def app_lifespan(app: FastAPI):
 
 
 async def _daily_portfolio_price_refresh():
-    """Refresh portfolio positions prices once daily at 20:30 (after market close).
+    """Refresh portfolio positions prices at 08:30 and 20:30 Beijing time.
     
-    On startup, checks if today's 20:30 refresh was missed (e.g., server was off).
-    If current time is >= 20:30 Beijing time and no refresh has been done today,
-    executes immediately to catch up.
+    On startup, checks whether any configured slot has been missed today and
+    executes the latest missed slot when no task history exists for it.
     """
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
@@ -191,53 +193,105 @@ async def _daily_portfolio_price_refresh():
     now = datetime.now(beijing_tz)
     today = now.date()
     
-    # Check if we need to catch up a missed 20:30 refresh on startup
-    # This handles the case where the server was off during 20:30
+    last_refresh_slots = set()
+
+    # Check if we need to catch up a missed scheduled refresh on startup.
     try:
-        if now.hour >= 20 and now.minute >= 30:
-            # Check if any position was updated today (indicating refresh already ran)
-            from src.storage import get_db, PortfolioPosition
-            db = get_db()
-            with db.get_session() as session:
-                today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=beijing_tz)
-                updated_count = session.query(PortfolioPosition).filter(
-                    PortfolioPosition.updated_at >= today_start
-                ).count()
-                
-            if updated_count == 0:
-                logger.info("Startup catch-up: Today's 20:30 refresh was missed, executing now")
+        due_slots = [slot for slot in PORTFOLIO_PRICE_REFRESH_TIMES if _is_refresh_slot_due(now, slot)]
+        if due_slots:
+            slot = due_slots[-1]
+            if not _has_price_refresh_history_for_slot(today, slot, beijing_tz):
+                logger.info("Startup catch-up: Today's %02d:%02d refresh was missed, executing now", slot[0], slot[1])
                 loop = asyncio.get_event_loop()
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    await loop.run_in_executor(executor, _run_price_refresh)
+                    await loop.run_in_executor(executor, _run_price_refresh_with_history)
+                last_refresh_slots.update((today, due_slot) for due_slot in due_slots)
                 logger.info("Startup catch-up: Refresh completed")
             else:
-                logger.info("Startup check: Today's 20:30 refresh already executed (%d positions updated)", updated_count)
+                last_refresh_slots.update((today, due_slot) for due_slot in due_slots)
+                logger.info("Startup check: Today's %02d:%02d refresh already recorded", slot[0], slot[1])
         else:
-            logger.info("Startup check: Current time %02d:%02d is before 20:30, no catch-up needed", now.hour, now.minute)
+            logger.info("Startup check: Current time %02d:%02d is before the first refresh slot", now.hour, now.minute)
     except Exception as exc:
         logger.error("Startup catch-up check failed: %s", exc, exc_info=True)
     
     # Wait before entering the regular check loop so server can start normally
     await asyncio.sleep(30)
 
-    last_refresh_date = None
     with ThreadPoolExecutor(max_workers=1) as executor:
         while True:
             try:
                 # Use Beijing time (UTC+8) for time-based checks
                 now = datetime.now(beijing_tz)
                 today = now.date()
-                # Refresh at 20:30 Beijing time daily
-                if now.hour == 20 and now.minute >= 30 and last_refresh_date != today:
-                    logger.info("Daily portfolio price refresh started")
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(executor, _run_price_refresh)
-                    last_refresh_date = today
-                    logger.info("Daily portfolio price refresh completed")
+                for slot in PORTFOLIO_PRICE_REFRESH_TIMES:
+                    slot_key = (today, slot)
+                    if _is_refresh_slot_due(now, slot) and slot_key not in last_refresh_slots:
+                        logger.info("Daily portfolio price refresh started for %02d:%02d", slot[0], slot[1])
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(executor, _run_price_refresh_with_history)
+                        last_refresh_slots.add(slot_key)
+                        logger.info("Daily portfolio price refresh completed for %02d:%02d", slot[0], slot[1])
+                        break
+
+                if len(last_refresh_slots) > len(PORTFOLIO_PRICE_REFRESH_TIMES) * 2:
+                    last_refresh_slots = {
+                        item for item in last_refresh_slots
+                        if item[0] >= today - timedelta(days=1)
+                    }
             except Exception as exc:
                 logger.error("Portfolio price refresh error: %s", exc)
 
             await asyncio.sleep(30)  # Check every 30 seconds
+
+
+def _is_refresh_slot_due(now: datetime, slot: tuple[int, int]) -> bool:
+    hour, minute = slot
+    return now.hour > hour or (now.hour == hour and now.minute >= minute)
+
+
+def _has_price_refresh_history_for_slot(day, slot: tuple[int, int], beijing_tz) -> bool:
+    from src.task_history import task_history
+
+    slot_start = datetime.combine(day, datetime.min.time()).replace(
+        hour=slot[0], minute=slot[1], tzinfo=beijing_tz,
+    )
+    slot_end = slot_start + timedelta(hours=1)
+    for item in task_history.get_history(PORTFOLIO_PRICE_REFRESH_TASK_KEY, limit=20):
+        try:
+            executed_at = datetime.fromisoformat(item["executed_at"])
+        except (TypeError, ValueError):
+            continue
+        if executed_at.tzinfo is None:
+            executed_at = executed_at.replace(tzinfo=beijing_tz)
+        else:
+            executed_at = executed_at.astimezone(beijing_tz)
+        if slot_start <= executed_at < slot_end:
+            return True
+    return False
+
+
+def _run_price_refresh_with_history():
+    """Run price refresh and record automatic scheduler history."""
+    import time
+    from src.task_history import task_history
+
+    start = time.time()
+    try:
+        _run_price_refresh()
+        task_history.record(
+            PORTFOLIO_PRICE_REFRESH_TASK_KEY,
+            "success",
+            duration_ms=int((time.time() - start) * 1000),
+        )
+    except Exception as exc:
+        task_history.record(
+            PORTFOLIO_PRICE_REFRESH_TASK_KEY,
+            "failed",
+            duration_ms=int((time.time() - start) * 1000),
+            error=str(exc),
+        )
+        raise
 
 
 def _run_price_refresh():
@@ -249,11 +303,13 @@ def _run_price_refresh():
     pos = result.get("positions", {})
     idx = result.get("indices", {})
     fx = result.get("fx", {"refreshed": 0, "failed": 0})
+    fund_nav = result.get("fund_nav") or {}
     logger.info(
-        "Price refresh: pos=%d/%d, indices=%d/%d, fx=%d/%d",
+        "Price refresh: pos=%d/%d, indices=%d/%d, fx=%d/%d, fund_nav=%s",
         pos.get("refreshed", 0), pos.get("failed", 0),
         idx.get("refreshed", 0), idx.get("failed", 0),
         fx.get("refreshed", 0), fx.get("failed", 0),
+        fund_nav.get("fund_nav", "skipped"),
     )
 
     try:

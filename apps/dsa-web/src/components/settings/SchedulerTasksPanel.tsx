@@ -21,7 +21,7 @@ interface TaskRecord {
   name: string;
   description: string;
   scheduleType: string;
-  scheduleTime: string | null;
+  scheduleTime: string | string[] | null;
   intervalSeconds: number | null;
   enabled: boolean;
   successRate: string | null;
@@ -38,6 +38,12 @@ const formatInterval = (secs: number | null): string => {
   if (secs < 60) return `每 ${secs} 秒`;
   if (secs < 3600) return `每 ${Math.floor(secs / 60)} 分钟`;
   return `每 ${(secs / 3600).toFixed(1)} 小时`;
+};
+
+const formatScheduleTime = (value: string | string[] | null | undefined, nextRun: string): string => {
+  if (Array.isArray(value)) return value.join('、');
+  if (typeof value === 'string' && value.trim()) return value.split(',').map((item) => item.trim()).filter(Boolean).join('、');
+  return nextRun !== '-' && nextRun.startsWith('每日') ? nextRun.replace('每日 ', '') : '-';
 };
 
 const getStatusIcon = (status: string) => {
@@ -284,9 +290,8 @@ export const SchedulerTasksPanel: React.FC = () => {
       {/* 任务行 */}
       {tasks.map((task) => {
         const isEditing = editingKey === task.taskKey;
-        const displayTime = task.scheduleTime
-          ? task.scheduleTime
-          : (task.nextRun !== '-' && task.nextRun.startsWith('每日') ? task.nextRun.replace('每日 ', '') : '-');
+        const displayTime = formatScheduleTime(task.scheduleTime, task.nextRun);
+        const dailyRunCount = displayTime === '-' ? 1 : displayTime.split('、').filter(Boolean).length;
 
         return (
           <div
@@ -328,7 +333,7 @@ export const SchedulerTasksPanel: React.FC = () => {
                   {task.scheduleType === 'daily' && !READONLY_CONFIG_TASK_KEYS.has(task.taskKey) && (
                     <button
                       className="text-muted-text hover:text-foreground transition-colors"
-                      onClick={() => { setEditingKey(task.taskKey); setEditSchedule(task.scheduleTime || ''); }}
+                    onClick={() => { setEditingKey(task.taskKey); setEditSchedule(Array.isArray(task.scheduleTime) ? task.scheduleTime.join(',') : task.scheduleTime || ''); }}
                     >
                       编辑
                     </button>
@@ -341,7 +346,7 @@ export const SchedulerTasksPanel: React.FC = () => {
             <div className="col-span-1 text-xs text-foreground">
               {task.scheduleType === 'interval'
                 ? formatInterval(task.intervalSeconds)
-                : (task.scheduleType === 'daily' ? '每日一次' : '-')}
+                : (task.scheduleType === 'daily' ? `每日${dailyRunCount}次` : '-')}
             </div>
 
             {/* 成功率 */}

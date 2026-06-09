@@ -27,3 +27,25 @@ apiClient.interceptors.response.use(
 );
 
 export default apiClient;
+
+export async function apiRequest(path: string, options: RequestInit & { body?: string } = {}): Promise<any> {
+  const url = API_BASE_URL + path;
+  const resp = await fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    body: options.body,
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    const err: any = new Error(data.message || data.error || 'Request failed');
+    err.status = resp.status;
+    err.response = { data, status: resp.status };
+    attachParsedApiError(err);
+    throw err;
+  }
+  return resp.status === 204 ? null : resp.json();
+}

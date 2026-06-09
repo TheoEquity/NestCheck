@@ -66,6 +66,30 @@ def _get_credential_path() -> Path:
     return _get_data_dir() / ".admin_password_hash"
 
 
+def _get_recovery_email_path() -> Path:
+    """Path to stored recovery email file."""
+    return _get_data_dir() / ".admin_recovery_email"
+
+
+def _get_security_question_path() -> Path:
+    """Path to stored security question & hashed answer file."""
+    return _get_data_dir() / ".admin_security_question"
+
+
+SECURITY_QUESTIONS = [
+    "你的出生年份是多少？",
+    "你母亲的姓名是什么？",
+    "你小学的名字是什么？",
+    "你最好的朋友叫什么？",
+    "你的第一只宠物名字是什么？",
+    "你出生城市的名字是什么？",
+    "你的生日（月日）是什么？",
+    "你的工牌号是多少？",
+    "你最喜欢的球队是哪个？",
+    "你第一次旅行的目的地是哪里？",
+]
+
+
 def _is_auth_enabled_from_env() -> bool:
     """Read ADMIN_AUTH_ENABLED from .env file."""
     _ensure_env_loaded()
@@ -284,6 +308,198 @@ def verify_password(password: str) -> bool:
     if not is_auth_enabled():
         return True
     return verify_stored_password(password)
+
+
+def bind_security_question(question_index: int, answer: str) -> Optional[str]:
+    """
+    Bind a security question (0-based index) with a hashed answer.
+    Returns error message or None on success.
+    """
+    if question_index < 0 or question_index >= len(SECURITY_QUESTIONS):
+        return "无效的问题编号"
+    if not answer or not answer.strip():
+        return "答案不能为空"
+
+    data_dir = _get_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = _get_security_question_path()
+
+    salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        answer.strip().lower().encode("utf-8"),
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    salt_b64 = base64.standard_b64encode(salt).decode("ascii")
+    hash_b64 = base64.standard_b64encode(derived).decode("ascii")
+    content = f"{question_index}:{salt_b64}:{hash_b64}"
+
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(path)
+        logger.info("Security question bound")
+        return None
+    except OSError as e:
+        logger.error("Failed to write security question: %s", e)
+        return f"保存失败: {e}"
+
+
+def _load_security_question() -> Optional[tuple[int, bytes, bytes]]:
+    """Return (question_index, salt, hash) or None."""
+    path = _get_security_question_path()
+    if not path.exists():
+        return None
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+        parts = content.split(":")
+        if len(parts) != 3:
+            return None
+        q_idx = int(parts[0])
+        salt = base64.standard_b64decode(parts[1])
+        hash_val = base64.standard_b64decode(parts[2])
+        return (q_idx, salt, hash_val)
+    except (OSError, ValueError):
+        return None
+
+
+def is_security_question_set() -> bool:
+    """Return True if a security question is bound."""
+    return _load_security_question() is not None
+
+
+def check_security_answer(answer: str) -> tuple[bool, Optional[str]]:
+    """
+    Verify answer against stored security question.
+    Returns (is_correct, question_text_if_bound).
+    """
+    stored = _load_security_question()
+    if not stored:
+        return False, None
+
+    q_idx, salt, stored_hash = stored
+    question_text = SECURITY_QUESTIONS[q_idx]
+
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        answer.strip().lower().encode("utf-8"),
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    is_correct = hmac.compare_digest(derived, stored_hash)
+    return is_correct, question_text
+
+
+def change_password_by_answer(new: str) -> Optional[str]:
+    """Reset password without verifying current. For security answer flow only."""
+    if not is_auth_enabled():
+        return "认证功能未用"
+    if not is_password_set():
+        return "尚未设置密码"
+
+    err = _validate_password(new)
+    if err:
+        return err
+
+    cred_path = _get_credential_path()
+    salt = secrets.token_bytes(32)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        new.encode("utf-8"),
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    salt_b64 = base64.standard_b64encode(salt).decode("ascii")
+    hash_b64 = base64.standard_b64encode(derived).decode("ascii")
+    content = f"{salt_b64}:{hash_b64}"
+
+    try:
+        data_dir = _get_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cred_path.with_suffix(".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(cred_path)
+        _password_hash_salt = salt
+        _password_hash_stored = derived
+        rotate_session_secret()
+        logger.info("Password reset via security answer")
+        return None
+    except OSError as e:
+        logger.error("Failed to write credential: %s", e)
+        return f"写入失败: {e}"
+
+
+def set_recovery_email(email: str) -> Optional[str]:
+    """Store recovery email for password reset. Returns error or None."""
+    if not email or "@" not in email:
+        return "邮箱格式不正确"
+    data_dir = _get_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = _get_recovery_email_path()
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(email.strip().lower(), encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(path)
+        logger.info("Recovery email set")
+        return None
+    except OSError as e:
+        logger.error("Failed to write recovery email: %s", e)
+        return f"写入失败: {e}"
+
+
+def get_recovery_email() -> Optional[str]:
+    """Return stored recovery email or None."""
+    path = _get_recovery_email_path()
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def change_password_by_recovery(new: str) -> Optional[str]:
+    """Reset password without verifying current. For recovery flow only."""
+    if not is_auth_enabled():
+        return "认证功能未启用"
+    if not is_password_set():
+        return "尚未设置密码"
+
+    err = _validate_password(new)
+    if err:
+        return err
+
+    cred_path = _get_credential_path()
+    salt = secrets.token_bytes(32)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        new.encode("utf-8"),
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    salt_b64 = base64.standard_b64encode(salt).decode("ascii")
+    hash_b64 = base64.standard_b64encode(derived).decode("ascii")
+    content = f"{salt_b64}:{hash_b64}"
+
+    try:
+        data_dir = _get_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cred_path.with_suffix(".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(cred_path)
+        _password_hash_salt = salt
+        _password_hash_stored = derived
+        rotate_session_secret()
+        logger.info("Password reset via recovery")
+        return None
+    except OSError as e:
+        logger.error("Failed to write credential: %s", e)
+        return f"写入失败: {e}"
 
 
 def change_password(current: str, new: str) -> Optional[str]:

@@ -257,7 +257,6 @@ export function usePortfolioOverview() {
   const [indices, setIndices] = useState<MarketIndexItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ParsedApiError | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -286,33 +285,9 @@ export function usePortfolioOverview() {
     });
   }, []);
 
-  const refreshPrices = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      const positionsResp = await portfolioApi.realtimeRevaluePositions({ costMethod: 'fifo' });
-      setPositions((positionsResp.items || []).slice().sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0)));
-    } catch (err) {
-      setError(getParsedApiError(err));
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, []);
-
-  const syncData = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      const positionsResp = await portfolioApi.realtimeRevaluePositions({ costMethod: 'fifo' });
-      setPositions((positionsResp.items || []).slice().sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0)));
-    } catch (err) {
-      setError(getParsedApiError(err));
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, []);
-
   useEffect(() => {
     void load();
   }, [load]);
 
-  return { accounts, risk, positions, indices, isLoading, error, reload: load, refreshPrices, syncData, isRefreshing };
+  return { accounts, risk, positions, indices, isLoading, error, reload: load };
 }

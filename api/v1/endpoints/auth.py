@@ -14,19 +14,25 @@ from api.deps import get_system_config_service
 from src.auth import (
     COOKIE_NAME,
     SESSION_MAX_AGE_HOURS_DEFAULT,
+    SECURITY_QUESTIONS,
+    bind_security_question,
     change_password,
     check_rate_limit,
+    check_security_answer,
     clear_rate_limit,
     create_session,
     get_client_ip,
+    get_recovery_email,
     has_stored_password,
     is_auth_enabled,
     is_password_changeable,
     is_password_set,
+    is_security_question_set,
     record_login_failure,
     refresh_auth_state,
     rotate_session_secret,
     set_initial_password,
+    set_recovery_email,
     verify_password,
     verify_stored_password,
     verify_session,
@@ -46,6 +52,8 @@ class LoginRequest(BaseModel):
 
     password: str = Field(default="", description="Admin password")
     password_confirm: str | None = Field(default=None, alias="passwordConfirm", description="Confirm (first-time)")
+    security_question_index: int | None = Field(default=None, alias="securityQuestionIndex", description="Security question index (first-time)")
+    security_answer: str | None = Field(default=None, alias="securityAnswer", description="Security answer (first-time)")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -56,6 +64,35 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(default="", alias="currentPassword")
     new_password: str = Field(default="", alias="newPassword")
     new_password_confirm: str = Field(default="", alias="newPasswordConfirm")
+
+
+class BindSecurityQuestionRequest(BaseModel):
+    """Bind security question during first-time setup."""
+
+    model_config = {"populate_by_name": True}
+
+    question_index: int = Field(alias="questionIndex")
+    answer: str = Field()
+
+
+class CheckSecurityAnswerRequest(BaseModel):
+    """Check security answer for password recovery."""
+
+    model_config = {"populate_by_name": True}
+
+    question_index: int = Field(alias="questionIndex")
+    answer: str = Field()
+
+
+class ResetPasswordByAnswerRequest(BaseModel):
+    """Reset password after verifying security answer."""
+
+    model_config = {"populate_by_name": True}
+
+    question_index: int = Field(alias="questionIndex")
+    answer: str = Field()
+    new_password: str = Field(alias="newPassword")
+    new_password_confirm: str = Field(alias="newPasswordConfirm")
 
 
 class AuthSettingsRequest(BaseModel):
@@ -178,6 +215,7 @@ def _get_auth_status_dict(request: Request | None = None) -> dict:
         "loggedIn": logged_in,
         "passwordSet": _password_set_for_response(auth_enabled),
         "passwordChangeable": is_password_changeable() if auth_enabled else False,
+        "securityQuestionSet": is_security_question_set() if auth_enabled else False,
         "setupState": setup_state,
     }
 
@@ -402,6 +440,11 @@ async def auth_login(request: Request, body: LoginRequest):
                 status_code=400,
                 content={"error": "invalid_password", "message": err},
             )
+        # Bind security question if provided
+        if body.security_question_index is not None and body.security_answer:
+            bind_err = bind_security_question(body.security_question_index, body.security_answer.strip())
+            if bind_err:
+                logger.warning("Failed to bind security question during setup: %s", bind_err)
     else:
         if not verify_password(password):
             record_login_failure(ip)
@@ -475,3 +518,97 @@ async def auth_logout(request: Request):
     resp = Response(status_code=204)
     resp.delete_cookie(key=COOKIE_NAME, path="/")
     return resp
+
+
+@router.post(
+    "/bind-security-question",
+    summary="Bind security question",
+    description="Bind a security question & answer during first-time setup.",
+)
+async def auth_bind_security_question(body: BindSecurityQuestionRequest):
+    """Bind security question during first-time setup."""
+    if not is_password_set():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "password_not_set", "message": "请先设置密码"},
+        )
+    if is_security_question_set():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "already_bound", "message": "已绑定安全问题"},
+        )
+
+    err = bind_security_question(body.question_index, body.answer)
+    if err:
+        return JSONResponse(status_code=400, content={"error": "bind_failed", "message": err})
+    return Response(status_code=204)
+
+
+@router.post(
+    "/check-security-answer",
+    summary="Check security answer",
+    description="Verify security answer for password recovery.",
+)
+async def auth_check_security_answer(body: CheckSecurityAnswerRequest):
+    """Check security answer for password recovery."""
+    if not is_security_question_set():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "no_question", "message": "未设置安全问题"},
+        )
+
+    is_correct, _ = check_security_answer(body.answer)
+    if is_correct:
+        return Response(status_code=204)
+    return JSONResponse(
+        status_code=400,
+        content={"error": "wrong_answer", "message": "答案不正确"},
+    )
+
+
+@router.post(
+    "/reset-password-by-answer",
+    summary="Reset password via security answer",
+    description="Reset password after verifying security answer.",
+)
+async def auth_reset_password_by_answer(body: ResetPasswordByAnswerRequest):
+    """Reset password after verifying security answer."""
+    if not is_password_changeable():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "not_changeable", "message": "密码无法通过此方式重置"},
+        )
+    if not is_security_question_set():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "no_question", "message": "未设置安全问题"},
+        )
+
+    # Verify answer first
+    is_correct, _ = check_security_answer(body.answer)
+    if not is_correct:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "wrong_answer", "message": "答案不正确"},
+        )
+
+    # Validate new password
+    new_pwd = body.new_password.strip()
+    new_confirm = body.new_password_confirm.strip()
+    if new_pwd != new_confirm:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "password_mismatch", "message": "两次输入的新密码不一致"},
+        )
+
+    from src.auth import _validate_password
+    err = _validate_password(new_pwd)
+    if err:
+        return JSONResponse(status_code=400, content={"error": "invalid_password", "message": err})
+
+    # Change password via security answer
+    err = change_password_by_answer(new_pwd)
+    if err:
+        return JSONResponse(status_code=400, content={"error": "change_failed", "message": err})
+
+    return Response(status_code=204)

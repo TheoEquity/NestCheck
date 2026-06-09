@@ -465,26 +465,6 @@ def dismiss_open_date_position(trade_id: int) -> PortfolioEventCreatedResponse:
 
 
 @router.post(
-    "/positions/realtime-revalue",
-    response_model=PortfolioPositionListResponse,
-    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Realtime revalue stock positions without persisting cached prices",
-)
-def realtime_revalue_positions(
-    account_id: Optional[int] = Query(None, description="Optional account id"),
-    cost_method: str = Query("fifo", description="Cost method: fifo or avg"),
-) -> PortfolioPositionListResponse:
-    service = PortfolioService()
-    try:
-        data = service.realtime_revalue_positions(account_id=account_id, cost_method=cost_method)
-        return PortfolioPositionListResponse(**data)
-    except ValueError as exc:
-        raise _bad_request(exc)
-    except Exception as exc:
-        raise _internal_error("Realtime revalue positions failed", exc)
-
-
-@router.post(
     "/positions/{position_id}/adjust",
     response_model=PortfolioPositionAdjustResponse,
     responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},

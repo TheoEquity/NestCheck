@@ -214,18 +214,6 @@ export const portfolioApi = {
     return toCamelCase<PortfolioLatestFxRateListResponse>(response.data);
   },
 
-  async refreshPrices(): Promise<Record<string, unknown>> {
-    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/prices/refresh');
-    return response.data;
-  },
-
-  async realtimeRevaluePositions(query: SnapshotQuery = {}): Promise<PortfolioPositionListResponse> {
-    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/positions/realtime-revalue', undefined, {
-      params: buildSnapshotParams(query),
-    });
-    return toCamelCase<PortfolioPositionListResponse>(response.data);
-  },
-
   async createTrade(payload: PortfolioTradeCreateRequest): Promise<PortfolioEventCreatedResponse> {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/trades', {
       account_id: payload.accountId,

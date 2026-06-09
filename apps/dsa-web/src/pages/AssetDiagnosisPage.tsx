@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useEffect, useMemo } from 'react';
-import { Activity, BarChart3, HeartPulse, RefreshCcw, Scale, WalletCards } from 'lucide-react';
-import { ApiErrorAlert, Button, Card, EmptyState, PageHeader } from '../components/common';
+import { Activity, BarChart3, HeartPulse, Scale, WalletCards } from 'lucide-react';
+import { ApiErrorAlert, Card, EmptyState, PageHeader } from '../components/common';
 import { usePortfolioOverview, formatMoney, formatSignedPct, formatPct, localizeAssetCategory } from './assetsShared';
 
 const benchmarkRows = [
@@ -11,7 +11,7 @@ const benchmarkRows = [
 ];
 
 const AssetDiagnosisPage: React.FC = () => {
-  const { positions, risk, isLoading, error, isRefreshing, refreshPrices } = usePortfolioOverview();
+  const { positions, risk, isLoading, error } = usePortfolioOverview();
 
   useEffect(() => {
     document.title = '资产诊断 - NestCheck';
@@ -48,12 +48,6 @@ const AssetDiagnosisPage: React.FC = () => {
       <PageHeader
         title="资产诊断"
         description="聚焦收益、风险、参照物对比、资产质量和操作行为，用轻量指标支撑后续 AI 诊断。"
-        actions={(
-          <Button variant="secondary" onClick={() => void refreshPrices()} disabled={isRefreshing}>
-            <RefreshCcw className="h-4 w-4" />
-            {isRefreshing ? '刷新中...' : '刷新'}
-          </Button>
-        )}
       />
 
       {error ? <ApiErrorAlert error={error} /> : null}

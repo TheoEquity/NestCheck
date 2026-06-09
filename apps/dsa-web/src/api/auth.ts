@@ -5,6 +5,7 @@ export type AuthStatusResponse = {
   loggedIn: boolean;
   passwordSet?: boolean;
   passwordChangeable?: boolean;
+  securityQuestionSet?: boolean;
   setupState: 'enabled' | 'password_retained' | 'no_password';
 };
 
@@ -39,10 +40,16 @@ export const authApi = {
     return data;
   },
 
-  async login(password: string, passwordConfirm?: string): Promise<void> {
-    const body: { password: string; passwordConfirm?: string } = { password };
+  async login(password: string, passwordConfirm?: string, securityQuestionIndex?: number, securityAnswer?: string): Promise<void> {
+    const body: { password: string; passwordConfirm?: string; securityQuestionIndex?: number; securityAnswer?: string } = { password };
     if (passwordConfirm !== undefined) {
       body.passwordConfirm = passwordConfirm;
+    }
+    if (securityQuestionIndex !== undefined) {
+      body.securityQuestionIndex = securityQuestionIndex;
+    }
+    if (securityAnswer !== undefined) {
+      body.securityAnswer = securityAnswer;
     }
     await apiClient.post('/api/v1/auth/login', body);
   },

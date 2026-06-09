@@ -388,6 +388,7 @@ class PortfolioRepository:
                 action_type=action_type,
                 cash_dividend_per_share=cash_dividend_per_share,
                 realized_pnl=realized_pnl,
+                split_ratio=split_ratio,
                 note=note,
             )
             session.expunge(row)
@@ -577,6 +578,7 @@ class PortfolioRepository:
         action_type: str,
         cash_dividend_per_share: Optional[float] = None,
         realized_pnl: float = 0.0,
+        split_ratio: Optional[float] = None,
         note: Optional[str] = None,
     ) -> PortfolioCorporateAction:
         row = PortfolioCorporateAction(

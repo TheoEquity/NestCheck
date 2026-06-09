@@ -341,7 +341,7 @@ const AssetEventsPage: React.FC = () => {
         direction: item.side === 'buy' ? '买入' : '卖出',
         amount: formatNumber(item.quantity),
         price: formatNumber(item.price),
-        note: item.note || `本单盈利 ${formatNumber(item.realizedPnl || 0)}`,
+        note: item.note || (item.side === 'sell' ? `本单盈利 ${formatNumber(item.realizedPnl || 0)}` : '买入建仓/加仓'),
       });
     });
     recentCashLedgers.forEach((item) => {

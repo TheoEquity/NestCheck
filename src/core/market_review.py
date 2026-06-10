@@ -11,12 +11,10 @@
 """
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, Optional
 import uuid
 
 from src.config import get_config
-from src.notification import NotificationService
 from src.market_analyzer import MarketAnalyzer
 from src.report_language import normalize_report_language
 from src.search_service import SearchService
@@ -76,11 +74,8 @@ def _resolve_market_review_regions(raw_region: Optional[str]) -> list[str]:
 
 
 def run_market_review(
-    notifier: NotificationService,
     analyzer: Optional[GeminiAnalyzer] = None,
     search_service: Optional[SearchService] = None,
-    send_notification: bool = True,
-    merge_notification: bool = False,
     override_region: Optional[str] = None,
     query_id: Optional[str] = None,
 ) -> Optional[str]:
@@ -88,11 +83,8 @@ def run_market_review(
     执行大盘复盘分析
 
     Args:
-        notifier: 通知服务
         analyzer: AI分析器（可选）
         search_service: 搜索服务（可选）
-        send_notification: 是否发送通知
-        merge_notification: 是否合并推送（跳过本次推送，由 main 层合并个股+大盘后统一发送，Issue #190）
         override_region: 覆盖 config 的 market_review_region（Issue #373 交易日过滤后有效子集）
         query_id: 历史记录关联 ID；API 后台任务会传入 task_id，CLI/Bot 为空时自动生成
 
@@ -143,15 +135,6 @@ def run_market_review(
             market_light_snapshots = {run_region: review_result.market_light_snapshot}
         
         if review_report:
-            # 保存报告到文件
-            date_str = datetime.now().strftime('%Y%m%d')
-            report_filename = f"market_review_{date_str}.md"
-            filepath = notifier.save_report_to_file(
-                f"{review_text['root_title']}\n\n{review_report}",
-                report_filename
-            )
-            logger.info(f"大盘复盘报告已保存: {filepath}")
-
             _persist_market_review_history(
                 review_report=review_report,
                 markdown_report=f"{review_text['root_title']}\n\n{review_report}",
@@ -160,21 +143,6 @@ def run_market_review(
                 query_id=query_id,
                 market_light_snapshots=market_light_snapshots,
             )
-            
-            # 推送通知（合并模式下跳过，由 main 层统一发送）
-            if merge_notification and send_notification:
-                logger.info("合并推送模式：跳过大盘复盘单独推送，将在个股+大盘复盘后统一发送")
-            elif send_notification and notifier.is_available():
-                # 添加标题
-                report_content = f"{review_text['push_title']}\n\n{review_report}"
-
-                success = notifier.send(report_content, email_send_to_all=True, route_type="report")
-                if success:
-                    logger.info("大盘复盘推送成功")
-                else:
-                    logger.warning("大盘复盘推送失败")
-            elif not send_notification:
-                logger.info("已跳过推送通知 (--no-notify)")
             
             return review_report
         

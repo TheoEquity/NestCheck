@@ -335,12 +335,6 @@ def aggregate_dry_run_results(rule_id: int, target_scope: str, results: List[Dic
 
 
 def _watchlist_symbols(config: Any) -> List[str]:
-    refresh = getattr(config, "refresh_stock_list", None)
-    if callable(refresh):
-        try:
-            refresh()
-        except Exception as exc:
-            logger.warning("[portfolio_alerts] Failed to refresh watchlist symbols: %s", exc)
     return list(getattr(config, "stock_list", []) or [])
 
 

@@ -112,23 +112,3 @@ class AlertTriggerListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-
-
-class AlertNotificationItem(BaseModel):
-    id: int
-    trigger_id: Optional[int] = None
-    channel: str
-    attempt: int
-    success: bool
-    error_code: Optional[str] = None
-    retryable: bool
-    latency_ms: Optional[int] = None
-    diagnostics: Optional[str] = None
-    created_at: Optional[str] = None
-
-
-class AlertNotificationListResponse(BaseModel):
-    items: List[AlertNotificationItem] = Field(default_factory=list)
-    total: int
-    page: int
-    page_size: int

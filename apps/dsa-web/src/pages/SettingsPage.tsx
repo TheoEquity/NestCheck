@@ -8,9 +8,7 @@ import { ApiErrorAlert, Button, ConfirmDialog, EmptyState } from '../components/
 import {
   AuthSettingsCard,
   ChangePasswordCard,
-  IntelligentImport,
   LLMChannelEditor,
-  NotificationTestPanel,
   SettingsCategoryNav,
   SettingsAlert,
   SettingsField,
@@ -499,8 +497,8 @@ const SettingsPage: React.FC = () => {
   };
 
   const desktopUpdateNotice = getDesktopUpdateNotice(desktopUpdateState);
-  const shouldGuardActiveConfigPanel = activeCategory === 'notification' || activeCategory === 'agent';
-  const activeConfigPanelErrorTitle = activeCategory === 'agent' ? 'Agent 设置' : '通知设置';
+  const shouldGuardActiveConfigPanel = activeCategory === 'agent';
+  const activeConfigPanelErrorTitle = 'Agent 设置';
   const settingsPanelDiagnosticHint = isDesktopRuntime ? (
     <>
       请查看并提供桌面端日志
@@ -780,24 +778,6 @@ const SettingsPage: React.FC = () => {
                 </div>
               </SettingsSectionCard>
             ) : null}
-            {activeCategory === 'base' ? (
-              <SettingsSectionCard
-                title="智能导入"
-                description="从图片、文件或剪贴板中提取股票代码，并合并到自选股列表。"
-              >
-                <IntelligentImport
-                  stockListValue={
-                    (activeItems.find((i) => i.key === 'STOCK_LIST')?.value as string) ?? ''
-                  }
-                  configVersion={configVersion}
-                  maskToken={maskToken}
-                  onMerged={async () => {
-                    await refreshAfterExternalSave(['STOCK_LIST']);
-                  }}
-                  disabled={isSaving || isLoading}
-                />
-              </SettingsSectionCard>
-            ) : null}
             {activeCategory === 'ai_model' ? (
               <SettingsSectionCard
                 title="AI 模型接入"
@@ -816,19 +796,6 @@ const SettingsPage: React.FC = () => {
             ) : null}
             {activeCategory === 'system' && passwordChangeable ? (
               <ChangePasswordCard />
-            ) : null}
-            {activeCategory === 'notification' ? (
-              <SettingsPanelErrorBoundary
-                title="通知测试"
-                resetKey={`notification-test:${configVersion}`}
-                diagnosticHint={settingsPanelDiagnosticHint}
-              >
-                <NotificationTestPanel
-                  items={rawActiveItems.map((item) => ({ key: item.key, value: String(item.value ?? '') }))}
-                  maskToken={maskToken}
-                  disabled={isSaving || isLoading}
-                />
-              </SettingsPanelErrorBoundary>
             ) : null}
             {activeCategory === 'scheduler' ? (
               <SchedulerTasksPanel />

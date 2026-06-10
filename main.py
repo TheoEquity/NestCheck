@@ -172,9 +172,6 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --debug            # 调试模式
   python main.py --dry-run          # 仅获取数据，不进行 AI 分析
   python main.py --stocks 600519,000001  # 指定分析特定股票
-  python main.py --no-notify        # 不发送推送通知
-  python main.py --check-notify     # 检查通知配置，不发送通知
-  python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
   python main.py --market-review    # 仅运行大盘复盘
         '''
     )
@@ -195,24 +192,6 @@ def parse_arguments() -> argparse.Namespace:
         '--stocks',
         type=str,
         help='指定要分析的股票代码，逗号分隔（覆盖配置文件）'
-    )
-
-    parser.add_argument(
-        '--no-notify',
-        action='store_true',
-        help='不发送推送通知'
-    )
-
-    parser.add_argument(
-        '--check-notify',
-        action='store_true',
-        help='只读检查通知渠道配置，不发送通知'
-    )
-
-    parser.add_argument(
-        '--single-notify',
-        action='store_true',
-        help='启用单股推送模式：每分析完一只股票立即推送，而不是汇总推送'
     )
 
     parser.add_argument(
@@ -393,12 +372,8 @@ def run_full_analysis(
     from src.core.pipeline import StockAnalysisPipeline
 
     try:
-        # Issue #529: Hot-reload STOCK_LIST from .env on each scheduled run
-        if stock_codes is None:
-            config.refresh_stock_list()
-
         # Issue #373: Trading day filter (per-stock, per-market)
-        effective_codes = stock_codes if stock_codes is not None else config.stock_list
+        effective_codes = stock_codes if stock_codes is not None else list(config.stock_list)
         filtered_codes, effective_region, should_skip = _compute_trading_day_filter(
             config, args, effective_codes
         )
@@ -411,18 +386,6 @@ def run_full_analysis(
             skipped = set(effective_codes) - set(filtered_codes)
             logger.info("今日休市股票已跳过: %s", skipped)
         stock_codes = filtered_codes
-
-        # 命令行参数 --single-notify 覆盖配置（#55）
-        if getattr(args, 'single_notify', False):
-            config.single_stock_notify = True
-
-        # Issue #190: 个股与大盘复盘合并推送
-        merge_notification = (
-            getattr(config, 'merge_email_notification', False)
-            and config.market_review_enabled
-            and not getattr(args, 'no_market_review', False)
-            and not config.single_stock_notify
-        )
 
         # 创建调度器
         save_context_snapshot = None
@@ -441,8 +404,6 @@ def run_full_analysis(
         results = pipeline.run(
             stock_codes=stock_codes,
             dry_run=args.dry_run,
-            send_notification=not args.no_notify,
-            merge_notification=merge_notification
         )
 
         # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
@@ -469,32 +430,11 @@ def run_full_analysis(
                 notifier=pipeline.notifier,
                 analyzer=pipeline.analyzer,
                 search_service=pipeline.search_service,
-                send_notification=not args.no_notify,
-                merge_notification=merge_notification,
                 override_region=effective_region,
             )
             # 如果有结果，赋值给 market_report 用于后续飞书文档生成
             if review_result:
                 market_report = review_result
-
-        # Issue #190: 合并推送（个股+大盘复盘）
-        if merge_notification and (results or market_report) and not args.no_notify:
-            parts = []
-            if market_report:
-                parts.append(f"# 📈 大盘复盘\n\n{market_report}")
-            if results:
-                dashboard_content = pipeline.notifier.generate_aggregate_report(
-                    results,
-                    getattr(config, 'report_type', 'simple'),
-                )
-                parts.append(f"# 🚀 个股决策仪表盘\n\n{dashboard_content}")
-            if parts:
-                combined_content = "\n\n---\n\n".join(parts)
-                if pipeline.notifier.is_available():
-                    if pipeline.notifier.send(combined_content, email_send_to_all=True, route_type="report"):
-                        logger.info("已合并推送（个股+大盘复盘）")
-                    else:
-                        logger.warning("合并推送失败")
 
         # 输出摘要
         if results:
@@ -540,12 +480,6 @@ def run_full_analysis(
                 doc_url = feishu_doc.create_daily_doc(doc_title, full_content)
                 if doc_url:
                     logger.info(f"飞书云文档创建成功: {doc_url}")
-                    # 可选：将文档链接也推送到群里
-                    if not args.no_notify:
-                        pipeline.notifier.send(
-                            f"[{now.strftime('%Y-%m-%d %H:%M')}] 复盘文档创建成功: {doc_url}",
-                            route_type="report",
-                        )
 
         except Exception as e:
             logger.error(f"飞书文档生成失败: {e}")
@@ -685,16 +619,6 @@ def main() -> int:
     for warning in warnings:
         logger.warning(warning)
 
-    if getattr(args, "check_notify", False):
-        from src.services.notification_diagnostics import (
-            format_notification_diagnostics,
-            run_notification_diagnostics,
-        )
-
-        result = run_notification_diagnostics(config)
-        print(format_notification_diagnostics(result))
-        return 0 if result.ok else 1
-
     # 解析股票列表（统一为大写 Issue #355）
     stock_codes = None
     if args.stocks:
@@ -800,7 +724,6 @@ def main() -> int:
                 notifier=notifier,
                 analyzer=analyzer,
                 search_service=search_service,
-                send_notification=not args.no_notify,
                 override_region=effective_region,
             )
             return 0

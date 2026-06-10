@@ -122,15 +122,7 @@ class MarketCommand(BotCommand):
         try:
             override_region = self._compute_market_review_override_region(config)
             if override_region == "":
-                from src.notification import NotificationService
-                notifier = NotificationService(source_message=message)
                 logger.info("[MarketCommand] 今日相关市场休市，跳过大盘复盘")
-                if notifier.is_available():
-                    notifier.send(
-                        "🎯 大盘复盘\n\n今日相关市场休市，已跳过大盘复盘。",
-                        email_send_to_all=True,
-                        route_type="report",
-                    )
                 return
 
             from src.core.market_review_runtime import build_market_review_runtime
@@ -144,7 +136,6 @@ class MarketCommand(BotCommand):
                 notifier=notifier,
                 analyzer=analyzer,
                 search_service=search_service,
-                send_notification=True,
                 override_region=override_region,
             )
             if review_report:

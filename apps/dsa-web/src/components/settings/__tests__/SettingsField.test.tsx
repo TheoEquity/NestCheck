@@ -96,7 +96,7 @@ describe('SettingsField', () => {
           schema: {
             key: 'NOTIFICATION_MIN_SEVERITY',
             title: 'Notification Minimum Severity',
-            category: 'notification',
+            category: 'system',
             dataType: 'string',
             uiControl: 'select',
             isSensitive: false,
@@ -137,7 +137,7 @@ describe('SettingsField', () => {
       },
       {
         key: 'REPORT_TYPE',
-        category: 'notification',
+        category: 'system',
         options: ['simple', 'full', 'brief'],
         expectedLabels: ['简洁', '完整', '简报'],
       },
@@ -304,7 +304,7 @@ describe('SettingsField', () => {
           isMasked: false,
           schema: {
             key: 'CUSTOM_WEBHOOK_BODY_TEMPLATE',
-            category: 'notification',
+            category: 'system',
             dataType: 'string',
             uiControl: 'textarea',
             isSensitive: false,
@@ -329,23 +329,23 @@ describe('SettingsField', () => {
     render(
       <SettingsField
         item={{
-          key: 'STOCK_LIST',
-          value: '600519,300750',
+          key: 'TUSHARE_TOKEN',
+          value: 'abc123',
           rawValueExists: true,
           isMasked: false,
           schema: {
-            key: 'STOCK_LIST',
-            category: 'base',
-            dataType: 'array',
-            uiControl: 'textarea',
-            isSensitive: false,
+            key: 'TUSHARE_TOKEN',
+            category: 'data_source',
+            dataType: 'string',
+            uiControl: 'password',
+            isSensitive: true,
             isRequired: false,
             isEditable: true,
             options: [],
             validation: {},
             displayOrder: 1,
-            helpKey: 'settings.base.STOCK_LIST',
-            examples: ['STOCK_LIST=600519,300750,002594'],
+            helpKey: 'settings.data_source.TUSHARE_TOKEN',
+            examples: ['TUSHARE_TOKEN=abc123'],
             docs: [
               {
                 label: '完整指南',
@@ -355,15 +355,15 @@ describe('SettingsField', () => {
             warningCodes: [],
           },
         }}
-        value="600519,300750"
+        value="abc123"
         onChange={() => undefined}
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '查看 自选股列表 配置说明' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看 Tushare Token 配置说明' }));
 
-    expect(screen.getByRole('dialog', { name: '自选股列表' })).toBeInTheDocument();
-    expect(screen.getByText('STOCK_LIST=600519,300750,002594')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Tushare Token' })).toBeInTheDocument();
+    expect(screen.getByText('TUSHARE_TOKEN=abc123')).toBeInTheDocument();
     const docLink = screen.getByRole('link', { name: /完整指南/ });
     expect(docLink).toHaveAttribute('href', 'https://example.com/full-guide');
 

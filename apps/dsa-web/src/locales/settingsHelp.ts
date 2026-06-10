@@ -13,23 +13,6 @@ export interface SettingsHelpContent {
 type SettingsHelpMap = Record<string, SettingsHelpContent>;
 
 const settingsHelpZhCN: SettingsHelpMap = {
-  'settings.base.STOCK_LIST': {
-    title: '自选股列表',
-    summary: '配置需要分析的股票代码列表，是手动分析、定时任务和通知报告的基础输入。',
-    usage: '多个股票代码使用英文逗号分隔。A 股可直接填写 6 位代码，港股可使用 hk 前缀，美股可填写 ticker。',
-    valueNotes: [
-      '定时模式每次触发前会重新读取当前保存的 STOCK_LIST。',
-      '如果命令行临时传入 --stocks，只影响本次手动运行，不会锁定后续计划任务。',
-      '邮件分组里的 STOCK_GROUP_N 应写成 STOCK_LIST 的子集，只影响邮件收件人，不改变分析范围。',
-    ],
-    impact: [
-      '影响主分析任务、市场报告中的个股范围、通知推送内容和历史报告记录。',
-    ],
-    notes: [
-      '股票代码之间不要使用中文逗号。',
-      '修改后保存配置即可供后续任务读取。',
-    ],
-  },
   'settings.ai_model.LITELLM_MODEL': {
     title: '主模型',
     summary: '指定普通分析流程默认使用的 LLM 模型。',
@@ -234,88 +217,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
     valueNotes: ['实际窗口会受 profile 与最大天数共同约束。'],
     impact: ['影响新闻上下文数量、时效性和报告长度。'],
     notes: ['窗口过长可能引入陈旧信息，过短可能遗漏慢发酵事件。'],
-  },
-  'settings.notification.FEISHU_WEBHOOK_URL': {
-    title: '飞书群机器人 Webhook',
-    summary: '配置飞书自定义群机器人，用于把分析报告推送到指定飞书群。',
-    usage: '在飞书群中添加自定义机器人后，复制 open-apis/bot/v2/hook 开头的 Webhook URL 到这里。',
-    valueNotes: [
-      '如果机器人开启“签名校验”，还需要填写 FEISHU_WEBHOOK_SECRET。',
-      '如果机器人开启“关键词”，还需要填写 FEISHU_WEBHOOK_KEYWORD，系统会自动补到消息前。',
-      'FEISHU_APP_ID / FEISHU_APP_SECRET 用于飞书应用、云文档或 Stream Bot，不会直接启用群 Webhook 推送。',
-    ],
-    impact: [
-      '影响飞书通知渠道；失败时不应拖垮主分析流程，只影响该渠道送达。',
-    ],
-    notes: [
-      '不要把 FEISHU_APP_SECRET 当作 FEISHU_WEBHOOK_SECRET 使用。',
-      '如果飞书侧配置 IP 白名单，需要确认当前运行环境出口 IP 已加入白名单。',
-    ],
-  },
-  'settings.notification.webhooks': {
-    title: '企业微信 Webhook',
-    summary: '配置企业微信群机器人 Webhook，用于把分析报告推送到指定群。',
-    usage: '在企业微信群中创建机器人后，复制 qyapi.weixin.qq.com/cgi-bin/webhook/send 开头的 Webhook URL。',
-    valueNotes: [
-      'Webhook URL 通常包含敏感 token，应按密钥处理。',
-      '不同平台对消息长度、格式和频率限制不同。',
-    ],
-    impact: ['影响对应 Webhook 通知渠道的报告送达。'],
-    notes: ['单个通知渠道失败不应阻断主分析流程。'],
-  },
-  'settings.notification.CUSTOM_WEBHOOK_URLS': {
-    title: '自定义 Webhook',
-    summary: '向任意支持 POST JSON 的服务推送报告。',
-    usage: '多个 URL 使用英文逗号分隔；如需自定义 body，可配置 CUSTOM_WEBHOOK_BODY_TEMPLATE。',
-    valueNotes: [
-      '模板必须渲染为 JSON object。',
-      '推荐使用 $content_json、$title_json 避免换行和引号破坏 JSON。',
-    ],
-    impact: ['影响 AstrBot、NapCat、自建服务等自定义推送。'],
-    notes: ['先用一个 Webhook 验证成功，再扩展到多个目标。'],
-  },
-  'settings.notification.WEBHOOK_VERIFY_SSL': {
-    title: 'Webhook SSL 校验',
-    summary: '控制发送 HTTPS Webhook 时是否校验证书。',
-    usage: '默认保持 true；只有可信内网自签证书场景才考虑 false。',
-    valueNotes: ['关闭校验会降低中间人攻击防护。'],
-    impact: ['影响所有自定义 Webhook HTTPS 请求的 TLS 校验行为。'],
-    notes: ['公网环境不要关闭 SSL 校验。'],
-  },
-  'settings.notification.telegram': {
-    title: 'Telegram 推送',
-    summary: '通过 Telegram Bot 向个人、群组或 Topic 推送报告。',
-    usage: '使用 @BotFather 创建 Bot，填写 Bot Token 和目标 Chat ID；群组 Topic 可额外填写 Thread ID。',
-    valueNotes: ['Bot 需要被加入目标群组并具备发言权限。'],
-    impact: ['影响 Telegram 通知渠道。'],
-    notes: ['群组 Chat ID 通常是负数或 -100 开头。'],
-  },
-  'settings.notification.email': {
-    title: '邮件通知',
-    summary: '通过 SMTP 邮箱发送分析报告。',
-    usage: '填写发件邮箱、SMTP 授权码和收件人列表；多个收件人使用英文逗号分隔。',
-    valueNotes: [
-      'EMAIL_PASSWORD 通常是邮箱授权码，不是网页登录密码。',
-      '可用 STOCK_GROUP_N / EMAIL_GROUP_N 配置分组收件人。',
-    ],
-    impact: ['影响邮件报告发送、分组收件和大盘复盘邮件送达。'],
-    notes: ['不同邮箱服务商需要先开启 SMTP 服务。'],
-  },
-  'settings.notification.chat_bots': {
-    title: '聊天平台 Bot',
-    summary: '配置 Discord、Slack、Pushover、ServerChan 等聊天或推送平台。',
-    usage: '按平台选择 Webhook 或 Bot Token 模式；Bot 模式通常还需要频道 ID。',
-    valueNotes: ['同一平台同时配置 Bot 与 Webhook 时，代码可能按既定优先级选择其中一种。'],
-    impact: ['影响对应聊天平台通知渠道。'],
-    notes: ['Bot Token、Webhook URL、SendKey 都应按密钥处理。'],
-  },
-  'settings.notification.report_output': {
-    title: '报告输出设置',
-    summary: '控制通知报告的详细程度、语言和模板输出。',
-    usage: 'REPORT_TYPE 可选 simple/full/brief，REPORT_LANGUAGE 可选 zh/en。',
-    valueNotes: ['报告语言影响默认模板和通知文案，不等同于前端界面语言。'],
-    impact: ['影响通知正文长度、语言和阅读体验。'],
-    notes: ['full 报告可能更长，部分平台可能触发分段发送。'],
   },
   'settings.system.WEBUI_HOST': {
     title: 'WebUI 监听地址',
@@ -729,76 +630,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响报告中历史信号对比部分的展示。'],
     notes: ['设为 0 关闭该功能。'],
   },
-  'settings.report.SINGLE_STOCK_NOTIFY': {
-    title: '逐股即时推送',
-    summary: '每完成一只股票分析后立即推送，而不是等全部完成后批量推送。',
-    usage: '开启后，每只股票分析完成后独立发送通知；关闭后汇总发送。',
-    valueNotes: ['开启后通知更及时，但推送频率更高。'],
-    impact: ['影响通知推送时机和频率。'],
-    notes: ['跟踪大量股票时可能产生较多通知消息。'],
-  },
-  'settings.report.MERGE_EMAIL_NOTIFICATION': {
-    title: '合并邮件通知',
-    summary: '将个股分析与大盘复盘合并为一封邮件发送。',
-    usage: '开启后，个股分析和大盘复盘会合并在同一封邮件中发送。',
-    valueNotes: ['仅在同时启用了个股分析和大盘复盘时有效。'],
-    impact: ['影响邮件通知的封数和内容组织。'],
-    notes: ['关闭后个股分析和大盘复盘会分别发送邮件。'],
-  },
-  // ------------------------------------------------------------------
-  // Notification routing
-  // ------------------------------------------------------------------
-  'settings.notification.channel_routing': {
-    title: '通知渠道路由',
-    summary: '为不同类型的通知指定目标推送渠道。',
-    usage: '三个路由字段分别控制报告推送、告警推送和系统错误推送的目标渠道。使用英文逗号分隔渠道名；留空则推送到所有已配置渠道。',
-    valueNotes: [
-      'NOTIFICATION_REPORT_CHANNELS 控制日常分析报告推送渠道。',
-      'NOTIFICATION_ALERT_CHANNELS 控制事件告警推送渠道。',
-      'NOTIFICATION_SYSTEM_ERROR_CHANNELS 控制系统错误推送渠道。',
-      '可用渠道取决于已配置的通知渠道（如 email、feishu、telegram 等）。',
-    ],
-    impact: ['影响不同通知类型的推送目标。'],
-    notes: ['指定的渠道必须已完成对应配置，否则不会生效。'],
-  },
-  'settings.notification.dedup': {
-    title: '通知去重与冷却',
-    summary: '控制静态通知的去重时间窗口和冷却时间。',
-    usage: 'NOTIFICATION_DEDUP_TTL_SECONDS 设定去重时间窗口，同一去重 key 在窗口内只推送一次；NOTIFICATION_COOLDOWN_SECONDS 设定冷却时间，同一冷却 key 在窗口内只推送一次。',
-    valueNotes: [
-      '两个机制独立生效，互不影响。',
-      '都设为 0 时关闭对应去重或冷却功能。',
-    ],
-    impact: ['影响通知推送频率和重复控制。'],
-    notes: ['动态通知（如告警）有独立的触发和冷却逻辑。'],
-  },
-  'settings.notification.quiet_hours': {
-    title: '静默时段',
-    summary: '在指定时间段内抑制通知推送。',
-    usage: 'NOTIFICATION_QUIET_HOURS 使用 HH:MM-HH:MM 格式，支持跨夜；NOTIFICATION_TIMEZONE 指定对应时区。',
-    valueNotes: [
-      '留空关闭静默时段。',
-      '时区留空时使用系统本地时区。',
-    ],
-    impact: ['影响通知推送的时段。'],
-    notes: ['静默时段内的静态通知会被抑制并跳过，不会在时段结束后补发。'],
-  },
-  'settings.notification.MIN_SEVERITY': {
-    title: '最低通知等级',
-    summary: '过滤低于指定等级的静态通知。',
-    usage: '设为 warning 时，只有 warning 及以上等级的通知会被推送；留空保留当前行为。',
-    valueNotes: ['等级从低到高依次为 info、warning、error、critical。'],
-    impact: ['影响静态通知的推送量。'],
-    notes: ['动态通知（如告警）有独立的事件和等级评估。'],
-  },
-  'settings.notification.DAILY_DIGEST_ENABLED': {
-    title: '每日摘要（预留）',
-    summary: '预留功能开关，当前不会发送每日摘要。',
-    usage: '该字段为 P4 预留功能，当前开启后不会产生任何效果。',
-    valueNotes: ['保留用于后续每日摘要聚合推送功能。'],
-    impact: ['当前无实际影响。'],
-    notes: ['未来版本启用后会聚合当日通知为一条摘要推送。'],
-  },
   // ------------------------------------------------------------------
   // System runtime
   // ------------------------------------------------------------------
@@ -854,18 +685,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
 };
 
 const settingsHelpEnUS: SettingsHelpMap = {
-  'settings.base.STOCK_LIST': {
-    title: 'Watchlist',
-    summary: 'Defines the stock codes used by analysis jobs and notification reports.',
-    usage: 'Separate symbols with commas. A-shares can use six-digit codes, HK stocks can use the hk prefix, and US stocks can use ticker symbols.',
-    valueNotes: [
-      'Scheduled mode rereads the saved STOCK_LIST before each run.',
-      'A temporary --stocks argument only affects that manual run.',
-      'STOCK_GROUP_N should be a subset of STOCK_LIST and only affects grouped email routing.',
-    ],
-    impact: ['Affects analysis scope, notification content, and saved history reports.'],
-    notes: ['Use English commas between symbols.', 'Save the setting before later tasks can read it.'],
-  },
   'settings.ai_model.LITELLM_MODEL': {
     title: 'Primary Model',
     summary: 'Selects the default LLM model for regular analysis flows.',
@@ -1045,77 +864,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['The effective window is constrained by both values.'],
     impact: ['Affects news context size, freshness, and report length.'],
     notes: ['Too wide can include stale news; too narrow can miss slow-moving events.'],
-  },
-  'settings.notification.FEISHU_WEBHOOK_URL': {
-    title: 'Feishu Webhook URL',
-    summary: 'Sends analysis reports to a Feishu group through a custom bot webhook.',
-    usage: 'Create a custom bot in the target Feishu group and paste the open-apis/bot/v2/hook webhook URL here.',
-    valueNotes: [
-      'If signing is enabled, also set FEISHU_WEBHOOK_SECRET.',
-      'If keyword protection is enabled, also set FEISHU_WEBHOOK_KEYWORD; the sender prepends it automatically.',
-      'FEISHU_APP_ID / FEISHU_APP_SECRET are for app, cloud-doc, or Stream Bot modes and do not enable group webhook delivery.',
-    ],
-    impact: ['Affects only the Feishu notification channel; delivery failure should not block the main analysis flow.'],
-    notes: [
-      'Do not use FEISHU_APP_SECRET as FEISHU_WEBHOOK_SECRET.',
-      'If IP allowlisting is enabled in Feishu, add the outbound IP of your runtime environment.',
-    ],
-  },
-  'settings.notification.webhooks': {
-    title: 'Enterprise WeChat Webhook',
-    summary: 'Configures an Enterprise WeChat group bot webhook for report delivery.',
-    usage: 'Create a group bot in Enterprise WeChat and paste the Webhook URL that starts with qyapi.weixin.qq.com/cgi-bin/webhook/send.',
-    valueNotes: ['Webhook URLs often contain sensitive tokens.', 'Platforms differ in message length, format, and rate limits.'],
-    impact: ['Affects delivery for the corresponding webhook channel.'],
-    notes: ['A single notification failure should not block the main analysis flow.'],
-  },
-  'settings.notification.CUSTOM_WEBHOOK_URLS': {
-    title: 'Custom Webhooks',
-    summary: 'Pushes reports to any service that accepts POST JSON.',
-    usage: 'Use comma-separated URLs. CUSTOM_WEBHOOK_BODY_TEMPLATE can customize the JSON body.',
-    valueNotes: ['The template must render to a JSON object.', 'Prefer $content_json and $title_json to avoid invalid JSON.'],
-    impact: ['Affects AstrBot, NapCat, or self-hosted push integrations.'],
-    notes: ['Validate one webhook before adding multiple targets.'],
-  },
-  'settings.notification.WEBHOOK_VERIFY_SSL': {
-    title: 'Webhook SSL Verification',
-    summary: 'Controls HTTPS certificate verification for webhook requests.',
-    usage: 'Keep true by default. Use false only for trusted internal self-signed certificates.',
-    valueNotes: ['Disabling verification weakens MITM protection.'],
-    impact: ['Affects TLS verification for custom webhook HTTPS requests.'],
-    notes: ['Do not disable SSL verification on public networks.'],
-  },
-  'settings.notification.telegram': {
-    title: 'Telegram Delivery',
-    summary: 'Sends reports through a Telegram Bot.',
-    usage: 'Create a bot with @BotFather, then set Bot Token and Chat ID. Topic delivery can also set Thread ID.',
-    valueNotes: ['The bot must be added to the target group and allowed to post.'],
-    impact: ['Affects Telegram notifications.'],
-    notes: ['Group Chat IDs are often negative or start with -100.'],
-  },
-  'settings.notification.email': {
-    title: 'Email Delivery',
-    summary: 'Sends analysis reports through SMTP.',
-    usage: 'Set sender, SMTP authorization code, and comma-separated receivers.',
-    valueNotes: ['EMAIL_PASSWORD is usually an app authorization code, not the web login password.', 'STOCK_GROUP_N and EMAIL_GROUP_N can route groups to different receivers.'],
-    impact: ['Affects email reports, grouped recipients, and market-review emails.'],
-    notes: ['Enable SMTP in the mailbox provider first.'],
-  },
-  'settings.notification.chat_bots': {
-    title: 'Chat Platform Bots',
-    summary: 'Configures Discord, Slack, Pushover, ServerChan, and similar channels.',
-    usage: 'Choose Webhook or Bot Token mode for the platform; Bot mode usually also needs a channel ID.',
-    valueNotes: ['When both Bot and Webhook are configured, existing code may prefer one mode.'],
-    impact: ['Affects the corresponding chat notification channel.'],
-    notes: ['Bot tokens, webhook URLs, and SendKeys are secrets.'],
-  },
-  'settings.notification.report_output': {
-    title: 'Report Output',
-    summary: 'Controls notification detail level, language, and template output.',
-    usage: 'REPORT_TYPE supports simple/full/brief. REPORT_LANGUAGE supports zh/en.',
-    valueNotes: ['Report language affects default report and notification text, not the Web UI language.'],
-    impact: ['Affects notification length, language, and readability.'],
-    notes: ['Full reports can be long and may be split by some platforms.'],
   },
   'settings.system.WEBUI_HOST': {
     title: 'WebUI Host',
@@ -1526,76 +1274,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['Larger N gives a broader comparison but longer tables.'],
     impact: ['Affects the historical signal comparison section in reports.'],
     notes: ['Set to 0 to disable.'],
-  },
-  'settings.report.SINGLE_STOCK_NOTIFY': {
-    title: 'Per-Stock Immediate Notify',
-    summary: 'Push immediately after each stock analysis instead of batching all results.',
-    usage: 'When enabled, each stock analysis sends a separate notification. When disabled, results are batched.',
-    valueNotes: ['Enabled mode is more timely but increases push frequency.'],
-    impact: ['Affects notification timing and frequency.'],
-    notes: ['Tracking many stocks can produce a large number of notifications when enabled.'],
-  },
-  'settings.report.MERGE_EMAIL_NOTIFICATION': {
-    title: 'Merge Email Notification',
-    summary: 'Merge stock analysis and market review into a single email.',
-    usage: 'When enabled, stock analysis and market review are combined into one email.',
-    valueNotes: ['Only effective when both stock analysis and market review are enabled.'],
-    impact: ['Affects email count and content organization.'],
-    notes: ['When disabled, stock analysis and market review are sent as separate emails.'],
-  },
-  // ------------------------------------------------------------------
-  // Notification routing
-  // ------------------------------------------------------------------
-  'settings.notification.channel_routing': {
-    title: 'Notification Channel Routing',
-    summary: 'Specifies target push channels for different notification types.',
-    usage: 'Three routing fields control the target channels for report pushes, alert pushes, and system error pushes. Use comma-separated channel names. Leave empty to push to all configured channels.',
-    valueNotes: [
-      'NOTIFICATION_REPORT_CHANNELS controls daily analysis report delivery.',
-      'NOTIFICATION_ALERT_CHANNELS controls event alert delivery.',
-      'NOTIFICATION_SYSTEM_ERROR_CHANNELS controls system error delivery.',
-      'Available channels depend on configured notification channels (e.g. email, feishu, telegram).',
-    ],
-    impact: ['Affects the push targets for different notification types.'],
-    notes: ['Specified channels must be properly configured, or they will not work.'],
-  },
-  'settings.notification.dedup': {
-    title: 'Notification Dedup & Cooldown',
-    summary: 'Controls the dedup window and cooldown period for static notifications.',
-    usage: 'NOTIFICATION_DEDUP_TTL_SECONDS sets the dedup window where the same dedup key is pushed only once. NOTIFICATION_COOLDOWN_SECONDS sets the cooldown window for the same cooldown key.',
-    valueNotes: [
-      'The two mechanisms work independently.',
-      'Setting either to 0 disables that mechanism.',
-    ],
-    impact: ['Affects notification push frequency and duplicate control.'],
-    notes: ['Dynamic notifications (e.g. alerts) have independent trigger and cooldown logic.'],
-  },
-  'settings.notification.quiet_hours': {
-    title: 'Quiet Hours',
-    summary: 'Suppress notification delivery during a specified time window.',
-    usage: 'NOTIFICATION_QUIET_HOURS uses HH:MM-HH:MM format and supports overnight ranges. NOTIFICATION_TIMEZONE specifies the timezone.',
-    valueNotes: [
-      'Leave empty to disable quiet hours.',
-      'When timezone is empty, the local system timezone is used.',
-    ],
-    impact: ['Affects when notifications are delivered.'],
-    notes: ['Static notifications during quiet hours are suppressed and skipped; they are not queued for later delivery.'],
-  },
-  'settings.notification.MIN_SEVERITY': {
-    title: 'Minimum Notification Severity',
-    summary: 'Filters static notifications below the specified severity level.',
-    usage: 'When set to warning, only warning and above are pushed. Leave empty for current behavior.',
-    valueNotes: ['Severity levels from low to high: info, warning, error, critical.'],
-    impact: ['Affects static notification volume.'],
-    notes: ['Dynamic notifications (e.g. alerts) have independent event and severity evaluation.'],
-  },
-  'settings.notification.DAILY_DIGEST_ENABLED': {
-    title: 'Daily Digest (Reserved)',
-    summary: 'Reserved feature flag. Currently does not send daily digests.',
-    usage: 'This is a P4 reserved feature. Enabling it has no effect at this time.',
-    valueNotes: ['Preserved for a future daily digest aggregation feature.'],
-    impact: ['No current effect.'],
-    notes: ['A future version will aggregate the day\'s notifications into a single digest push.'],
   },
   // ------------------------------------------------------------------
   // System runtime

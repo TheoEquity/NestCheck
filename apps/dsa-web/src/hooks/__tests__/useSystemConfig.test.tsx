@@ -31,16 +31,16 @@ const sampleConfig = {
   maskToken: '******',
   items: [
     {
-      key: 'STOCK_LIST',
-      value: 'SH600000',
+      key: 'TUSHARE_TOKEN',
+      value: 'abc123',
       rawValueExists: true,
       isMasked: false,
       schema: {
-        key: 'STOCK_LIST',
-        category: 'base',
+        key: 'TUSHARE_TOKEN',
+        category: 'data_source',
         dataType: 'string',
-        uiControl: 'textarea',
-        isSensitive: false,
+        uiControl: 'password',
+        isSensitive: true,
         isRequired: false,
         isEditable: true,
         options: [],

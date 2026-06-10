@@ -125,7 +125,6 @@ def _build_market_review_runtime(config: Config, source_message: Optional[Any] =
 
 
 def _run_market_review_background(
-    send_notification: bool,
     override_region: Optional[str] = None,
     lock_token: Optional[_MarketReviewExecutionLock] = None,
     config: Optional[Config] = None,
@@ -141,7 +140,7 @@ def _run_market_review_background(
             "notifier": notifier,
             "analyzer": analyzer,
             "search_service": search_service,
-            "send_notification": send_notification,
+            "send_notification": False,
             "override_region": override_region,
         }
         if query_id:
@@ -335,7 +334,6 @@ def _handle_async_analysis_batch(
     stock_name = request.stock_name if is_single else None
     original_query = request.original_query if (is_single or preserve_batch_metadata) else None
     selection_source = request.selection_source if (is_single or preserve_batch_metadata) else None
-    notify = getattr(request, "notify", True)
     skills = getattr(request, "skills", None)
     profile_id = getattr(request, "profile_id", None)
 
@@ -346,7 +344,6 @@ def _handle_async_analysis_batch(
         selection_source=selection_source,
         report_type=request.report_type,
         force_refresh=request.force_refresh,
-        notify=notify,
     )
     if skills is not None:
         submit_kwargs["skills"] = skills
@@ -434,7 +431,7 @@ def _handle_sync_analysis(
             report_type=request.report_type,
             force_refresh=request.force_refresh,
             query_id=query_id,
-            send_notification=getattr(request, "notify", True),
+            send_notification=False,
             skills=getattr(request, "skills", None),
             profile_id=getattr(request, "profile_id", None),
         )
@@ -515,7 +512,6 @@ def trigger_market_review(
         return MarketReviewAccepted(
             status="accepted",
             message="今日大盘复盘相关市场均为非交易日，已跳过大盘复盘",
-            send_notification=request.send_notification,
             trace_id=None,
         )
 
@@ -533,7 +529,6 @@ def trigger_market_review(
         task_id = uuid.uuid4().hex
         task = get_task_queue().submit_background_task(
             lambda: _run_market_review_background(
-                request.send_notification,
                 override_region=override_region,
                 lock_token=lock_token,
                 config=config,
@@ -550,8 +545,7 @@ def trigger_market_review(
 
     return MarketReviewAccepted(
         status="accepted",
-        message="大盘复盘任务已提交，完成后会保存报告并按配置推送通知",
-        send_notification=request.send_notification,
+        message="大盘复盘任务已提交，完成后会保存报告",
         task_id=task.task_id,
         trace_id=_get_task_trace_id(task),
     )

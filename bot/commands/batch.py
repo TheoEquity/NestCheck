@@ -55,13 +55,12 @@ class BatchCommand(BotCommand):
         from src.config import get_config
         
         config = get_config()
-        config.refresh_stock_list()
         
-        stock_list = config.stock_list
+        stock_list = list(config.stock_list)
         
         if not stock_list:
             return BotResponse.error_response(
-                "自选股列表为空，请先配置 STOCK_LIST"
+                "自选股列表为空"
             )
         
         # 解析数量参数
@@ -112,11 +111,10 @@ class BatchCommand(BotCommand):
                 query_source="bot"
             )
             
-            # 执行分析（会自动推送汇总报告）
+            # 执行分析
             results = pipeline.run(
                 stock_codes=stock_list,
-                dry_run=False,
-                send_notification=True
+                dry_run=False
             )
             
             logger.info(f"[BatchCommand] 批量分析完成，成功 {len(results)} 只")

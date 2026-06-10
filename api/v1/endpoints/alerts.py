@@ -10,7 +10,6 @@ from fastapi import APIRouter, HTTPException, Query
 
 from api.v1.schemas.alerts import (
     AlertDeleteResponse,
-    AlertNotificationListResponse,
     AlertRuleCreateRequest,
     AlertRuleItem,
     AlertRuleListResponse,
@@ -232,31 +231,3 @@ def list_triggers(
         )
     except Exception as exc:
         raise _internal_error("List alert triggers failed", exc)
-
-
-@router.get(
-    "/notifications",
-    response_model=AlertNotificationListResponse,
-    responses={500: {"model": ErrorResponse}},
-    summary="List alert notification attempts",
-)
-def list_notifications(
-    trigger_id: Optional[int] = Query(None, description="Optional trigger id filter"),
-    channel: Optional[str] = Query(None, description="Optional channel filter"),
-    success: Optional[bool] = Query(None, description="Optional success filter"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> AlertNotificationListResponse:
-    service = AlertService()
-    try:
-        return AlertNotificationListResponse(
-            **service.list_notifications(
-                trigger_id=trigger_id,
-                channel=channel,
-                success=success,
-                page=page,
-                page_size=page_size,
-            )
-        )
-    except Exception as exc:
-        raise _internal_error("List alert notifications failed", exc)

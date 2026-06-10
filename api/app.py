@@ -181,9 +181,9 @@ async def app_lifespan(app: FastAPI):
 
 async def _daily_portfolio_price_refresh():
     """Refresh portfolio positions prices at 08:30 and 20:30 Beijing time.
-    
-    On startup, checks whether any configured slot has been missed today and
-    executes the latest missed slot when no task history exists for it.
+
+    Past due slots are skipped on startup; only upcoming scheduled slots will
+    be triggered. Missed slots should be re-run manually via the scheduler UI.
     """
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
@@ -195,25 +195,15 @@ async def _daily_portfolio_price_refresh():
     
     last_refresh_slots = set()
 
-    # Check if we need to catch up a missed scheduled refresh on startup.
+    # Startup check: Mark past slots as handled to avoid immediate execution.
+    # Intentionally skip catch-up; rely on scheduled runs or manual triggers.
     try:
-        due_slots = [slot for slot in PORTFOLIO_PRICE_REFRESH_TIMES if _is_refresh_slot_due(now, slot)]
-        if due_slots:
-            slot = due_slots[-1]
-            if not _has_price_refresh_history_for_slot(today, slot, beijing_tz):
-                logger.info("Startup catch-up: Today's %02d:%02d refresh was missed, executing now", slot[0], slot[1])
-                loop = asyncio.get_event_loop()
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    await loop.run_in_executor(executor, _run_price_refresh_with_history)
-                last_refresh_slots.update((today, due_slot) for due_slot in due_slots)
-                logger.info("Startup catch-up: Refresh completed")
-            else:
-                last_refresh_slots.update((today, due_slot) for due_slot in due_slots)
-                logger.info("Startup check: Today's %02d:%02d refresh already recorded", slot[0], slot[1])
-        else:
-            logger.info("Startup check: Current time %02d:%02d is before the first refresh slot", now.hour, now.minute)
+        for slot in PORTFOLIO_PRICE_REFRESH_TIMES:
+            if _is_refresh_slot_due(now, slot):
+                last_refresh_slots.add((today, slot))
+                logger.info("Startup: Slot %02d:%02d is past; marked as handled", slot[0], slot[1])
     except Exception as exc:
-        logger.error("Startup catch-up check failed: %s", exc, exc_info=True)
+        logger.error("Startup check failed: %s", exc, exc_info=True)
     
     # Wait before entering the regular check loop so server can start normally
     await asyncio.sleep(30)

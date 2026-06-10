@@ -97,8 +97,6 @@ from api.v1.schemas.portfolio import (
 )
 from api.v1.schemas.alerts import (
     AlertDeleteResponse,
-    AlertNotificationItem,
-    AlertNotificationListResponse,
     AlertRuleCreateRequest,
     AlertRuleItem,
     AlertRuleListResponse,
@@ -191,8 +189,6 @@ __all__ = [
     "PortfolioRiskResponse",
     # alerts
     "AlertDeleteResponse",
-    "AlertNotificationItem",
-    "AlertNotificationListResponse",
     "AlertRuleCreateRequest",
     "AlertRuleItem",
     "AlertRuleListResponse",

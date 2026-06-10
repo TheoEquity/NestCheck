@@ -67,10 +67,6 @@ class AnalyzeRequest(BaseModel):
         pattern=SELECTION_SOURCE_PATTERN,
         json_schema_extra={"example": "autocomplete"},
     )
-    notify: bool = Field(
-        True,
-        description="是否发送推送通知（Telegram/企业微信等）"
-    )
     skills: Optional[List[str]] = Field(
         None,
         validation_alias=AliasChoices("skills", "strategies"),
@@ -92,7 +88,6 @@ class AnalyzeRequest(BaseModel):
             "stock_name": "贵州茅台",
             "original_query": "茅台",
             "selection_source": "autocomplete",
-            "notify": True,
             "skills": ["bull_trend"],
             "profile_id": "stock_intel"
         }
@@ -102,10 +97,7 @@ class AnalyzeRequest(BaseModel):
 class MarketReviewRequest(BaseModel):
     """Market review trigger parameters."""
 
-    send_notification: bool = Field(
-        True,
-        description="是否在大盘复盘完成后发送推送通知",
-    )
+    pass
 
 
 class MarketReviewAccepted(BaseModel):
@@ -113,7 +105,6 @@ class MarketReviewAccepted(BaseModel):
 
     status: str = Field("accepted", description="提交状态")
     message: str = Field(..., description="提示信息")
-    send_notification: bool = Field(..., description="是否发送通知")
     trace_id: Optional[str] = Field(
         None,
         description="本次后台任务的诊断 trace ID",

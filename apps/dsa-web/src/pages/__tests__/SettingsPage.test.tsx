@@ -213,7 +213,6 @@ const baseCategories = [
   { category: 'system', title: 'System', description: '系统设置', displayOrder: 1, fields: [] },
   { category: 'base', title: 'Base', description: '基础配置', displayOrder: 2, fields: [] },
   { category: 'ai_model', title: 'AI', description: '模型配置', displayOrder: 3, fields: [] },
-  { category: 'notification', title: 'Notification', description: '通知配置', displayOrder: 4, fields: [] },
   { category: 'agent', title: 'Agent', description: 'Agent 配置', displayOrder: 5, fields: [] },
 ];
 
@@ -260,26 +259,6 @@ function buildSystemConfigState(overrides: ConfigOverride = {}) {
             category: 'system',
             dataType: 'boolean',
             uiControl: 'switch',
-            isSensitive: false,
-            isRequired: false,
-            isEditable: true,
-            options: [],
-            validation: {},
-            displayOrder: 1,
-          },
-        },
-      ],
-      base: [
-        {
-          key: 'STOCK_LIST',
-          value: 'SH600000',
-          rawValueExists: true,
-          isMasked: false,
-          schema: {
-            key: 'STOCK_LIST',
-            category: 'base',
-            dataType: 'string',
-            uiControl: 'textarea',
             isSensitive: false,
             isRequired: false,
             isEditable: true,
@@ -337,7 +316,7 @@ function buildSystemConfigState(overrides: ConfigOverride = {}) {
           isMasked: false,
           schema: {
             key: 'WECHAT_WEBHOOK_URL',
-            category: 'notification',
+            category: 'system',
             dataType: 'string',
             uiControl: 'password',
             isSensitive: true,
@@ -388,7 +367,7 @@ describe('SettingsPage', () => {
     });
     load.mockResolvedValue(true);
     exportEnv.mockResolvedValue({
-      content: 'STOCK_LIST=600519\n',
+      content: 'TUSHARE_TOKEN=abc123\n',
       configVersion: 'v1',
       updatedAt: '2026-03-21T00:00:00Z',
     });
@@ -398,7 +377,7 @@ describe('SettingsPage', () => {
       appliedCount: 1,
       skippedMaskedCount: 0,
       reloadTriggered: true,
-      updatedKeys: ['STOCK_LIST'],
+      updatedKeys: ['TUSHARE_TOKEN'],
       warnings: [],
     });
     desktopGetUpdateState.mockResolvedValue({
@@ -727,17 +706,6 @@ describe('SettingsPage', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('refreshes server state after intelligent import merges stock list', async () => {
-    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'base' }));
-
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'merge stock list' }));
-
-    expect(refreshAfterExternalSave).toHaveBeenCalledWith(['STOCK_LIST']);
-    expect(load).toHaveBeenCalledTimes(1);
-  });
-
   it('refreshes server state after llm channel editor saves', async () => {
     useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'ai_model' }));
 
@@ -749,19 +717,8 @@ describe('SettingsPage', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it('renders notification test panel before notification fields', () => {
-    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'notification' }));
-
-    render(<SettingsPage />);
-
-    expect(screen.getByText('通知测试面板:WECHAT_WEBHOOK_URL')).toBeInTheDocument();
-    expect(screen.getByText('WECHAT_WEBHOOK_URL')).toBeInTheDocument();
-    expect(settingsPanelErrorBoundary).toHaveBeenCalledWith('通知测试');
-    expect(settingsPanelErrorBoundary).toHaveBeenCalledWith('通知设置');
-  });
-
   it('uses browser and backend logs in settings panel diagnostic hints outside desktop runtime', () => {
-    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'notification' }));
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'ai_model' }));
 
     render(<SettingsPage />);
 
@@ -770,7 +727,7 @@ describe('SettingsPage', () => {
   });
 
   it('uses desktop log in settings panel diagnostic hints during desktop runtime', () => {
-    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'notification' }));
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'ai_model' }));
     (window as { dsaDesktop?: unknown }).dsaDesktop = createDesktopRuntime();
 
     render(<SettingsPage />);
@@ -864,7 +821,7 @@ describe('SettingsPage', () => {
 
     fireEvent.change(input as HTMLInputElement, {
       target: {
-        files: [new File(['STOCK_LIST=300750\n'], 'desktop-backup.env', { type: 'text/plain' })],
+        files: [new File(['TUSHARE_TOKEN=xyz789\n'], 'desktop-backup.env', { type: 'text/plain' })],
       },
     });
 
@@ -886,7 +843,7 @@ describe('SettingsPage', () => {
 
     fireEvent.change(input as HTMLInputElement, {
       target: {
-        files: [new File(['STOCK_LIST=300750\n'], 'desktop-backup.env', { type: 'text/plain' })],
+        files: [new File(['TUSHARE_TOKEN=xyz789\n'], 'desktop-backup.env', { type: 'text/plain' })],
       },
     });
 

@@ -34,7 +34,6 @@ from tenacity import (
 )
 
 from data_provider.us_index_mapping import is_us_index_code
-from src.config import NEWS_STRATEGY_WINDOWS
 
 logger = logging.getLogger(__name__)
 

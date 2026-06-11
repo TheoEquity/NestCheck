@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
 """Regression tests for chip distribution provider fallback."""
 
-from types import SimpleNamespace
-from unittest.mock import patch
-
 from data_provider.base import DataFetcherManager
 from data_provider.realtime_types import ChipDistribution, get_chip_circuit_breaker
 
@@ -36,8 +33,7 @@ def test_manager_skips_placeholder_chip_distribution_and_tries_next_fetcher():
         ]
     )
 
-    with patch("src.config.get_config", return_value=SimpleNamespace(enable_chip_distribution=True)):
-        chip = manager.get_chip_distribution("600519")
+    chip = manager.get_chip_distribution("600519")
 
     assert chip is valid_chip
 
@@ -61,8 +57,7 @@ def test_manager_accepts_zero_concentration_chip_distribution():
     fallback_fetcher = _ChipFetcher("FallbackFetcher", 1, fallback_chip)
     manager = DataFetcherManager(fetchers=[zero_fetcher, fallback_fetcher])
 
-    with patch("src.config.get_config", return_value=SimpleNamespace(enable_chip_distribution=True)):
-        chip = manager.get_chip_distribution("600519")
+    chip = manager.get_chip_distribution("600519")
 
     assert chip is zero_concentration_chip
     assert zero_fetcher.calls == 1

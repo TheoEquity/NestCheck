@@ -6,7 +6,7 @@
 // ============ Request Types ============
 
 export type StockReportType = 'simple' | 'detailed' | 'full' | 'brief';
-export type ReportType = StockReportType | 'market_review';
+export type ReportType = StockReportType;
 
 export interface AnalysisRequest {
   stockCode?: string;
@@ -200,7 +200,6 @@ export interface TaskStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress?: number;
   result?: AnalysisResult;
-  marketReviewReport?: string;
   error?: string;
   stockName?: string;
   originalQuery?: string;

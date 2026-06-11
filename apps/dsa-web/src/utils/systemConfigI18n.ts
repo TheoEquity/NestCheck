@@ -1,7 +1,6 @@
 import type { SystemConfigCategory } from '../types/systemConfig';
 
 const categoryTitleMap: Record<SystemConfigCategory, string> = {
-  base: '基础设置',
   data_source: '数据源',
   ai_model: 'AI 模型',
   system: '系统设置',
@@ -12,7 +11,6 @@ const categoryTitleMap: Record<SystemConfigCategory, string> = {
 };
 
 const categoryDescriptionMap: Partial<Record<SystemConfigCategory, string>> = {
-  base: '管理自选股与基础运行参数。',
   data_source: '管理行情数据源与优先级策略。',
   ai_model: '管理模型服务、模型名称与推理参数。',
   system: '管理调度、日志、端口等系统级参数。',
@@ -24,35 +22,13 @@ const categoryDescriptionMap: Partial<Record<SystemConfigCategory, string>> = {
 
 const fieldTitleMap: Record<string, string> = {
   TUSHARE_TOKEN: 'Tushare Token',
-  BOCHA_API_KEYS: 'Bocha API Keys',
-  TAVILY_API_KEYS: 'Tavily API Keys',
-  ANSPIRE_API_KEYS: 'Anspire API Keys',
-  SERPAPI_API_KEYS: 'SerpAPI API Keys',
-  BRAVE_API_KEYS: 'Brave API Keys',
-  SEARXNG_BASE_URLS: 'SearXNG Base URLs',
-  SEARXNG_PUBLIC_INSTANCES_ENABLED: 'SearXNG 公共实例自动发现',
-  MINIMAX_API_KEYS: 'MiniMax API Keys',
-  NEWS_STRATEGY_PROFILE: '新闻策略窗口档位',
-  NEWS_MAX_AGE_DAYS: '新闻最大时效（天）',
   REALTIME_SOURCE_PRIORITY: '实时数据源优先级',
-  TICKFLOW_API_KEY: 'TickFlow API Key',
-  ENABLE_REALTIME_QUOTE: '启用实时行情',
-  ENABLE_REALTIME_TECHNICAL_INDICATORS: '盘中实时技术面',
-  ENABLE_CHIP_DISTRIBUTION: '启用筹码分布分析',
-  PYTDX_HOST: 'Pytdx 主机地址',
-  PYTDX_PORT: 'Pytdx 端口',
-  PYTDX_SERVERS: 'Pytdx 服务器列表',
-  BIAS_THRESHOLD: 'BIAS 阈值',
   LITELLM_MODEL: '主模型',
   AGENT_LITELLM_MODEL: 'Agent 主模型',
   LITELLM_FALLBACK_MODELS: '备选模型',
-  LITELLM_CONFIG: '高级模型路由配置',
   LLM_CHANNELS: 'LLM 渠道列表',
   LLM_TEMPERATURE: '采样温度',
   AIHUBMIX_KEY: 'AIHubmix Key',
-  ANSPIRE_LLM_ENABLED: '启用 Anspire 大模型',
-  ANSPIRE_LLM_BASE_URL: 'Anspire 大模型网关',
-  ANSPIRE_LLM_MODEL: 'Anspire 默认模型',
   DEEPSEEK_API_KEY: 'DeepSeek API Key',
   GEMINI_API_KEY: 'Gemini API Key',
   GEMINI_MODEL: 'Gemini 模型',
@@ -110,35 +86,13 @@ const fieldTitleMap: Record<string, string> = {
 
 const fieldDescriptionMap: Record<string, string> = {
   TUSHARE_TOKEN: '用于接入 Tushare Pro 数据服务的凭据。',
-  BOCHA_API_KEYS: '用于新闻检索的 Bocha 密钥，支持逗号分隔多个（最高优先级）。',
-  TAVILY_API_KEYS: '用于新闻检索的 Tavily 密钥，支持逗号分隔多个。',
-  ANSPIRE_API_KEYS: 'Anspire Open 密钥，支持逗号分隔多个；默认同时用于大模型网关和新闻检索。',
-  SERPAPI_API_KEYS: '用于新闻检索的 SerpAPI 密钥，支持逗号分隔多个。',
-  BRAVE_API_KEYS: '用于新闻检索的 Brave Search 密钥，支持逗号分隔多个。',
-  SEARXNG_BASE_URLS: 'SearXNG 自建实例地址（逗号分隔，无配额兜底，需在 settings.yml 启用 format: json）。',
-  SEARXNG_PUBLIC_INSTANCES_ENABLED: '当未配置 SearXNG 自建实例时，自动从 searx.space 获取公共实例并轮询使用；设为 false 可禁用该默认行为。',
-  MINIMAX_API_KEYS: '用于新闻检索的 MiniMax 密钥，支持逗号分隔多个（最低优先级）。',
-  NEWS_STRATEGY_PROFILE: '新闻窗口档位：ultra_short=1天，short=3天，medium=7天，long=30天。',
-  NEWS_MAX_AGE_DAYS: '新闻最大时效上限。实际窗口 = min(策略档位天数, NEWS_MAX_AGE_DAYS)。例如 ultra_short + 7 仍为 1 天。',
   REALTIME_SOURCE_PRIORITY: '按逗号分隔填写数据源调用优先级。',
-  TICKFLOW_API_KEY: '用于接入 TickFlow 数据服务的 API 密钥。',
-  ENABLE_REALTIME_QUOTE: '控制是否启用实时行情数据获取。',
-  ENABLE_REALTIME_TECHNICAL_INDICATORS: '盘中分析时用实时价计算 MA5/MA10/MA20 与多头排列（Issue #234）；关闭则用昨日收盘。',
-  ENABLE_CHIP_DISTRIBUTION: '控制是否启用筹码分布分析；关闭后可减少外部请求和失败噪音。',
-  PYTDX_HOST: 'Pytdx 单节点主机地址，留空时按默认节点池选择。',
-  PYTDX_PORT: 'Pytdx 单节点端口，需与主机配置配套。',
-  PYTDX_SERVERS: 'Pytdx 自定义节点列表，支持 host:port 逗号分隔。',
-  BIAS_THRESHOLD: 'BIAS 偏离阈值，超过后用于增强超买超卖提示。',
   LITELLM_MODEL: '主模型，格式 provider/model（如 gemini/gemini-2.5-flash）。配置渠道后自动推断。',
   AGENT_LITELLM_MODEL: 'Agent 专用主模型。留空时继承主模型；无 provider 前缀时会按 openai/<model> 解析。',
   LITELLM_FALLBACK_MODELS: '备选模型，逗号分隔，主模型失败时按序尝试。',
-  LITELLM_CONFIG: '高级模型路由 YAML 配置文件路径（高级用法）。仅在 YAML 可解析且产出 model_list 时优先于渠道与旧配置，否则会回退。',
   LLM_CHANNELS: '渠道名称列表（逗号分隔）。推荐使用上方渠道编辑器管理。',
   LLM_TEMPERATURE: '控制模型输出随机性，0 为确定性输出，2 为最大随机性，推荐 0.7。',
   AIHUBMIX_KEY: 'AIHubmix 一站式密钥，自动指向 aihubmix.com/v1。',
-  ANSPIRE_LLM_ENABLED: '开启后，未配置更高优先级 LLM 渠道或 OpenAI 兼容密钥时，ANSPIRE_API_KEYS 会自动作为 Anspire 大模型密钥使用。',
-  ANSPIRE_LLM_BASE_URL: 'Anspire OpenAI 兼容网关地址，默认 https://open-gateway.anspire.cn/v6，海外可用 https://open-gateway.anspire.ai/v6。',
-  ANSPIRE_LLM_MODEL: '仅填写 ANSPIRE_API_KEYS 时自动使用的模型，默认 Doubao-Seed-2.0-lite。',
   DEEPSEEK_API_KEY: 'DeepSeek 官方 API 密钥。填写后自动使用 deepseek-chat 模型。',
   GEMINI_API_KEY: '用于 Gemini 服务调用的密钥。',
   GEMINI_MODEL: '设置 Gemini 分析模型名称。',
@@ -195,12 +149,6 @@ const fieldDescriptionMap: Record<string, string> = {
 };
 
 const fieldOptionLabelMap: Record<string, Record<string, string>> = {
-  NEWS_STRATEGY_PROFILE: {
-    ultra_short: '超短线（1天）',
-    short: '短期（3天）',
-    medium: '中期（7天）',
-    long: '长期（30天）',
-  },
   REPORT_TYPE: {
     simple: '简洁',
     full: '完整',

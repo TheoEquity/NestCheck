@@ -1087,19 +1087,16 @@ function channelsToUpdateItems(
   channels: ChannelConfig[],
   previousChannelNames: string[],
   runtimeConfig: RuntimeConfig,
-  includeRuntimeConfig: boolean,
 ): Array<{ key: string; value: string }> {
   const updates: Array<{ key: string; value: string }> = [];
   const activeNames = channels.map((channel) => channel.name.toUpperCase());
 
   updates.push({ key: 'LLM_CHANNELS', value: channels.map((channel) => channel.name).join(',') });
-  if (includeRuntimeConfig) {
-    updates.push({ key: 'LITELLM_MODEL', value: runtimeConfig.primaryModel });
-    updates.push({ key: 'AGENT_LITELLM_MODEL', value: runtimeConfig.agentPrimaryModel });
-    updates.push({ key: 'LITELLM_FALLBACK_MODELS', value: runtimeConfig.fallbackModels.join(',') });
-    updates.push({ key: 'VISION_MODEL', value: runtimeConfig.visionModel });
-    updates.push({ key: 'LLM_TEMPERATURE', value: runtimeConfig.temperature });
-  }
+  updates.push({ key: 'LITELLM_MODEL', value: runtimeConfig.primaryModel });
+  updates.push({ key: 'AGENT_LITELLM_MODEL', value: runtimeConfig.agentPrimaryModel });
+  updates.push({ key: 'LITELLM_FALLBACK_MODELS', value: runtimeConfig.fallbackModels.join(',') });
+  updates.push({ key: 'VISION_MODEL', value: runtimeConfig.visionModel });
+  updates.push({ key: 'LLM_TEMPERATURE', value: runtimeConfig.temperature });
 
   for (const channel of channels) {
     const prefix = `LLM_${channel.name.toUpperCase()}`;
@@ -1153,11 +1150,6 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   const initialNames = useMemo(() => initialChannels.map((channel) => channel.name), [initialChannels]);
   const initialRuntimeConfig = useMemo(() => parseRuntimeConfigFromItems(items), [items]);
   const savedItemMap = useMemo(() => new Map(items.map((item) => [item.key.toUpperCase(), item.value])), [items]);
-  const hasLitellmConfig = useMemo(
-    () => items.some((item) => item.key === 'LITELLM_CONFIG' && item.value.trim().length > 0),
-    [items],
-  );
-  const managesRuntimeConfig = !hasLitellmConfig;
 
   const channelsFingerprint = useMemo(() => JSON.stringify(initialChannels), [initialChannels]);
   const runtimeFingerprint = useMemo(() => JSON.stringify(initialRuntimeConfig), [initialRuntimeConfig]);
@@ -1216,9 +1208,6 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   }, [channelsFingerprint, runtimeFingerprint, initialChannels, initialRuntimeConfig]);
 
   const availableModels = useMemo(() => {
-    if (!managesRuntimeConfig) {
-      return [];
-    }
     const seen = new Set<string>();
     const models: string[] = [];
     for (const channel of channels) {
@@ -1234,7 +1223,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       }
     }
     return models;
-  }, [channels, managesRuntimeConfig]);
+  }, [channels]);
 
   const hasChanges = useMemo(() => {
     const runtimeChanged = (
@@ -1390,42 +1379,38 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       return;
     }
 
-    const runtimeConfigForSave = managesRuntimeConfig
-      ? sanitizeRuntimeConfigForSave(runtimeConfig, availableModels, savedItemMap)
-      : runtimeConfig;
+    const runtimeConfigForSave = sanitizeRuntimeConfigForSave(runtimeConfig, availableModels, savedItemMap);
     if (!runtimeConfigsAreEqual(runtimeConfigForSave, runtimeConfig)) {
       setRuntimeConfig(runtimeConfigForSave);
     }
 
-    if (managesRuntimeConfig) {
-      const invalidPrimaryModel = runtimeConfigForSave.primaryModel
-        && !isRuntimeModelAvailable(runtimeConfigForSave.primaryModel, availableModels, savedItemMap);
-      if (invalidPrimaryModel) {
-        setSaveMessage({ type: 'local-error', text: '当前主模型不在已启用渠道的模型列表中，请重新选择。' });
-        return;
-      }
+    const invalidPrimaryModel = runtimeConfigForSave.primaryModel
+      && !isRuntimeModelAvailable(runtimeConfigForSave.primaryModel, availableModels, savedItemMap);
+    if (invalidPrimaryModel) {
+      setSaveMessage({ type: 'local-error', text: '当前主模型不在已启用渠道的模型列表中，请重新选择。' });
+      return;
+    }
 
-      const invalidAgentPrimaryModel = runtimeConfigForSave.agentPrimaryModel
-        && !isRuntimeModelAvailable(runtimeConfigForSave.agentPrimaryModel, availableModels, savedItemMap);
-      if (invalidAgentPrimaryModel) {
-        setSaveMessage({ type: 'local-error', text: '当前 Agent 主模型不在已启用渠道的模型列表中，请重新选择。' });
-        return;
-      }
+    const invalidAgentPrimaryModel = runtimeConfigForSave.agentPrimaryModel
+      && !isRuntimeModelAvailable(runtimeConfigForSave.agentPrimaryModel, availableModels, savedItemMap);
+    if (invalidAgentPrimaryModel) {
+      setSaveMessage({ type: 'local-error', text: '当前 Agent 主模型不在已启用渠道的模型列表中，请重新选择。' });
+      return;
+    }
 
-      const invalidFallbackModel = runtimeConfigForSave.fallbackModels.some(
-        (model) => !isRuntimeModelAvailable(model, availableModels, savedItemMap),
-      );
-      if (invalidFallbackModel) {
-        setSaveMessage({ type: 'local-error', text: '存在无效的备选模型，请重新选择。' });
-        return;
-      }
+    const invalidFallbackModel = runtimeConfigForSave.fallbackModels.some(
+      (model) => !isRuntimeModelAvailable(model, availableModels, savedItemMap),
+    );
+    if (invalidFallbackModel) {
+      setSaveMessage({ type: 'local-error', text: '存在无效的备选模型，请重新选择。' });
+      return;
+    }
 
-      const invalidVisionModel = runtimeConfigForSave.visionModel
-        && !isRuntimeModelAvailable(runtimeConfigForSave.visionModel, availableModels, savedItemMap);
-      if (invalidVisionModel) {
-        setSaveMessage({ type: 'local-error', text: '当前 Vision 模型不在已启用渠道的模型列表中，请重新选择。' });
-        return;
-      }
+    const invalidVisionModel = runtimeConfigForSave.visionModel
+      && !isRuntimeModelAvailable(runtimeConfigForSave.visionModel, availableModels, savedItemMap);
+    if (invalidVisionModel) {
+      setSaveMessage({ type: 'local-error', text: '当前 Vision 模型不在已启用渠道的模型列表中，请重新选择。' });
+      return;
     }
 
     setIsSaving(true);
@@ -1433,7 +1418,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     setSaveWarnings([]);
 
     try {
-      const updateItems = channelsToUpdateItems(channels, initialNames, runtimeConfigForSave, managesRuntimeConfig);
+      const updateItems = channelsToUpdateItems(channels, initialNames, runtimeConfigForSave);
       const response = await systemConfigApi.update({
         configVersion,
         maskToken,
@@ -1447,7 +1432,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         runtime: JSON.stringify(parseRuntimeConfigFromItems(updateItems)),
       };
       setSaveWarnings(responseWarnings);
-      setSaveMessage({ type: 'success', text: managesRuntimeConfig ? 'AI 配置已保存' : '渠道配置已保存' });
+      setSaveMessage({ type: 'success', text: 'AI 配置已保存' });
     } catch (error: unknown) {
       setSaveWarnings([]);
       setSaveMessage({ type: 'error', error: getParsedApiError(error) });
@@ -1747,8 +1732,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             ))}
           </div>
 
-          {managesRuntimeConfig ? (
-            <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+          <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <span className="settings-accent-text text-xs font-medium uppercase tracking-wider">运行时参数</span>
@@ -1876,14 +1860,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                   </div>
                 </div>
               )}
-            </div>
-          ) : (
-            <InlineAlert
-              variant="warning"
-              message="检测到已配置高级模型路由 YAML：此处仅管理渠道条目和基础连接信息。运行时主模型 / 备选模型 / Vision / Temperature 仍由下方通用字段决定；若 YAML 解析成功，则以其中的路由与可用模型声明为准，本配置不会覆盖 YAML 文件本身。"
-              className="rounded-[1.35rem] px-4 py-3 text-xs shadow-none"
-            />
-          )}
+          </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -1893,7 +1870,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
               disabled={busy || !hasChanges}
               onClick={() => void handleSave()}
             >
-              {isSaving ? '保存中...' : managesRuntimeConfig ? '保存 AI 配置' : '保存渠道配置'}
+              {isSaving ? '保存中...' : '保存 AI 配置'}
             </Button>
             {!hasChanges ? <span className="text-xs text-muted-text">当前没有未保存的改动</span> : null}
           </div>

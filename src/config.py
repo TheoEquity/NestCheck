@@ -52,22 +52,12 @@ class ConfigIssue:
 _MANAGED_LITELLM_KEY_PROVIDERS = {"gemini", "vertex_ai", "anthropic", "openai", "deepseek"}
 SUPPORTED_LLM_CHANNEL_PROTOCOLS = ("openai", "anthropic", "gemini", "vertex_ai", "deepseek", "ollama")
 _FALSEY_ENV_VALUES = {"0", "false", "no", "off"}
-# Fallback defaults used when ANSPIRE_API_KEYS is reused as legacy OpenAI-compatible source.
-# These are compatibility examples; actual availability should be validated by Anspire console/model entitlement.
-ANSPIRE_LLM_BASE_URL_DEFAULT = "https://open-gateway.anspire.cn/v6"
-ANSPIRE_LLM_MODEL_DEFAULT = "Doubao-Seed-2.0-lite"
 
 
 
 
 AGENT_MAX_STEPS_DEFAULT = 10
 FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT = 8.0
-NEWS_STRATEGY_WINDOWS: Dict[str, int] = {
-    "ultra_short": 1,
-    "short": 3,
-    "medium": 7,
-    "long": 30,
-}
 
 
 @dataclass(frozen=True)
@@ -203,19 +193,6 @@ def parse_env_float(
         )
         parsed = maximum
     return parsed
-
-
-def normalize_news_strategy_profile(value: Optional[str]) -> str:
-    """Normalize news strategy profile to known values."""
-    candidate = (value or "short").strip().lower()
-    return candidate if candidate in NEWS_STRATEGY_WINDOWS else "short"
-
-
-def resolve_news_window_days(news_max_age_days: int, news_strategy_profile: Optional[str]) -> int:
-    """Resolve effective news window days from profile and global max-age."""
-    profile = normalize_news_strategy_profile(news_strategy_profile)
-    profile_days = NEWS_STRATEGY_WINDOWS.get(profile, NEWS_STRATEGY_WINDOWS["short"])
-    return max(1, min(max(1, int(news_max_age_days)), profile_days))
 
 
 def normalize_agent_context_compression_profile(value: Optional[str]) -> str:
@@ -603,9 +580,7 @@ class Config:
     # Unified temperature for all LLM calls (LLM_TEMPERATURE); legacy per-provider temps are fallback only
     llm_temperature: float = 0.7
 
-    # --- Multi-channel LLM config (new) ---
-    # LITELLM_CONFIG: path to a standard litellm_config.yaml file (most powerful)
-    litellm_config_path: Optional[str] = None
+    # --- Multi-channel LLM config ---
     # Internal metadata: which config layer actually produced llm_model_list
     llm_models_source: str = "legacy_env"
     # LLM_CHANNELS: list of channel dicts, each with name/base_url/api_keys/models
@@ -651,14 +626,10 @@ class Config:
     vision_provider_priority: str = "gemini,anthropic,openai"
 
     # === 搜索引擎配置（支持多 Key 负载均衡）===
-    anspire_api_keys: List[str] = field(default_factory=list)  # Anspire Search API Keys
-    bocha_api_keys: List[str] = field(default_factory=list)  # Bocha API Keys
+    anspire_api_keys: List[str] = field(default_factory=list)  # Anspire API Keys (LLM channel fallback only)
     minimax_api_keys: List[str] = field(default_factory=list)  # MiniMax API Keys
-    tavily_api_keys: List[str] = field(default_factory=list)  # Tavily API Keys
     brave_api_keys: List[str] = field(default_factory=list)  # Brave Search API Keys
     serpapi_keys: List[str] = field(default_factory=list)  # SerpAPI Keys
-    searxng_base_urls: List[str] = field(default_factory=list)  # SearXNG instance URLs (self-hosted, no quota)
-    searxng_public_instances_enabled: bool = True  # Auto-discover public SearXNG instances when base URLs are absent
     firecrawl_api_key: Optional[str] = None  # Firecrawl API key for URL content scraping
 
     # === Social Sentiment (US stocks only, api.adanos.org) ===
@@ -666,9 +637,7 @@ class Config:
     social_sentiment_api_url: str = "https://api.adanos.org"
 
     # === 新闻与分析筛选配置 ===
-    news_max_age_days: int = 3   # 新闻最大时效（天）
-    news_strategy_profile: str = "short"  # 新闻窗口策略档位：ultra_short/short/medium/long
-    bias_threshold: float = 5.0  # 乖离率阈值（%），超过此值提示不追高
+    bias_threshold: float = 5.0  # 旧个股分析链路的固定乖离率阈值
 
     # === Agent 模式配置 ===
     agent_litellm_model: str = ""  # Optional Agent-only primary model; empty inherits LITELLM_MODEL
@@ -707,9 +676,6 @@ class Config:
     report_integrity_retry: int = 1  # Retry count when mandatory fields missing (0 = placeholder only)
     report_history_compare_n: int = 0  # History comparison count (0 = disabled)
 
-    # 分析间隔时间（秒）- 用于避免API限流
-    analysis_delay: float = 0.0  # 个股分析与大盘分析之间的延迟
-
     # 实时行情预取（Issue #455）：设为 false 可禁用，避免 efinance/akshare_em 全市场拉取
     prefetch_realtime_quotes: bool = True
 
@@ -743,23 +709,6 @@ class Config:
     # === 启动配置 ===
     schedule_enabled: bool = False            # legacy compatibility, scheduler mode has been removed
     schedule_time: str = "18:00"              # legacy compatibility
-    schedule_cron: str = ""                   # legacy compatibility
-    schedule_run_immediately: bool = True     # legacy compatibility
-    run_immediately: bool = True              # 启动时是否立即执行一次
-    market_review_enabled: bool = True        # 是否启用大盘复盘
-    # 大盘复盘市场区域：cn(A股)、hk(港股)、us(美股)、both(三市场)，us 适合仅关注美股的用户
-    market_review_region: str = "cn"
-    market_review_color_scheme: str = "green_up"
-    # 交易日检查：默认启用，非交易日跳过执行；设为 false 或 --force-run 可强制执行（Issue #373）
-    trading_day_check_enabled: bool = True
-
-    # === 实时行情增强数据配置 ===
-    # 实时行情开关（关闭后使用历史收盘价进行分析）
-    enable_realtime_quote: bool = True
-    # 盘中实时技术面：启用时用实时价计算 MA/多头排列（Issue #234）；关闭则用昨日收盘
-    enable_realtime_technical_indicators: bool = True
-    # 筹码分布开关（该接口不稳定，云端部署建议关闭）
-    enable_chip_distribution: bool = True
     # 东财接口补丁开关
     enable_eastmoney_patch: bool = False
     # 实时行情数据源优先级（逗号分隔）
@@ -767,8 +716,15 @@ class Config:
     # - tencent: 腾讯财经，有量比/换手率/市盈率等，单股查询稳定（推荐）
     # - akshare_sina: 新浪财经，基本行情稳定，但无量比
     # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
-    # - tushare: Tushare Pro，需要2000积分，数据全面（付费用户可优先使用）
+    # - tushare: Tushare Pro，需要 2000 积分，数据全面（付费用户可优先使用）
     realtime_source_priority: str = "tencent,akshare_sina,efinance,akshare_em"
+    # Toggle switches for built-in data providers
+    tushare: bool = False
+    akshare: bool = True
+    yfinance: bool = True
+    pytdx: bool = True
+    efinance: bool = True
+    baostock: bool = True
     # 实时行情缓存时间（秒）
     realtime_cache_ttl: int = 600
     # 熔断器冷却时间（秒）
@@ -852,11 +808,7 @@ class Config:
     _VALID_AGENT_ARCH = {"single", "multi"}
     _VALID_ORCHESTRATOR_MODES = {"quick", "standard", "full", "specialist"}
     _VALID_SKILL_ROUTING = {"auto", "manual"}
-    _WEBUI_RUNTIME_ENV_FILE_PRIORITY_KEYS = frozenset(
-        {
-            "RUN_IMMEDIATELY",
-        }
-    )
+    _WEBUI_RUNTIME_ENV_FILE_PRIORITY_KEYS = frozenset()
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES_CAPTURED = False
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES = frozenset()
     _BOOTSTRAP_RUNTIME_ENV_PRESENT_KEYS = frozenset()
@@ -1008,45 +960,14 @@ class Config:
             if _single_deepseek:
                 deepseek_api_keys = [_single_deepseek]
 
-        # Anspire Open shares the same key as Anspire Search and exposes an
-        # OpenAI-compatible LLM gateway.  When no other OpenAI-compatible key is
-        # configured, use ANSPIRE_API_KEYS as the legacy openai-compatible
-        # provider so "one key" setups work without LLM_CHANNELS.
         anspire_keys_str = os.getenv('ANSPIRE_API_KEYS', '')
         anspire_api_keys = [k.strip() for k in anspire_keys_str.split(',') if k.strip()]
-        anspire_llm_enabled = parse_env_bool(os.getenv('ANSPIRE_LLM_ENABLED'), default=True)
-        anspire_llm_base_url = (
-            os.getenv('ANSPIRE_LLM_BASE_URL') or ANSPIRE_LLM_BASE_URL_DEFAULT
-        ).strip()
-        _anspire_llm_model_env = os.getenv('ANSPIRE_LLM_MODEL', '').strip()
-        anspire_channel_disabled = False
-        for _raw_channel in os.getenv('LLM_CHANNELS', '').split(','):
-            if _raw_channel.strip().lower() != "anspire":
-                continue
-            _channel_enabled_raw = os.getenv('LLM_ANSPIRE_ENABLED')
-            if _channel_enabled_raw is not None and _channel_enabled_raw.strip():
-                anspire_channel_disabled = not parse_env_bool(_channel_enabled_raw, default=True)
-            else:
-                anspire_channel_disabled = not anspire_llm_enabled
-            break
-        using_anspire_llm_legacy = bool(
-            anspire_llm_enabled
-            and not anspire_channel_disabled
-            and anspire_api_keys
-            and not openai_api_keys
-        )
-        if using_anspire_llm_legacy:
-            openai_api_keys = list(anspire_api_keys)
-            openai_base_url = anspire_llm_base_url
 
         # LITELLM_MODEL: explicit config takes precedence; else infer from available keys
         litellm_model = os.getenv('LITELLM_MODEL', '').strip()
         inferred_legacy_deepseek_model = False
         _openai_model_env = os.getenv('OPENAI_MODEL', '').strip()
-        if using_anspire_llm_legacy:
-            _openai_model_name = _anspire_llm_model_env or _openai_model_env or ANSPIRE_LLM_MODEL_DEFAULT
-        else:
-            _openai_model_name = _openai_model_env or 'gpt-5.5'
+        _openai_model_name = _openai_model_env or 'gpt-5.5'
         if not litellm_model:
             _gemini_model_name = os.getenv('GEMINI_MODEL', 'gemini-3.1-pro-preview').strip()
             _anthropic_model_name = os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-4-6').strip()
@@ -1077,28 +998,20 @@ class Config:
             else:
                 litellm_fallback_models = []
 
-        # === LLM Channels + YAML config ===
-        litellm_config_path = os.getenv('LITELLM_CONFIG', '').strip() or None
+        # === LLM Channels ===
         llm_models_source = "legacy_env"
         llm_channels: List[Dict[str, Any]] = []
         llm_model_list: List[Dict[str, Any]] = []
 
-        # Priority 1: LITELLM_CONFIG (standard LiteLLM YAML config file)
-        if litellm_config_path:
-            llm_model_list = cls._parse_litellm_yaml(litellm_config_path)
+        # Priority 1: LLM_CHANNELS (env var based channel config)
+        _channels_str = os.getenv('LLM_CHANNELS', '').strip()
+        if _channels_str:
+            llm_channels = cls._parse_llm_channels(_channels_str)
+            llm_model_list = cls._channels_to_model_list(llm_channels)
             if llm_model_list:
-                llm_models_source = "litellm_config"
+                llm_models_source = "llm_channels"
 
-        # Priority 2: LLM_CHANNELS (env var based channel config)
-        if not llm_model_list:
-            _channels_str = os.getenv('LLM_CHANNELS', '').strip()
-            if _channels_str:
-                llm_channels = cls._parse_llm_channels(_channels_str)
-                llm_model_list = cls._channels_to_model_list(llm_channels)
-                if llm_model_list:
-                    llm_models_source = "llm_channels"
-
-        # Priority 3: Legacy env vars → auto-build model_list (backward compatible)
+        # Priority 2: Legacy env vars → auto-build model_list (backward compatible)
         if not llm_model_list:
             llm_model_list = cls._legacy_keys_to_model_list(
                 gemini_api_keys, anthropic_api_keys, openai_api_keys,
@@ -1178,51 +1091,14 @@ class Config:
         )
 
         # 解析搜索引擎 API Keys（支持多个 key，逗号分隔）
-        bocha_keys_str = os.getenv('BOCHA_API_KEYS', '')
-        bocha_api_keys = [k.strip() for k in bocha_keys_str.split(',') if k.strip()]
-
         minimax_keys_str = os.getenv('MINIMAX_API_KEYS', '')
         minimax_api_keys = [k.strip() for k in minimax_keys_str.split(',') if k.strip()]
-        
-        tavily_keys_str = os.getenv('TAVILY_API_KEYS', '')
-        tavily_api_keys = [k.strip() for k in tavily_keys_str.split(',') if k.strip()]
         
         serpapi_keys_str = os.getenv('SERPAPI_API_KEYS', '')
         serpapi_keys = [k.strip() for k in serpapi_keys_str.split(',') if k.strip()]
 
         brave_keys_str = os.getenv('BRAVE_API_KEYS', '')
         brave_api_keys = [k.strip() for k in brave_keys_str.split(',') if k.strip()]
-
-        _raw_urls = [u.strip() for u in os.getenv('SEARXNG_BASE_URLS', '').split(',') if u.strip()]
-        searxng_base_urls = []
-        invalid_searxng_urls = []
-        for u in _raw_urls:
-            p = urlparse(u)
-            if p.scheme in ('http', 'https') and p.netloc:
-                searxng_base_urls.append(u)
-            else:
-                invalid_searxng_urls.append(u)
-        if invalid_searxng_urls:
-            logger.warning(
-                "SEARXNG_BASE_URLS 中存在无效 URL，已忽略: %s",
-                ", ".join(invalid_searxng_urls[:3]),
-            )
-        searxng_public_instances_enabled = parse_env_bool(
-            os.getenv('SEARXNG_PUBLIC_INSTANCES_ENABLED'),
-            default=True,
-        )
-
-        # Preserve historical semantics for startup flags: only an explicit
-        # literal "true" enables immediate execution; empty strings stay False.
-        legacy_run_immediately_env = cls._resolve_env_value(
-            'RUN_IMMEDIATELY',
-            prefer_env_file=True,
-        )
-        legacy_run_immediately = (
-            legacy_run_immediately_env.lower() == 'true'
-            if legacy_run_immediately_env is not None
-            else True
-        )
 
         report_language_raw = cls._resolve_report_language_env_value(
             preexisting_report_language
@@ -1241,7 +1117,6 @@ class Config:
             litellm_model=litellm_model,
             litellm_fallback_models=litellm_fallback_models,
             llm_temperature=resolve_unified_llm_temperature(litellm_model),
-            litellm_config_path=litellm_config_path,
             llm_models_source=llm_models_source,
             llm_channels=llm_channels,
             llm_model_list=llm_model_list,
@@ -1279,21 +1154,13 @@ class Config:
             ),
             vision_provider_priority=os.getenv('VISION_PROVIDER_PRIORITY', 'gemini,anthropic,openai'),
             anspire_api_keys=anspire_api_keys,
-            bocha_api_keys=bocha_api_keys,
             minimax_api_keys=minimax_api_keys,
-            tavily_api_keys=tavily_api_keys,
             brave_api_keys=brave_api_keys,
             serpapi_keys=serpapi_keys,
-            searxng_base_urls=searxng_base_urls,
-            searxng_public_instances_enabled=searxng_public_instances_enabled,
             firecrawl_api_key=os.getenv('FIRECRAWL_API_KEY') or None,
             social_sentiment_api_key=os.getenv('SOCIAL_SENTIMENT_API_KEY') or None,
             social_sentiment_api_url=os.getenv('SOCIAL_SENTIMENT_API_URL', 'https://api.adanos.org').rstrip('/'),
-            news_max_age_days=parse_env_int(os.getenv('NEWS_MAX_AGE_DAYS'), 3, field_name='NEWS_MAX_AGE_DAYS', minimum=1),
-            news_strategy_profile=cls._parse_news_strategy_profile(
-                os.getenv('NEWS_STRATEGY_PROFILE', 'short')
-            ),
-            bias_threshold=parse_env_float(os.getenv('BIAS_THRESHOLD'), 5.0, field_name='BIAS_THRESHOLD', minimum=1.0),
+            bias_threshold=5.0,
             agent_litellm_model=agent_litellm_model,
             agent_mode=os.getenv('AGENT_MODE', 'false').lower() == 'true',
             _agent_mode_explicit=os.getenv('AGENT_MODE') is not None,
@@ -1352,7 +1219,6 @@ class Config:
             report_integrity_enabled=os.getenv('REPORT_INTEGRITY_ENABLED', 'true').lower() == 'true',
             report_integrity_retry=parse_env_int(os.getenv('REPORT_INTEGRITY_RETRY'), 1, field_name='REPORT_INTEGRITY_RETRY', minimum=0),
             report_history_compare_n=parse_env_int(os.getenv('REPORT_HISTORY_COMPARE_N'), 0, field_name='REPORT_HISTORY_COMPARE_N', minimum=0),
-            analysis_delay=parse_env_float(os.getenv('ANALYSIS_DELAY'), 0.0, field_name='ANALYSIS_DELAY', minimum=0.0),
             prefetch_realtime_quotes=os.getenv('PREFETCH_REALTIME_QUOTES', 'true').lower() == 'true',
             database_path=os.getenv('DATABASE_PATH', './data/stock_analysis.db'),
             sqlite_wal_enabled=os.getenv('SQLITE_WAL_ENABLED', 'true').lower() == 'true',
@@ -1394,17 +1260,6 @@ class Config:
             https_proxy=os.getenv('HTTPS_PROXY'),
             schedule_enabled=False,
             schedule_time='18:00',
-            schedule_cron='',
-            schedule_run_immediately=legacy_run_immediately,
-            run_immediately=legacy_run_immediately,
-            market_review_enabled=os.getenv('MARKET_REVIEW_ENABLED', 'true').lower() == 'true',
-            market_review_region=cls._parse_market_review_region(
-                os.getenv('MARKET_REVIEW_REGION', 'cn')
-            ),
-            market_review_color_scheme=cls._parse_market_review_color_scheme(
-                os.getenv('MARKET_REVIEW_COLOR_SCHEME', 'green_up')
-            ),
-            trading_day_check_enabled=os.getenv('TRADING_DAY_CHECK_ENABLED', 'true').lower() != 'false',
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=parse_env_int(os.getenv('WEBUI_PORT'), 8000, field_name='WEBUI_PORT', minimum=1, maximum=65535),
@@ -1431,12 +1286,6 @@ class Config:
             telegram_webhook_secret=os.getenv('TELEGRAM_WEBHOOK_SECRET'),
             # Discord 机器人扩展配置
             discord_bot_status=os.getenv('DISCORD_BOT_STATUS', 'A股智能分析 | /help'),
-            # 实时行情增强数据配置
-            enable_realtime_quote=os.getenv('ENABLE_REALTIME_QUOTE', 'true').lower() == 'true',
-            enable_realtime_technical_indicators=os.getenv(
-                'ENABLE_REALTIME_TECHNICAL_INDICATORS', 'true'
-            ).lower() == 'true',
-            enable_chip_distribution=os.getenv('ENABLE_CHIP_DISTRIBUTION', 'true').lower() == 'true',
             # 东财接口补丁开关
             enable_eastmoney_patch=os.getenv('ENABLE_EASTMONEY_PATCH', 'false').lower() == 'true',
             # 实时行情数据源优先级：
@@ -1445,6 +1294,12 @@ class Config:
             # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
             # - tushare: Tushare Pro，需要2000积分，数据全面
             realtime_source_priority=cls._resolve_realtime_source_priority(),
+            tushare=parse_env_bool(os.getenv('TUSHARE_ENABLED'), False),
+            akshare=parse_env_bool(os.getenv('AKSHARE'), True),
+            yfinance=parse_env_bool(os.getenv('YFINANCE'), True),
+            pytdx=parse_env_bool(os.getenv('PYTDX'), True),
+            efinance=parse_env_bool(os.getenv('EFINANCE'), True),
+            baostock=parse_env_bool(os.getenv('BAOSTOCK'), True),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),
             enable_fundamental_pipeline=os.getenv('ENABLE_FUNDAMENTAL_PIPELINE', 'true').lower() == 'true',
@@ -1507,52 +1362,6 @@ class Config:
         )
     
     @classmethod
-    def _parse_litellm_yaml(cls, config_path: str) -> List[Dict[str, Any]]:
-        """Parse a standard LiteLLM config YAML file into Router model_list.
-
-        Supports the ``os.environ/VAR_NAME`` syntax for secret references.
-        Returns an empty list on any error (logged, never raises).
-        """
-        import logging
-        _logger = logging.getLogger(__name__)
-        try:
-            import yaml
-        except ImportError:
-            _logger.warning("PyYAML not installed; LITELLM_CONFIG ignored. Install with: pip install pyyaml")
-            return []
-
-        path = Path(config_path)
-        if not path.is_absolute():
-            path = Path(__file__).parent.parent / path
-        if not path.exists():
-            _logger.warning(f"LITELLM_CONFIG file not found: {path}")
-            return []
-
-        try:
-            with open(path, encoding='utf-8') as f:
-                yaml_config = yaml.safe_load(f) or {}
-        except Exception as e:
-            _logger.warning(f"Failed to parse LITELLM_CONFIG: {e}")
-            return []
-
-        model_list = yaml_config.get('model_list', [])
-        if not isinstance(model_list, list):
-            _logger.warning("LITELLM_CONFIG: model_list must be a list")
-            return []
-
-        # Resolve os.environ/ references in string params
-        for entry in model_list:
-            params = entry.get('litellm_params', {})
-            for key in list(params.keys()):
-                val = params.get(key)
-                if isinstance(val, str) and val.startswith('os.environ/'):
-                    env_name = val.split('/', 1)[1]
-                    params[key] = os.getenv(env_name, '')
-
-        _logger.info(f"LITELLM_CONFIG: loaded {len(model_list)} model deployment(s) from {path}")
-        return model_list
-
-    @classmethod
     def _parse_llm_channels(cls, channels_str: str) -> List[Dict[str, Any]]:
         """Parse LLM_CHANNELS env var and per-channel env vars.
 
@@ -1576,16 +1385,10 @@ class Config:
             ch_upper = ch_name.upper()
 
             base_url = os.getenv(f'LLM_{ch_upper}_BASE_URL', '').strip() or None
-            if ch_lower == "anspire" and not base_url:
-                base_url = (
-                    os.getenv('ANSPIRE_LLM_BASE_URL') or ANSPIRE_LLM_BASE_URL_DEFAULT
-                ).strip() or None
             protocol_raw = os.getenv(f'LLM_{ch_upper}_PROTOCOL', '').strip()
             if ch_lower == "anspire" and not protocol_raw:
                 protocol_raw = "openai"
             enabled_raw = os.getenv(f'LLM_{ch_upper}_ENABLED')
-            if ch_lower == "anspire" and (enabled_raw is None or not enabled_raw.strip()):
-                enabled_raw = os.getenv('ANSPIRE_LLM_ENABLED')
             enabled = parse_env_bool(enabled_raw, default=True)
 
             # API keys: LLM_{NAME}_API_KEYS (multi) > LLM_{NAME}_API_KEY (single)
@@ -1602,12 +1405,6 @@ class Config:
             # Models
             models_raw = os.getenv(f'LLM_{ch_upper}_MODELS', '')
             raw_models = [m.strip() for m in models_raw.split(',') if m.strip()]
-            if not raw_models and ch_lower == "anspire":
-                anspire_model = (
-                    os.getenv('ANSPIRE_LLM_MODEL') or ANSPIRE_LLM_MODEL_DEFAULT
-                ).strip()
-                if anspire_model:
-                    raw_models = [anspire_model]
             protocol = resolve_llm_channel_protocol(protocol_raw, base_url=base_url, models=raw_models, channel_name=ch_name)
             models = [normalize_llm_channel_model(m, protocol, base_url) for m in raw_models]
 
@@ -1887,51 +1684,6 @@ class Config:
         return normalized
 
     @classmethod
-    def _parse_news_strategy_profile(cls, value: Optional[str]) -> str:
-        """Parse NEWS_STRATEGY_PROFILE, fallback to short for invalid values."""
-        normalized = normalize_news_strategy_profile(value)
-        raw = (value or "short").strip().lower()
-        if raw != normalized:
-            logging.getLogger(__name__).warning(
-                "NEWS_STRATEGY_PROFILE '%s' invalid, fallback to 'short' "
-                "(valid: ultra_short/short/medium/long)",
-                value,
-            )
-        return normalized
-
-    def get_effective_news_window_days(self) -> int:
-        """Return effective news window days after profile + max-age merge."""
-        return resolve_news_window_days(
-            news_max_age_days=self.news_max_age_days,
-            news_strategy_profile=self.news_strategy_profile,
-        )
-
-    @classmethod
-    def _parse_market_review_region(cls, value: str) -> str:
-        """解析大盘复盘市场区域，非法值记录警告后回退为 cn"""
-        import logging
-        v = (value or 'cn').strip().lower()
-        if v in ('cn', 'us', 'hk', 'both'):
-            return v
-        logging.getLogger(__name__).warning(
-            f"MARKET_REVIEW_REGION 配置值 '{value}' 无效，已回退为默认值 'cn'（合法值：cn / hk / us / both）"
-        )
-        return 'cn'
-
-    @classmethod
-    def _parse_market_review_color_scheme(cls, value: str) -> str:
-        """Parse market-review index change color scheme."""
-        import logging
-        v = (value or 'green_up').strip().lower().replace('-', '_')
-        if v in ('green_up', 'red_up'):
-            return v
-        logging.getLogger(__name__).warning(
-            "MARKET_REVIEW_COLOR_SCHEME 配置值 '%s' 无效，已回退为默认值 'green_up'（合法值：green_up / red_up）",
-            value,
-        )
-        return 'green_up'
-
-    @classmethod
     def _resolve_realtime_source_priority(cls) -> str:
         """
         Resolve realtime source priority with automatic tushare injection.
@@ -1941,14 +1693,14 @@ class Config:
         so that the paid data source is utilized for realtime quotes as well.
         """
         explicit = os.getenv('REALTIME_SOURCE_PRIORITY')
-        default_priority = 'tencent,akshare_sina,efinance,akshare_em'
+        default_priority = 'tencent,akshare_sina,efinance,akshare_em,tushare'
 
         if explicit:
-            # User explicitly set priority, respect it
             return explicit
 
         tushare_token = os.getenv('TUSHARE_TOKEN', '').strip()
-        if tushare_token:
+        tushare_enabled = parse_env_bool(os.getenv('TUSHARE_ENABLED'), False)
+        if tushare_enabled and tushare_token:
             # Token configured but no explicit priority override
             # Prepend tushare so the paid source is tried first
             import logging
@@ -1969,20 +1721,13 @@ class Config:
         cls._BOOTSTRAP_RUNTIME_ENV_OVERRIDES = frozenset()
         cls._BOOTSTRAP_RUNTIME_ENV_PRESENT_KEYS = frozenset()
 
-    def has_searxng_enabled(self) -> bool:
-        """Whether SearXNG fallback is enabled via self-hosted or public mode."""
-        return bool(self.searxng_base_urls) or bool(self.searxng_public_instances_enabled)
 
     def has_search_capability_enabled(self) -> bool:
         """Whether any search provider or local AkShare news fallback is available."""
         return bool(
-            self.anspire_api_keys
-            or self.bocha_api_keys
-            or self.minimax_api_keys
-            or self.tavily_api_keys
+            self.minimax_api_keys
             or self.brave_api_keys
             or self.serpapi_keys
-            or self.has_searxng_enabled()
             or importlib.util.find_spec("akshare") is not None
         )
 
@@ -2014,8 +1759,7 @@ class Config:
     def validate_structured(self) -> List[ConfigIssue]:
         """Return structured validation issues with severity levels.
 
-        Covers all three LLM configuration tiers introduced by PR #494:
-        - LITELLM_CONFIG (YAML)
+        Covers the supported LLM configuration tiers:
         - LLM_CHANNELS (env)
         - Legacy per-provider keys
 
@@ -2035,7 +1779,7 @@ class Config:
             ))
 
         # --- LLM availability ---
-        # llm_model_list is populated for YAML / channels / managed legacy keys.
+        # llm_model_list is populated for channels / managed legacy keys.
         # Other LiteLLM-native providers (for example cohere/*) run through the
         # direct litellm env path and therefore do not populate llm_model_list.
         has_direct_env_model = bool(self.litellm_model) and _uses_direct_env_provider(self.litellm_model)
@@ -2043,10 +1787,10 @@ class Config:
             issues.append(ConfigIssue(
                 severity="error",
                 message=(
-                    "未配置任何可用的 AI 模型接入（高级模型路由配置 / 渠道 / API Key），"
+                    "未配置任何可用的 AI 模型接入（渠道 / API Key），"
                     "AI 分析功能将不可用"
                 ),
-                field="LITELLM_CONFIG",
+                field="LLM_CHANNELS",
             ))
         elif not self.litellm_model:
             issues.append(ConfigIssue(
@@ -2087,7 +1831,7 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "已配置的主模型未出现在当前渠道或高级模型路由配置中。"
+                        "已配置的主模型未出现在当前渠道配置中。"
                         f" 当前可用模型：{', '.join(available_router_models[:6])}"
                     ),
                     field="LITELLM_MODEL",
@@ -2102,7 +1846,7 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "已配置的 Agent 主模型未出现在当前渠道或高级模型路由配置中。"
+                        "已配置的 Agent 主模型未出现在当前渠道配置中。"
                         f" 当前可用模型：{', '.join(available_router_models[:6])}"
                     ),
                     field="AGENT_LITELLM_MODEL",
@@ -2154,8 +1898,8 @@ class Config:
         if not self.has_search_capability_enabled():
             issues.append(ConfigIssue(
                 severity="info",
-                message="未配置搜索引擎能力 (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG)，且 AkShare 不可用，新闻搜索功能将不可用",
-                field="BOCHA_API_KEYS",
+                message="未配置搜索引擎能力 (MiniMax/Brave/SerpAPI)，新闻搜索功能将不可用",
+                field="MINIMAX_API_KEYS",
             ))
 
         # --- Deprecated field migration hints ---

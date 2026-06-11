@@ -17,6 +17,7 @@ import time
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
@@ -27,14 +28,15 @@ from src.storage import get_db
 from data_provider import DataFetcherManager
 from data_provider.base import normalize_stock_code
 from data_provider.realtime_types import ChipDistribution
-from src.analyzer import (
-    GeminiAnalyzer,
-    AnalysisResult,
-    fill_price_position_if_needed,
-    normalize_chip_structure_availability,
-    stabilize_decision_with_structure,
-)
 from src.data.stock_mapping import STOCK_NAME_MAP
+from src.report_language import (
+    get_unknown_text,
+    infer_decision_type_from_advice,
+    localize_confidence_level,
+    localize_operation_advice,
+    localize_trend_prediction,
+    normalize_report_language,
+)
 from src.report_language import (
     get_unknown_text,
     infer_decision_type_from_advice,
@@ -68,6 +70,40 @@ from bot.models import BotMessage
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AnalysisResult:
+    """简化的分析结果数据结构（仅用于 Agent 模式）"""
+
+    code: str
+    name: str
+    sentiment_score: int = 50
+    trend_prediction: str = "未知"
+    operation_advice: str = "观望"
+    decision_type: str = "hold"
+    confidence_level: str = "中"
+    report_language: str = "zh"
+    success: bool = True
+    error_message: str = ""
+    data_sources: str = ""
+    model_used: str = ""
+
+    dashboard: Optional[Dict[str, Any]] = None
+    analysis_summary: str = ""
+    news_summary: str = ""
+    technical_analysis: str = ""
+    fundamental_analysis: str = ""
+    risk_warning: str = ""
+    buy_reason: str = ""
+    operation_advice: str = "观望"
+
+    # 元数据
+    current_price: Optional[float] = None
+    change_pct: Optional[float] = None
+    query_id: str = ""
+    fundamental_context: Optional[Dict[str, Any]] = None
+    raw_response: Optional[str] = None
 
 
 class StockAnalysisPipeline:
@@ -118,21 +154,13 @@ class StockAnalysisPipeline:
         self.fetcher_manager = DataFetcherManager()
         # 不再单独创建 akshare_fetcher，统一使用 fetcher_manager 获取增强数据
         self.trend_analyzer = StockTrendAnalyzer()  # 技术分析器
-        self.analyzer = GeminiAnalyzer(config=self.config, skills=self.analysis_skills)
         
         # 初始化搜索服务（可选，初始化失败不应阻断主分析流程）
         try:
             self.search_service = SearchService(
-                bocha_keys=self.config.bocha_api_keys,
-                tavily_keys=self.config.tavily_api_keys,
-                anspire_keys=self.config.anspire_api_keys,
                 brave_keys=self.config.brave_api_keys,
                 serpapi_keys=self.config.serpapi_keys,
                 minimax_keys=self.config.minimax_api_keys,
-                searxng_base_urls=self.config.searxng_base_urls,
-                searxng_public_instances_enabled=self.config.searxng_public_instances_enabled,
-                news_max_age_days=self.config.news_max_age_days,
-                news_strategy_profile=getattr(self.config, "news_strategy_profile", "short"),
             )
         except Exception as exc:
             logger.warning("搜索服务初始化失败，将以无搜索模式运行: %s", exc, exc_info=True)
@@ -141,14 +169,7 @@ class StockAnalysisPipeline:
         logger.info(f"调度器初始化完成，最大并发数: {self.max_workers}")
         logger.info("已启用技术分析引擎（均线/趋势/量价指标）")
         # 打印实时行情/筹码配置状态
-        if self.config.enable_realtime_quote:
-            logger.info(f"实时行情已启用 (优先级: {self.config.realtime_source_priority})")
-        else:
-            logger.info("实时行情已禁用，将使用历史收盘价")
-        if self.config.enable_chip_distribution:
-            logger.info("筹码分布分析已启用")
-        else:
-            logger.info("筹码分布分析已禁用")
+        logger.info(f"实时行情优先级: {self.config.realtime_source_priority}")
         if self.search_service is None:
             logger.warning("搜索服务未启用（初始化失败或依赖缺失）")
         elif self.search_service.is_available:
@@ -258,22 +279,21 @@ class StockAnalysisPipeline:
         current_time: Optional[datetime] = None,
     ) -> Optional[AnalysisResult]:
         """
-        分析单只股票（增强版：含量比、换手率、筹码分析、多维度情报）
-        
+        分析单只股票（Agent 模式专用）
+
         流程：
         1. 获取实时行情（量比、换手率）- 通过 DataFetcherManager 自动故障切换
         2. 获取筹码分布 - 通过 DataFetcherManager 带熔断保护
         3. 进行趋势分析（基于交易理念）
-        4. 多维度情报搜索（最新消息+风险排查+业绩预期）
-        5. 从数据库获取分析上下文
-        6. 调用 AI 进行综合分析
-        
+        4. 获取基本面数据
+        5. 调用 Agent 进行分析
+
         Args:
             query_id: 查询链路关联 id
             code: 股票代码
             report_type: 报告类型
             current_time: 本轮运行冻结的参考时间，用于统一市场阶段上下文
-            
+
         Returns:
             AnalysisResult 或 None（如果分析失败）
         """
@@ -295,22 +315,19 @@ class StockAnalysisPipeline:
             # Step 1: 获取实时行情（量比、换手率等）- 使用统一入口，自动故障切换
             realtime_quote = None
             try:
-                if self.config.enable_realtime_quote:
-                    realtime_quote = self.fetcher_manager.get_realtime_quote(code, log_final_failure=False)
-                    if realtime_quote:
-                        # 使用实时行情返回的真实股票名称
-                        if realtime_quote.name:
-                            stock_name = realtime_quote.name
-                        # 兼容不同数据源的字段（有些数据源可能没有 volume_ratio）
-                        volume_ratio = getattr(realtime_quote, 'volume_ratio', None)
-                        turnover_rate = getattr(realtime_quote, 'turnover_rate', None)
-                        logger.info(f"{stock_name}({code}) 实时行情: 价格={realtime_quote.price}, "
-                                  f"量比={volume_ratio}, 换手率={turnover_rate}% "
-                                  f"(来源: {realtime_quote.source.value if hasattr(realtime_quote, 'source') else 'unknown'})")
-                    else:
-                        logger.warning(f"{stock_name}({code}) 所有实时行情数据源均不可用，已降级为历史收盘价继续分析")
+                realtime_quote = self.fetcher_manager.get_realtime_quote(code, log_final_failure=False)
+                if realtime_quote:
+                    # 使用实时行情返回的真实股票名称
+                    if realtime_quote.name:
+                        stock_name = realtime_quote.name
+                    # 兼容不同数据源的字段（有些数据源可能没有 volume_ratio）
+                    volume_ratio = getattr(realtime_quote, 'volume_ratio', None)
+                    turnover_rate = getattr(realtime_quote, 'turnover_rate', None)
+                    logger.info(f"{stock_name}({code}) 实时行情: 价格={realtime_quote.price}, "
+                              f"量比={volume_ratio}, 换手率={turnover_rate}% "
+                              f"(来源: {realtime_quote.source.value if hasattr(realtime_quote, 'source') else 'unknown'})")
                 else:
-                    logger.info(f"{stock_name}({code}) 实时行情已禁用，使用历史收盘价继续分析")
+                    logger.warning(f"{stock_name}({code}) 所有实时行情数据源均不可用，已降级为历史收盘价继续分析")
             except Exception as e:
                 logger.warning(f"{stock_name}({code}) 实时行情链路异常，已降级为历史收盘价继续分析: {e}")
 
@@ -332,21 +349,6 @@ class StockAnalysisPipeline:
 
             # If agent mode is explicitly enabled, or specific agent skills are configured, use the Agent analysis pipeline.
             # NOTE: use config.agent_mode (explicit opt-in) instead of
-            # config.is_agent_available() so that users who only configured an
-            # API Key for the traditional analysis path are not silently
-            # switched to Agent mode (which is slower and more expensive).
-            use_agent = getattr(self.config, 'agent_mode', False)
-            if not use_agent:
-                if self.analysis_skills:
-                    use_agent = True
-                    logger.info(f"{stock_name}({code}) Auto-enabled agent mode due to request skills: {self.analysis_skills}")
-            if not use_agent:
-                # Auto-enable agent mode when specific skills are configured (e.g., scheduled task with strategy)
-                configured_skills = getattr(self.config, 'agent_skills', [])
-                if configured_skills and configured_skills != ['all']:
-                    use_agent = True
-                    logger.info(f"{stock_name}({code}) Auto-enabled agent mode due to configured skills: {configured_skills}")
-
             self._emit_progress(32, f"{stock_name}：正在聚合基本面与趋势数据")
 
             # Step 2.5: 基本面能力聚合（统一入口，异常降级）
@@ -395,221 +397,34 @@ class StockAnalysisPipeline:
                 if historical_bars:
                     df = pd.DataFrame([bar.to_dict() for bar in historical_bars])
                     # Issue #234: Augment with realtime for intraday MA calculation
-                    if self.config.enable_realtime_quote and realtime_quote:
+                    if realtime_quote:
                         df = self._augment_historical_with_realtime(df, realtime_quote, code)
                     trend_result = self.trend_analyzer.analyze(df, code)
                     logger.info(f"{stock_name}({code}) 趋势分析: {trend_result.trend_status.value}, "
-                              f"买入信号={trend_result.buy_signal.value}, 评分={trend_result.signal_score}")
+                               f"买入信号={trend_result.buy_signal.value}, 评分={trend_result.signal_score}")
             except Exception as e:
                 logger.warning(f"{stock_name}({code}) 趋势分析失败: {e}", exc_info=True)
 
-            if use_agent:
-                logger.info(f"{stock_name}({code}) 启用 Agent 模式进行分析")
-                self._emit_progress(58, f"{stock_name}：正在切换 Agent 分析链路")
-                return self._analyze_with_agent(
-                    code,
-                    report_type,
-                    query_id,
-                    stock_name,
-                    realtime_quote,
-                    chip_data,
-                    fundamental_context,
-                    trend_result,
-                    market_phase_context=market_phase_context_dict,
-                )
-
-            # Step 4: 多维度情报搜索（最新消息+风险排查+业绩预期）
-            news_context = None
-            news_result_count: Optional[int] = None
-            self._emit_progress(46, f"{stock_name}：正在检索新闻与舆情")
-            if self.search_service is not None and self.search_service.is_available:
-                logger.info(f"{stock_name}({code}) 开始多维度情报搜索...")
-
-                # 使用多维度搜索（最多5次搜索）
-                intel_results = self.search_service.search_comprehensive_intel(
-                    stock_code=code,
-                    stock_name=stock_name,
-                    max_searches=5
-                )
-
-                # 格式化情报报告
-                if intel_results:
-                    news_context = self.search_service.format_intel_report(intel_results, stock_name)
-                    total_results = sum(
-                        len(r.results) for r in intel_results.values() if r.success
-                    )
-                    news_result_count = total_results
-                    logger.info(f"{stock_name}({code}) 情报搜索完成: 共 {total_results} 条结果")
-                    logger.debug(f"{stock_name}({code}) 情报搜索结果:\n{news_context}")
-
-                    # 保存新闻情报到数据库（用于后续复盘与查询）
-                    try:
-                        query_context = self._build_query_context(query_id=query_id)
-                        for dim_name, response in intel_results.items():
-                            if response and response.success and response.results:
-                                self.db.save_news_intel(
-                                    code=code,
-                                    name=stock_name,
-                                    dimension=dim_name,
-                                    query=response.query,
-                                    response=response,
-                                    query_context=query_context
-                                )
-                    except Exception as e:
-                        logger.warning(f"{stock_name}({code}) 保存新闻情报失败: {e}")
-            else:
-                logger.info(f"{stock_name}({code}) 搜索服务不可用，跳过情报搜索")
-
-            # Step 4.5: Social sentiment intelligence (US stocks only)
-            if self.social_sentiment_service is not None and self.social_sentiment_service.is_available and is_us_stock_code(code):
-                try:
-                    social_context = self.social_sentiment_service.get_social_context(code)
-                    if social_context:
-                        logger.info(f"{stock_name}({code}) Social sentiment data retrieved")
-                        if news_context:
-                            news_context = news_context + "\n\n" + social_context
-                        else:
-                            news_context = social_context
-                except Exception as e:
-                    logger.warning(f"{stock_name}({code}) Social sentiment fetch failed: {e}")
-
-            # Step 5: 获取分析上下文（技术面数据）
-            self._emit_progress(58, f"{stock_name}：正在整理分析上下文")
-            context = self.db.get_analysis_context(code)
-
-            if context is None:
-                logger.warning(f"{stock_name}({code}) 无法获取历史行情数据，将仅基于新闻和实时行情分析")
-                _mkt_date = get_market_now(
-                    get_market_for_stock(normalize_stock_code(code))
-                ).date()
-                context = {
-                    'code': code,
-                    'stock_name': stock_name,
-                    'date': _mkt_date.isoformat(),
-                    'data_missing': True,
-                    'today': {},
-                    'yesterday': {}
-                }
-            
-            # Step 6: 增强上下文数据（添加实时行情、筹码、趋势分析结果、股票名称）
-            enhanced_context = self._enhance_context(
-                context, 
-                realtime_quote, 
+            # 强制使用 Agent 模式进行分析
+            logger.info(f"{stock_name}({code}) 启用 Agent 模式进行分析")
+            self._emit_progress(58, f"{stock_name}：正在切换 Agent 分析链路")
+            return self._analyze_with_agent(
+                code,
+                report_type,
+                query_id,
+                stock_name,
+                realtime_quote,
                 chip_data,
-                trend_result,
-                stock_name,  # 传入股票名称
                 fundamental_context,
+                trend_result,
+                market_phase_context=market_phase_context_dict,
             )
-            enhanced_context["market_phase_context"] = market_phase_context_dict
-            
-            # Step 7: 调用 AI 分析（传入增强的上下文和新闻）
-            llm_progress_state = {"last_progress": 64}
-
-            def _on_llm_stream(chars_received: int) -> None:
-                dynamic_progress = min(92, 64 + min(chars_received // 80, 28))
-                if dynamic_progress <= llm_progress_state["last_progress"]:
-                    return
-                llm_progress_state["last_progress"] = dynamic_progress
-                self._emit_progress(
-                    dynamic_progress,
-                    f"{stock_name}：LLM 正在生成分析结果（已接收 {chars_received} 字符）",
-                )
-
-            self._emit_progress(64, f"{stock_name}：正在请求 LLM 生成报告")
-            llm_started_at = time.monotonic()
-            try:
-                result = self.analyzer.analyze(
-                    enhanced_context,
-                    news_context=news_context,
-                    progress_callback=self._emit_progress,
-                    stream_progress_callback=_on_llm_stream,
-                )
-                llm_duration_ms = int((time.monotonic() - llm_started_at) * 1000)
-                record_llm_run(
-                    success=bool(result and getattr(result, "success", True)),
-                    model=getattr(result, "model_used", None) if result else None,
-                    call_type="analysis",
-                    duration_ms=llm_duration_ms,
-                    error_type=(
-                        None
-                        if result and getattr(result, "success", True)
-                        else "AnalysisResultError"
-                    ),
-                    error_message=(
-                        getattr(result, "error_message", None)
-                        if result and not getattr(result, "success", True)
-                        else ("LLM returned empty result" if result is None else None)
-                    ),
-                )
-            except Exception as exc:
-                record_llm_run(
-                    success=False,
-                    model=getattr(self.config, "litellm_model", None),
-                    call_type="analysis",
-                    duration_ms=int((time.monotonic() - llm_started_at) * 1000),
-                    error_type=type(exc).__name__,
-                    error_message=exc,
-                )
-                raise
-
-            # Step 7.5: 填充分析时的价格信息到 result
-            if result:
-                self._emit_progress(94, f"{stock_name}：正在校验并整理分析结果")
-                result.query_id = query_id
-                realtime_data = enhanced_context.get('realtime', {})
-                result.current_price = realtime_data.get('price')
-                result.change_pct = realtime_data.get('change_pct')
-
-            # Step 7.6: chip_structure fallback (Issue #589) and unavailable collapse
-            if result:
-                normalize_chip_structure_availability(result, chip_data)
-
-            # Step 7.7: price_position fallback
-            if result:
-                fill_price_position_if_needed(result, trend_result, realtime_quote)
-                stabilize_decision_with_structure(result, trend_result, fundamental_context)
-                if isinstance(fundamental_context, dict):
-                    result.fundamental_context = fundamental_context
-
-            # Step 8: 保存分析历史记录
-            if result and result.success:
-                try:
-                    self._emit_progress(97, f"{stock_name}：正在保存分析报告")
-                    context_snapshot = self._build_context_snapshot(
-                        enhanced_context=enhanced_context,
-                        news_content=news_context,
-                        news_result_count=news_result_count,
-                        realtime_quote=realtime_quote,
-                        chip_data=chip_data
-                    )
-                    result.diagnostic_context_snapshot = context_snapshot
-                    saved_count = self.db.save_analysis_history(
-                        result=result,
-                        query_id=query_id,
-                        report_type=report_type.value,
-                        news_content=news_context,
-                        context_snapshot=context_snapshot,
-                        save_snapshot=self.save_context_snapshot
-                    )
-                    record_history_run(
-                        report_saved=bool(saved_count),
-                        metadata_saved=bool(saved_count),
-                    )
-                except Exception as e:
-                    record_history_run(
-                        report_saved=False,
-                        metadata_saved=False,
-                        error_message=e,
-                    )
-                    logger.warning(f"{stock_name}({code}) 保存分析历史失败: {e}")
-
-            return result
 
         except Exception as e:
             logger.error(f"{stock_name}({code}) 分析失败: {e}")
             logger.exception(f"{stock_name}({code}) 详细错误信息:")
             return None
-    
+
     def _enhance_context(
         self,
         context: Dict[str, Any],
@@ -979,31 +794,6 @@ class StockAnalysisPipeline:
             )
             if result:
                 result.query_id = query_id
-            # Agent weak integrity: placeholder fill only, no LLM retry
-            if result and getattr(self.config, "report_integrity_enabled", False):
-                from src.analyzer import check_content_integrity, apply_placeholder_fill
-
-                pass_integrity, missing = check_content_integrity(result)
-                if not pass_integrity:
-                    apply_placeholder_fill(result, missing)
-                    logger.info(
-                        "[LLM完整性] integrity_mode=agent_weak 必填字段缺失 %s，已占位补全",
-                        missing,
-                    )
-            # chip_structure fallback (Issue #589), before save_analysis_history
-            if result and chip_data is not None:
-                normalize_chip_structure_availability(result, chip_data)
-
-            # price_position fallback (same as non-agent path Step 7.7)
-            if result:
-                fill_price_position_if_needed(result, trend_result, realtime_quote)
-                realtime_data = initial_context.get("realtime_quote", {})
-                if isinstance(realtime_data, dict):
-                    result.current_price = realtime_data.get("price")
-                    result.change_pct = realtime_data.get("change_pct")
-                stabilize_decision_with_structure(result, trend_result, fundamental_context)
-                if isinstance(fundamental_context, dict):
-                    result.fundamental_context = fundamental_context
 
             resolved_stock_name = result.name if result and result.name else stock_name
 
@@ -1607,11 +1397,6 @@ class StockAnalysisPipeline:
             return df
 
         # 非交易日可跳过实时补齐；异常情况下保持失败开放。
-        enable_realtime_tech = getattr(
-            self.config, 'enable_realtime_technical_indicators', True
-        )
-        if not enable_realtime_tech:
-            return df
         market = get_market_for_stock(code)
         market_today = get_market_now(market).date()
         if market and not is_market_open(market, market_today):
@@ -1924,8 +1709,6 @@ class StockAnalysisPipeline:
             report_type = ReportType.FULL
         else:
             report_type = ReportType.SIMPLE
-        # Issue #128: 从配置读取分析间隔
-        analysis_delay = getattr(self.config, 'analysis_delay', 0)
 
         results: List[AnalysisResult] = []
         
@@ -1956,16 +1739,7 @@ class StockAnalysisPipeline:
                         logger.warning(
                             f"[{code}] 分析结果标记为失败，不计入汇总: "
                             f"{result.error_message or '未知原因'}"
-                        )
-
-                    # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
-                    if idx < len(stock_codes) - 1 and analysis_delay > 0:
-                        # 注意：此 sleep 发生在“主线程收集 future 的循环”中，
-                        # 并不会阻止线程池中的任务同时发起网络请求。
-                        # 因此它对降低并发请求峰值的效果有限；真正的峰值主要由 max_workers 决定。
-                        # 该行为目前保留（按需求不改逻辑）。
-                        logger.debug(f"等待 {analysis_delay} 秒后继续下一只股票...")
-                        time.sleep(analysis_delay)
+)
 
                 except Exception as e:
                     logger.error(f"[{code}] 任务执行失败: {e}")

@@ -84,19 +84,9 @@ class WatchlistItem(BaseModel):
     updated_at: Optional[str] = None
 
 
-class WatchlistMarketReview(BaseModel):
-    latest_analysis_id: Optional[int] = None
-    latest_analysis_at: Optional[str] = None
-    latest_analysis_summary: Optional[str] = None
-    latest_analysis_sections: Dict[str, str] = Field(default_factory=dict)
-    latest_operation_advice: Optional[str] = None
-    latest_trend_prediction: Optional[str] = None
-
-
 class WatchlistItemListResponse(BaseModel):
     items: List[WatchlistItem] = Field(default_factory=list)
     total: int
-    market_review: Optional[WatchlistMarketReview] = None
 
 
 class WatchlistDeleteResponse(BaseModel):

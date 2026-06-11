@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from src.storage import (
@@ -248,76 +248,3 @@ class WatchlistRepository:
                 }
         return summary
 
-    def latest_market_review_summary(self) -> Dict[str, Any]:
-        with self.db.get_session() as session:
-            row = session.execute(
-                select(AnalysisHistory)
-                .where(AnalysisHistory.report_type == "market_review")
-                .order_by(desc(AnalysisHistory.created_at), desc(AnalysisHistory.id))
-                .limit(1)
-            ).scalar_one_or_none()
-            if row is None:
-                return {}
-            market_review_text = row.news_content or row.analysis_summary
-            return {
-                "latest_analysis_id": row.id,
-                "latest_analysis_at": row.created_at.isoformat() if row.created_at else None,
-                "latest_analysis_summary": self._market_review_excerpt(market_review_text),
-                "latest_analysis_sections": self._market_review_sections(market_review_text),
-                "latest_operation_advice": row.operation_advice,
-                "latest_trend_prediction": row.trend_prediction,
-            }
-
-    @staticmethod
-    def _market_review_excerpt(text: Optional[str]) -> Optional[str]:
-        if not text:
-            return None
-        lines = [line.strip() for line in str(text).splitlines() if line.strip()]
-        for line in lines:
-            if line.startswith(">"):
-                return line.lstrip(">").strip()
-        for line in lines:
-            if not line.startswith("#"):
-                return line
-        return lines[0].lstrip("#").strip() if lines else None
-
-    @staticmethod
-    def _market_review_sections(text: Optional[str]) -> Dict[str, str]:
-        if not text:
-            return {}
-
-        sections: List[Tuple[str, List[str]]] = []
-        current_title = ""
-        current_lines: List[str] = []
-        for raw_line in str(text).splitlines():
-            line = raw_line.strip()
-            if line.startswith("###"):
-                if current_title or current_lines:
-                    sections.append((current_title, current_lines))
-                current_title = line.lstrip("#").strip()
-                current_lines = []
-            elif line and not line.startswith("#") and not line.startswith(">"):
-                current_lines.append(line)
-        if current_title or current_lines:
-            sections.append((current_title, current_lines))
-
-        return {
-            "market_status": WatchlistRepository._pick_section(sections, ("盘面", "总览")),
-            "main_themes": WatchlistRepository._pick_section(sections, ("板块主线", "主线", "板块")),
-            "risk_alert": WatchlistRepository._pick_section(sections, ("风险提示", "风险")),
-            "tomorrow_watch": WatchlistRepository._pick_section(sections, ("明日交易计划", "明日", "交易计划")),
-        }
-
-    @staticmethod
-    def _pick_section(sections: List[Tuple[str, List[str]]], keywords: Tuple[str, ...]) -> str:
-        for title, lines in sections:
-            if any(keyword in title for keyword in keywords):
-                return WatchlistRepository._compact_section(lines)
-        return ""
-
-    @staticmethod
-    def _compact_section(lines: List[str], *, max_chars: int = 220) -> str:
-        text = " ".join(line.lstrip("- ").strip() for line in lines if line.strip())
-        if len(text) <= max_chars:
-            return text
-        return f"{text[:max_chars].rstrip()}..."

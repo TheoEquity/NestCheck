@@ -65,7 +65,6 @@ class WatchlistService:
                 for row in rows
             ],
             "total": total,
-            "market_review": self.repo.latest_market_review_summary(),
         }
 
     def get_item(self, item_id: int) -> Dict[str, Any]:

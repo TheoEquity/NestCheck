@@ -181,7 +181,7 @@ class StockTrendAnalyzer:
     6. RSI 指标 - 超买超卖判断
     """
     
-    # 交易参数配置（BIAS_THRESHOLD 从 Config 读取，见 _generate_signal）
+    # 交易参数配置（固定默认阈值从 Config 读取，见 _generate_signal）
     VOLUME_SHRINK_RATIO = 0.7   # 缩量判断阈值（当日量/5日均量）
     VOLUME_HEAVY_RATIO = 1.5    # 放量判断阈值
     MA_SUPPORT_TOLERANCE = 0.02  # MA 支撑判断容忍度（2%）

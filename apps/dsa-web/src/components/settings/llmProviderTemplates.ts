@@ -66,7 +66,7 @@ export const LLM_PROVIDER_TEMPLATES: LLMProviderTemplate[] = [
     placeholderModels: 'Doubao-Seed-2.0-lite,Doubao-Seed-2.0-pro,qwen3.5-flash,MiniMax-M2.7',
     capabilities: ['openai-compatible'],
     configHint:
-      '同一 ANSPIRE_API_KEYS 可复用到搜索与 LLM 渠道。以下模型与网关为配置示例，实际可用性请以账号权限和控制台为准；建议先点“测试连接”确认。',
+      'ANSPIRE_API_KEYS 用于 Anspire LLM 渠道的回退密钥。以下模型与网关为配置示例，实际可用性请以账号权限和控制台为准；建议先点"测试连接"确认。',
     officialSources: [
       { label: 'Anspire Open', url: 'https://open.anspire.cn/?share_code=QFBC0FYC' },
       {

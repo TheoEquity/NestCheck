@@ -50,11 +50,9 @@ def _make_quote(code: str = "600519", name: str = "贵州茅台") -> UnifiedReal
     )
 
 
-def _make_pipeline(enable_realtime_quote: bool, realtime_quote=None) -> StockAnalysisPipeline:
+def _make_pipeline(realtime_quote=None) -> StockAnalysisPipeline:
     pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
     pipeline.config = SimpleNamespace(
-        enable_realtime_quote=enable_realtime_quote,
-        enable_chip_distribution=True,
         agent_mode=False,
         agent_skills=[],
         fundamental_stage_timeout_seconds=1.5,
@@ -91,7 +89,6 @@ def _make_pipeline(enable_realtime_quote: bool, realtime_quote=None) -> StockAna
 @patch("src.config.get_config")
 def test_manager_does_not_warn_when_fallback_source_succeeds(mock_get_config, caplog):
     mock_get_config.return_value = SimpleNamespace(
-        enable_realtime_quote=True,
         realtime_source_priority="efinance,akshare_em",
     )
     manager = DataFetcherManager(
@@ -111,7 +108,7 @@ def test_manager_does_not_warn_when_fallback_source_succeeds(mock_get_config, ca
 
 
 def test_pipeline_warns_once_when_all_realtime_sources_fail(caplog):
-    pipeline = _make_pipeline(enable_realtime_quote=True, realtime_quote=None)
+    pipeline = _make_pipeline(realtime_quote=None)
 
     with caplog.at_level(logging.INFO):
         result = pipeline.analyze_stock("600519", ReportType.SIMPLE, "q1")
@@ -131,10 +128,7 @@ def test_pipeline_warns_once_when_all_realtime_sources_fail(caplog):
 def test_event_monitor_keeps_manager_failure_summary_for_direct_quote_call(mock_get_config, caplog):
     from src.agent.events import EventMonitor, PriceAlert
 
-    mock_get_config.return_value = SimpleNamespace(
-        enable_realtime_quote=True,
-        realtime_source_priority="efinance",
-    )
+    mock_get_config.return_value = SimpleNamespace(realtime_source_priority="efinance")
     manager = DataFetcherManager(
         fetchers=[
             _DummyFetcher("EfinanceFetcher", 0, error=RuntimeError("efinance timeout")),
@@ -155,18 +149,18 @@ def test_event_monitor_keeps_manager_failure_summary_for_direct_quote_call(mock_
     assert "[实时行情] 600519 所有数据源均失败: [efinance] 失败: efinance timeout" in caplog.text
 
 
-def test_pipeline_logs_disabled_realtime_once_without_fetching_quote(caplog):
-    pipeline = _make_pipeline(enable_realtime_quote=False, realtime_quote=_make_quote())
+def test_pipeline_uses_realtime_quote_when_available(caplog):
+    pipeline = _make_pipeline(realtime_quote=_make_quote())
 
     with caplog.at_level(logging.INFO):
         result = pipeline.analyze_stock("600519", ReportType.SIMPLE, "q1")
 
     assert result is None
     pipeline.fetcher_manager.get_stock_name.assert_called_once_with("600519", allow_realtime=False)
-    pipeline.fetcher_manager.get_realtime_quote.assert_not_called()
+    pipeline.fetcher_manager.get_realtime_quote.assert_called_once_with("600519", log_final_failure=False)
     downgrade_logs = [
         record.message
         for record in caplog.records
         if "历史收盘价继续分析" in record.message
     ]
-    assert downgrade_logs == ["贵州茅台(600519) 实时行情已禁用，使用历史收盘价继续分析"]
+    assert downgrade_logs == []

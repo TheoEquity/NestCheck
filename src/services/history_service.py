@@ -15,7 +15,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 
-from src.config import get_config, resolve_news_window_days
+from src.config import get_config
 from src.report_language import (
     get_bias_status_emoji,
     get_localized_stock_name,
@@ -34,7 +34,7 @@ from src.services.run_diagnostics import build_run_diagnostic_summary
 from src.utils.data_processing import normalize_model_used, parse_json_field
 
 if TYPE_CHECKING:
-    from src.analyzer import AnalysisResult
+    from src.core.pipeline import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -293,20 +293,6 @@ class HistoryService:
             display_points[field] = str(db_value) if db_value is not None else None
         return display_points
 
-    @staticmethod
-    def _extract_market_review_content(record, raw_result: Any) -> Optional[str]:
-        """Return persisted market review content from raw_result or news_content."""
-        if isinstance(raw_result, dict):
-            for field in ("raw_response", "market_review_report"):
-                content = raw_result.get(field)
-                if isinstance(content, str) and content.strip():
-                    return content
-
-        news_content = getattr(record, "news_content", None)
-        if isinstance(news_content, str) and news_content.strip():
-            return news_content
-        return None
-
     def _record_to_detail_dict(self, record) -> Dict[str, Any]:
         """
         Convert an AnalysisHistory ORM record to a detail response dict.
@@ -324,10 +310,6 @@ class HistoryService:
             except json.JSONDecodeError:
                 context_snapshot = record.context_snapshot
 
-        market_review_content = None
-        if getattr(record, "report_type", None) == "market_review":
-            market_review_content = self._extract_market_review_content(record, raw_result)
-
         return {
             "id": record.id,
             "query_id": record.query_id,
@@ -336,7 +318,7 @@ class HistoryService:
             "report_type": record.report_type,
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "model_used": model_used,
-            "analysis_summary": market_review_content or record.analysis_summary,
+            "analysis_summary": record.analysis_summary,
             "operation_advice": record.operation_advice,
             "trend_prediction": record.trend_prediction,
             "sentiment_score": record.sentiment_score,
@@ -345,7 +327,7 @@ class HistoryService:
             "secondary_buy": sniper_points.get("secondary_buy"),
             "stop_loss": sniper_points.get("stop_loss"),
             "take_profit": sniper_points.get("take_profit"),
-            "news_content": market_review_content or record.news_content,
+            "news_content": record.news_content,
             "raw_result": raw_result,
             "context_snapshot": context_snapshot,
         }
@@ -455,11 +437,7 @@ class HistoryService:
         ]
 
         # 历史兜底链路也做发布时间硬过滤，避免旧库脏数据重新冒出。
-        cfg = get_config()
-        window_days = resolve_news_window_days(
-            news_max_age_days=getattr(cfg, "news_max_age_days", 3),
-            news_strategy_profile=getattr(cfg, "news_strategy_profile", "short"),
-        )
+        window_days = 3
         # Anchor to analysis date instead of "today" to preserve historical context.
         anchor_date = analysis.created_at.date()
         latest_allowed = anchor_date + timedelta(days=1)
@@ -531,16 +509,6 @@ class HistoryService:
                 record_id=record_id
             )
 
-        if getattr(record, "report_type", None) == "market_review":
-            markdown_report = self._extract_market_review_content(record, raw_result)
-            if markdown_report:
-                return markdown_report
-            logger.error(f"get_markdown_report: market review report is empty for {record_id}")
-            raise MarkdownReportGenerationError(
-                f"market review report is empty for record {record_id}",
-                record_id=record_id,
-            )
-
         try:
             result = self._rebuild_analysis_result(raw_result, record)
         except Exception as e:
@@ -583,7 +551,7 @@ class HistoryService:
             AnalysisResult object or None
         """
         try:
-            from src.analyzer import AnalysisResult
+            from src.core.pipeline import AnalysisResult
             # Extract dashboard data if available
             dashboard = raw_result.get("dashboard", {})
 

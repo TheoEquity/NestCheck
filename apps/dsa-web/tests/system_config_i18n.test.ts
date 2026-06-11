@@ -2,13 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { getFieldDescriptionZh, getFieldOptionLabelZh, getFieldTitleZh } from '../src/utils/systemConfigI18n';
 
 const requiredLocalizedKeys = [
-  'TICKFLOW_API_KEY',
-  'ENABLE_REALTIME_QUOTE',
-  'ENABLE_CHIP_DISTRIBUTION',
-  'PYTDX_HOST',
-  'PYTDX_PORT',
-  'PYTDX_SERVERS',
-  'BIAS_THRESHOLD',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_CHAT_ID',
   'TELEGRAM_MESSAGE_THREAD_ID',

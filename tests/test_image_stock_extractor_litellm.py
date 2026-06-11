@@ -50,7 +50,6 @@ def _cfg(**kwargs) -> Config:
         tushare_token=None,
         llm_model_list=[],
         llm_channels=[],
-        litellm_config_path=None,
         litellm_model="",
         litellm_fallback_models=[],
         vision_model="",

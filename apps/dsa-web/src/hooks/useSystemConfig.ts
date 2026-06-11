@@ -25,10 +25,8 @@ type SaveResult = {
 };
 
 const CATEGORY_DISPLAY_ORDER: Record<string, number> = {
-  base: 10,
   ai_model: 20,
   data_source: 30,
-  notification: 40,
   system: 50,
   agent: 55,
   backtest: 60,

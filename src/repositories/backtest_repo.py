@@ -17,8 +17,6 @@ from src.storage import BacktestResult, BacktestSummary, DatabaseManager, Analys
 
 logger = logging.getLogger(__name__)
 
-MARKET_REVIEW_REPORT_TYPE = "market_review"
-
 
 class BacktestRepository:
     """DB access layer for backtesting."""
@@ -46,7 +44,7 @@ class BacktestRepository:
             conditions.append(
                 or_(
                     AnalysisHistory.report_type.is_(None),
-                    AnalysisHistory.report_type != MARKET_REVIEW_REPORT_TYPE,
+                    AnalysisHistory.report_type != "market_review",
                 )
             )
 

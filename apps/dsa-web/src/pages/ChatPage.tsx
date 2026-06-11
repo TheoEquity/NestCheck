@@ -71,11 +71,9 @@ const BOND_QUICK_QUESTIONS: QuickQuestion[] = [
 
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
-const MARKET_DEEP_PROFILE_ID = 'market_review';
 const STOCK_SPECIALIST_PROFILE_ID = 'stock_specialist';
 const STOCK_SPECIALIST_PROMPT = '请对当前个股进行专家分析，结合已选策略技能，覆盖行情位置、技术结构、情报风险、策略条件和操作建议。';
 const FUND_DEEP_ANALYSIS_PROMPT = '请对当前基金进行深度分析，覆盖基金档案、基金经理、投资风格、持仓结构、行业配置、业绩表现、回撤风险、持有体验、费用和适合人群，并给出是否适合继续持有或新买入的建议。';
-const MARKET_DEEP_ANALYSIS_PROMPT = '请对当前 A 股大盘进行深度分析，覆盖宽基指数强弱、市场趋势、热点板块持续性、风险雷达、资金偏好、权益仓位参考和下一步观察清单。';
 
 const MARKET_OPTIONS = [
   { value: 'cn', label: 'A股' },
@@ -559,10 +557,6 @@ const ChatPage: React.FC = () => {
     void handleSend(FUND_DEEP_ANALYSIS_PROMPT, [], FUND_CHAT_PROFILE_ID);
   }, [handleSend]);
 
-  const handleMarketDeepAnalysis = useCallback(() => {
-    void handleSend(MARKET_DEEP_ANALYSIS_PROMPT, [], MARKET_DEEP_PROFILE_ID);
-  }, [handleSend]);
-
   const toggleThinking = (msgId: string) => {
     setExpandedThinking((prev) => {
       const next = new Set(prev);
@@ -960,16 +954,6 @@ const ChatPage: React.FC = () => {
                   className="ml-auto h-8 whitespace-nowrap"
                 >
                   基金深度分析
-                </Button>
-              ) : activeTopic?.assetType === 'market' ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleMarketDeepAnalysis}
-                  disabled={loading}
-                  className="ml-auto h-8 whitespace-nowrap"
-                >
-                  大盘深度分析
                 </Button>
               ) : null}
             <label

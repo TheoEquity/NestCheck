@@ -13,7 +13,7 @@ from src.core.pipeline import StockAnalysisPipeline
 
 def _make_pipeline():
     p = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
-    p.config = SimpleNamespace(enable_realtime_technical_indicators=True)
+    p.config = SimpleNamespace()
     return p
 
 

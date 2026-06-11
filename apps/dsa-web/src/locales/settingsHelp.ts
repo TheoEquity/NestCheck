@@ -18,7 +18,7 @@ const settingsHelpZhCN: SettingsHelpMap = {
     summary: '指定普通分析流程默认使用的 LLM 模型。',
     usage: '推荐使用 provider/model 格式，例如 deepseek/deepseek-v4-flash、gemini/gemini-3.1-pro-preview 或 ollama/qwen3:8b。',
     valueNotes: [
-      '系统配置优先级为 LITELLM_CONFIG > LLM_CHANNELS > legacy provider keys。',
+      '系统配置优先级为 LLM_CHANNELS > legacy provider keys。',
       '如果留空，系统会尝试根据已配置的 API Key 或渠道声明自动推断。',
       'Agent 可通过 AGENT_LITELLM_MODEL 单独指定模型；留空时继承主模型。',
     ],
@@ -56,7 +56,7 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '该字段只影响 Agent 链路，不会改变普通个股分析的主模型。',
     ],
     impact: ['影响 Agent 问答、策略选择和相关工具调用的模型选择。'],
-    notes: ['请确认该模型存在于已启用渠道、YAML 路由或 legacy provider key 可达范围内。'],
+    notes: ['请确认该模型存在于已启用渠道或 legacy provider key 可达范围内。'],
   },
   'settings.ai_model.LITELLM_FALLBACK_MODELS': {
     title: '备用模型',
@@ -68,17 +68,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
     ],
     impact: ['提升 LLM 调用失败时的可用性，但可能增加跨 provider 成本和响应差异。'],
     notes: ['不要把主模型重复加入备用模型列表。'],
-  },
-  'settings.ai_model.LITELLM_CONFIG': {
-    title: '高级模型路由 YAML',
-    summary: '指定 LiteLLM 原生 YAML 路由文件，适合复杂路由、限流和专家配置。',
-    usage: '填写项目可访问的 YAML 文件路径，例如 ./litellm_config.yaml。',
-    valueNotes: [
-      '可解析且包含 model_list 时，优先级高于 LLM_CHANNELS 和 legacy provider keys。',
-      'Web 渠道编辑器不会修改 YAML 文件本身。',
-    ],
-    impact: ['影响模型选择、路由、fallback 和可用模型声明。'],
-    notes: ['如果 YAML 配置失效，系统会回退到渠道或 legacy 配置路径。'],
   },
   'settings.ai_model.LLM_TEMPERATURE': {
     title: 'Temperature',
@@ -102,17 +91,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响对应 provider 的模型调用、连接测试和可用模型发现。'],
     notes: ['不要在 issue、日志或截图里暴露真实 Key。'],
   },
-  'settings.ai_model.anspire_llm': {
-    title: 'Anspire LLM 网关',
-    summary: '使用 Anspire API Key 作为 OpenAI-compatible 模型网关的兼容入口。',
-    usage: 'ANSPIRE_LLM_ENABLED 控制是否启用该兼容路径；ANSPIRE_LLM_BASE_URL 指定网关地址；ANSPIRE_LLM_MODEL 指定未显式选择主模型时的默认模型。',
-    valueNotes: [
-      '该路径主要用于兼容未配置 LLM_CHANNELS 或 LITELLM_MODEL 的简化场景。',
-      '如果已配置 LITELLM_CONFIG、LLM_CHANNELS 或明确的 LITELLM_MODEL，运行时会按既有优先级选择模型来源。',
-    ],
-    impact: ['影响 Anspire API Key 参与 LLM 调用时的默认模型和网关地址。'],
-    notes: ['不要把 Base URL 改成其他 provider 的地址后继续复用 Anspire Key。'],
-  },
   'settings.ai_model.legacy_provider_params': {
     title: 'Legacy Provider 参数',
     summary: '为旧版 provider 专用配置路径设置模型名、温度或 token 上限。',
@@ -121,7 +99,7 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '启用 LLM Channels 后，相关 legacy 字段通常会从通用表单隐藏。',
       '字段只影响对应 provider 的 legacy 路径，不会自动迁移到渠道配置。',
     ],
-    impact: ['影响未使用渠道/YAML 路由时的 legacy provider 模型选择和采样参数。'],
+    impact: ['影响未使用渠道时的 legacy provider 模型选择和采样参数。'],
     notes: ['如果同时维护 legacy 字段和 Channels，请以设置页实际显示的运行时模型来源为准。'],
   },
   'settings.ai_model.OPENAI_BASE_URL': {
@@ -143,31 +121,12 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响部分 A 股基础数据、股票列表和相关增强数据获取。'],
     notes: ['不要把 token 提交到仓库或公开日志。'],
   },
-  'settings.data_source.TICKFLOW_API_KEY': {
-    title: 'TickFlow API Key',
-    summary: '用于增强大盘复盘中的指数、市场统计等数据。',
-    usage: '在 TickFlow 获取 API Key 后填入；未配置时系统会继续使用其他可用数据源和降级路径。',
-    valueNotes: ['该 Key 是可选增强项，不是运行主分析流程的必填项。'],
-    impact: ['影响大盘复盘和市场统计增强数据的覆盖度。'],
-    notes: ['不要在 issue、日志或截图中暴露真实 Key。'],
-  },
   'settings.data_source.REALTIME_SOURCE_PRIORITY': {
     title: '实时行情源优先级',
     summary: '配置多个实时行情源的尝试顺序。',
     usage: '优先级使用英文逗号分隔；系统会按顺序尝试可用数据源。',
     valueNotes: ['前面的数据源优先使用，失败后再降级到后续数据源。'],
     impact: ['影响现价、盘中分析和依赖实时价格的报告字段。'],
-    notes: ['单一数据源失败应降级到后续数据源，不应拖垮主流程。'],
-  },
-  'settings.data_source.realtime_quotes': {
-    title: '实时行情配置',
-    summary: '控制实时行情和盘中技术指标是否启用。',
-    usage: '开关字段使用 true/false；行情源顺序由 REALTIME_SOURCE_PRIORITY 单独配置。',
-    valueNotes: [
-      '关闭实时行情后，分析会更依赖历史收盘价。',
-      '实时技术指标会把盘中价格纳入均线和趋势判断。',
-    ],
-    impact: ['影响现价、技术指标、盘中分析和部分报告字段。'],
     notes: ['单一数据源失败应降级到后续数据源，不应拖垮主流程。'],
   },
   'settings.data_source.search_api_keys': {
@@ -177,46 +136,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
     valueNotes: ['搜索结果用于补充新闻、公告和市场信息上下文。'],
     impact: ['影响新闻检索覆盖度、时效性和 Agent/报告中的外部信息。'],
     notes: ['搜索服务可能有额度、限流和地区可用性差异。'],
-  },
-  'settings.data_source.SEARXNG_BASE_URLS': {
-    title: 'SearXNG 实例地址',
-    summary: '配置自建或可信 SearXNG 搜索实例。',
-    usage: '多个实例使用英文逗号分隔；自建实例需要启用 JSON 输出格式。',
-    valueNotes: ['禁用公开实例自动发现后，只会使用这里配置的实例。'],
-    impact: ['影响无商业搜索 Key 时的新闻和网页搜索兜底能力。'],
-    notes: ['公共实例稳定性不可控，生产环境建议使用自建或可信实例。'],
-  },
-  'settings.data_source.ENABLE_CHIP_DISTRIBUTION': {
-    title: '筹码分布分析',
-    summary: '控制是否启用筹码分布相关分析。',
-    usage: '云部署或数据源不稳定时可设为 false。',
-    valueNotes: ['关闭后会减少相关数据请求和失败噪音。'],
-    impact: ['影响报告中的筹码分布、成本区间等相关判断。'],
-    notes: ['该能力依赖外部数据源稳定性。'],
-  },
-  'settings.data_source.BIAS_THRESHOLD': {
-    title: '乖离率阈值',
-    summary: '设置股价偏离 MA5 的风险提示阈值。',
-    usage: '填写百分比数值；当价格偏离 MA5 超过阈值时，报告会提示避免追高或注意回归风险。',
-    valueNotes: ['强趋势股票可能按运行时规则适当放宽阈值。'],
-    impact: ['影响技术分析中追高风险、均线偏离和操作建议的提示强度。'],
-    notes: ['阈值过低会增加风险提示噪声，过高可能弱化追高提醒。'],
-  },
-  'settings.data_source.pytdx': {
-    title: 'Pytdx 通达信服务器',
-    summary: '配置通达信行情服务器地址，覆盖内置默认服务器。',
-    usage: '可分别填写 PYTDX_HOST/PYTDX_PORT，也可使用 PYTDX_SERVERS 填写多个 ip:port；PYTDX_SERVERS 优先级更高。',
-    valueNotes: ['多个服务器使用英文逗号分隔，系统会按既有数据源逻辑尝试连接。'],
-    impact: ['影响使用 Pytdx 数据源时的行情连接目标和可用性。'],
-    notes: ['服务器不可达时应依赖数据源 fallback，不建议只配置单个不稳定地址。'],
-  },
-  'settings.data_source.news_window': {
-    title: '新闻时间窗口',
-    summary: '控制纳入分析上下文的新闻时效范围。',
-    usage: 'NEWS_MAX_AGE_DAYS 设最大天数，NEWS_STRATEGY_PROFILE 设窗口策略。',
-    valueNotes: ['实际窗口会受 profile 与最大天数共同约束。'],
-    impact: ['影响新闻上下文数量、时效性和报告长度。'],
-    notes: ['窗口过长可能引入陈旧信息，过短可能遗漏慢发酵事件。'],
   },
   'settings.system.WEBUI_HOST': {
     title: 'WebUI 监听地址',
@@ -660,17 +579,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响分析总耗时。'],
     notes: ['总耗时 ≈ 股票数 × 单股耗时 + (股票数-1) × ANALYSIS_DELAY。'],
   },
-  'settings.system.market_review': {
-    title: '大盘分析',
-    summary: '控制大盘分析功能的开关、覆盖市场和配色方案。',
-    usage: 'MARKET_REVIEW_ENABLED 开启大盘分析；MARKET_REVIEW_REGION 选择市场（cn/hk/us/both）；MARKET_REVIEW_COLOR_SCHEME 选择配色。',
-    valueNotes: [
-      'cn 覆盖 A 股，hk 覆盖港股，us 覆盖美股，both 覆盖全部。',
-      '配色方案影响大盘报告中指数涨跌的颜色显示：green_up 为绿涨红跌，red_up 为红涨绿跌。',
-    ],
-    impact: ['影响分析报告中大盘概览部分的内容和视觉呈现。'],
-    notes: ['大盘分析依赖对应市场的指数数据源可用性。'],
-  },
 };
 
 const settingsHelpEnUS: SettingsHelpMap = {
@@ -679,7 +587,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
     summary: 'Selects the default LLM model for regular analysis flows.',
     usage: 'Use provider/model format, such as deepseek/deepseek-v4-flash, gemini/gemini-3.1-pro-preview, or ollama/qwen3:8b.',
     valueNotes: [
-      'Runtime priority is LITELLM_CONFIG > LLM_CHANNELS > legacy provider keys.',
+      'Runtime priority is LLM_CHANNELS > legacy provider keys.',
       'When empty, the system tries to infer a model from available API keys or channels.',
       'Agent can use AGENT_LITELLM_MODEL; when empty, it inherits the primary model.',
     ],
@@ -710,7 +618,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
     usage: 'Use provider/model format. When empty, Agent inherits the regular primary model.',
     valueNotes: ['Useful when Agent needs stronger reasoning or longer context.', 'Only affects Agent flows.'],
     impact: ['Affects Agent chat, strategy selection, and Agent tool calls.'],
-    notes: ['Make sure the model is reachable through enabled channels, YAML routing, or legacy provider keys.'],
+    notes: ['Make sure the model is reachable through enabled channels or legacy provider keys.'],
   },
   'settings.ai_model.LITELLM_FALLBACK_MODELS': {
     title: 'Fallback Models',
@@ -719,14 +627,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['Fallbacks run only after primary model failures.', 'The channel editor removes unreachable managed-provider references on save.'],
     impact: ['Improves LLM availability, but can change cost, latency, and provider behavior.'],
     notes: ['Do not duplicate the primary model in the fallback list.'],
-  },
-  'settings.ai_model.LITELLM_CONFIG': {
-    title: 'Advanced Routing YAML',
-    summary: 'Points to a native LiteLLM YAML routing file for expert routing setups.',
-    usage: 'Use a path reachable by the running process, such as ./litellm_config.yaml.',
-    valueNotes: ['A valid model_list has higher priority than channels and legacy keys.', 'The Web channel editor does not edit the YAML file.'],
-    impact: ['Affects model routing, fallbacks, and available model declarations.'],
-    notes: ['If the YAML cannot be parsed, the system falls back to channels or legacy configuration.'],
   },
   'settings.ai_model.LLM_TEMPERATURE': {
     title: 'Temperature',
@@ -744,17 +644,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects model calls, connection tests, and model discovery for the provider.'],
     notes: ['Do not expose real keys in issues, logs, or screenshots.'],
   },
-  'settings.ai_model.anspire_llm': {
-    title: 'Anspire LLM Gateway',
-    summary: 'Uses Anspire API keys as a compatible OpenAI-style LLM gateway.',
-    usage: 'ANSPIRE_LLM_ENABLED controls this compatibility path; ANSPIRE_LLM_BASE_URL sets the gateway endpoint; ANSPIRE_LLM_MODEL sets the default model when no primary model is explicitly selected.',
-    valueNotes: [
-      'This path is mainly for simplified setups without LLM_CHANNELS or LITELLM_MODEL.',
-      'When LITELLM_CONFIG, LLM_CHANNELS, or an explicit LITELLM_MODEL is configured, runtime selection follows the existing priority order.',
-    ],
-    impact: ['Affects the default gateway and model used when Anspire keys participate in LLM calls.'],
-    notes: ['Do not point the Base URL at another provider while reusing an Anspire key.'],
-  },
   'settings.ai_model.legacy_provider_params': {
     title: 'Legacy Provider Parameters',
     summary: 'Configures model names, temperature, or token limits for legacy provider-specific paths.',
@@ -763,7 +652,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
       'When LLM Channels are active, related legacy fields are often hidden from the generic form.',
       'These fields affect only the matching legacy provider path and are not automatically migrated into channels.',
     ],
-    impact: ['Affects legacy provider model selection and sampling parameters when channel/YAML routing is not used.'],
+    impact: ['Affects legacy provider model selection and sampling parameters when channel routing is not used.'],
     notes: ['If both legacy fields and Channels exist, trust the runtime source shown by the settings page.'],
   },
   'settings.ai_model.OPENAI_BASE_URL': {
@@ -782,28 +671,12 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects some A-share base data, stock lists, and enrichment data.'],
     notes: ['Do not commit the token or print it in public logs.'],
   },
-  'settings.data_source.TICKFLOW_API_KEY': {
-    title: 'TickFlow API Key',
-    summary: 'Enhances market review with index and market-statistics data.',
-    usage: 'Paste a TickFlow API key here. When empty, the system continues with other data sources and fallback paths.',
-    valueNotes: ['This key is an optional enhancement, not required for the main analysis flow.'],
-    impact: ['Affects market-review and market-statistics coverage.'],
-    notes: ['Do not expose real keys in issues, logs, or screenshots.'],
-  },
   'settings.data_source.REALTIME_SOURCE_PRIORITY': {
     title: 'Realtime Source Priority',
     summary: 'Configures the provider order for realtime quotes.',
     usage: 'Use comma-separated provider names; the system tries them in order.',
     valueNotes: ['Earlier providers are preferred; failures fall back to later providers.'],
     impact: ['Affects current price, intraday analysis, and report fields that depend on realtime prices.'],
-    notes: ['A single provider failure should fall back to the next source.'],
-  },
-  'settings.data_source.realtime_quotes': {
-    title: 'Realtime Quotes',
-    summary: 'Controls whether realtime quotes and intraday technical indicators are enabled.',
-    usage: 'Switch fields use true/false. Provider order is configured separately by REALTIME_SOURCE_PRIORITY.',
-    valueNotes: ['Disabling realtime quotes falls back toward historical close prices.', 'Realtime technical indicators use intraday prices.'],
-    impact: ['Affects current price, technical indicators, intraday analysis, and report fields.'],
     notes: ['A single provider failure should fall back to the next source.'],
   },
   'settings.data_source.search_api_keys': {
@@ -813,46 +686,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['Search results enrich news, announcements, and market context.'],
     impact: ['Affects news coverage and external information in reports or Agent flows.'],
     notes: ['Search services can differ in quota, rate limits, and regional availability.'],
-  },
-  'settings.data_source.SEARXNG_BASE_URLS': {
-    title: 'SearXNG URLs',
-    summary: 'Configures self-hosted or trusted SearXNG search instances.',
-    usage: 'Use comma-separated URLs. Self-hosted instances should enable JSON output.',
-    valueNotes: ['When public discovery is disabled, only these instances are used.'],
-    impact: ['Affects fallback web search when commercial search keys are absent.'],
-    notes: ['For production, prefer self-hosted or trusted instances over public ones.'],
-  },
-  'settings.data_source.ENABLE_CHIP_DISTRIBUTION': {
-    title: 'Chip Distribution',
-    summary: 'Toggles chip distribution analysis.',
-    usage: 'Set false when cloud deployments or data sources are unstable.',
-    valueNotes: ['Disabling reduces related data calls and failure noise.'],
-    impact: ['Affects chip distribution and cost-area analysis in reports.'],
-    notes: ['This feature depends on external data-source stability.'],
-  },
-  'settings.data_source.BIAS_THRESHOLD': {
-    title: 'BIAS Threshold',
-    summary: 'Sets the risk-warning threshold for price deviation from MA5.',
-    usage: 'Enter a percentage. When price deviation from MA5 exceeds the threshold, reports can warn against chasing or highlight mean-reversion risk.',
-    valueNotes: ['Strong-trend stocks may widen the threshold according to runtime rules.'],
-    impact: ['Affects technical-analysis warnings about chasing, MA deviation, and trading advice.'],
-    notes: ['Too low can add noisy warnings; too high can weaken chase-risk alerts.'],
-  },
-  'settings.data_source.pytdx': {
-    title: 'Pytdx Servers',
-    summary: 'Configures Tongdaxin quote servers and overrides built-in defaults.',
-    usage: 'Use PYTDX_HOST/PYTDX_PORT for a single server, or PYTDX_SERVERS for multiple ip:port entries. PYTDX_SERVERS takes priority.',
-    valueNotes: ['Separate multiple servers with English commas; runtime data-source logic tries them as configured.'],
-    impact: ['Affects quote connectivity and availability when the Pytdx data source is used.'],
-    notes: ['If a server is unreachable, rely on data-source fallback and avoid a single unstable endpoint.'],
-  },
-  'settings.data_source.news_window': {
-    title: 'News Window',
-    summary: 'Controls how old news can be before it is excluded from analysis context.',
-    usage: 'NEWS_MAX_AGE_DAYS sets the cap; NEWS_STRATEGY_PROFILE selects the profile.',
-    valueNotes: ['The effective window is constrained by both values.'],
-    impact: ['Affects news context size, freshness, and report length.'],
-    notes: ['Too wide can include stale news; too narrow can miss slow-moving events.'],
   },
   'settings.system.WEBUI_HOST': {
     title: 'WebUI Host',
@@ -1293,17 +1126,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['Useful when APIs have strict rate limits.'],
     impact: ['Affects total analysis time.'],
     notes: ['Total time ≈ stock count × per-stock time + (count-1) × ANALYSIS_DELAY.'],
-  },
-  'settings.system.market_review': {
-    title: 'Market Review',
-    summary: 'Controls the market review feature: on/off, coverage region, and color scheme.',
-    usage: 'MARKET_REVIEW_ENABLED toggles market review; MARKET_REVIEW_REGION selects markets (cn/hk/us/both); MARKET_REVIEW_COLOR_SCHEME selects colors.',
-    valueNotes: [
-      'cn covers A-shares, hk covers Hong Kong, us covers US stocks, both covers all.',
-      'Color scheme affects how index changes are displayed: green_up = green for gains/red for losses; red_up = red for gains/green for losses.',
-    ],
-    impact: ['Affects the market overview section in analysis reports.'],
-    notes: ['Market review depends on the availability of index data sources for the selected markets.'],
   },
 };
 

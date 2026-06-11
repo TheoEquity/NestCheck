@@ -1107,20 +1107,19 @@ class DataFetcherManager:
         baostock_priority = resolve_priority("baostock", "BAOSTOCK_PRIORITY", 3)
         yfinance_priority = resolve_priority("yfinance", "YFINANCE_PRIORITY", 4)
 
-        efinance = EfinanceFetcher()
-        efinance.priority = efinance_priority
-        akshare = AkshareFetcher()
-        akshare.priority = akshare_priority
-        pytdx = PytdxFetcher()
-        pytdx.priority = pytdx_priority
-        baostock = BaostockFetcher()
-        baostock.priority = baostock_priority
-        yfinance = YfinanceFetcher()
-        yfinance.priority = yfinance_priority
+        efinance = EfinanceFetcher() if getattr(config, "efinance", True) else None
+        akshare = AkshareFetcher() if getattr(config, "akshare", True) else None
+        pytdx = PytdxFetcher() if getattr(config, "pytdx", True) else None
+        baostock = BaostockFetcher() if getattr(config, "baostock", True) else None
+        yfinance = YfinanceFetcher() if getattr(config, "yfinance", True) else None
+        if yfinance:
+            yfinance.priority = yfinance_priority
+            
         optional_fetchers: List[BaseFetcher] = []
 
         tushare_token = (getattr(config, "tushare_token", None) or "").strip()
-        if tushare_token:
+        tushare_enabled = getattr(config, "tushare", False)
+        if tushare_enabled and tushare_token:
             tushare = TushareFetcher()
             tushare.priority = resolve_priority("tushare", "TUSHARE_PRIORITY", tushare.priority)
             optional_fetchers.append(tushare)
@@ -1131,12 +1130,14 @@ class DataFetcherManager:
         self._ensure_concurrency_guards()
         with self._fetchers_lock:
             self._fetchers = [
-                efinance,
-                akshare,
-                pytdx,
-                baostock,
-                yfinance,
-                *optional_fetchers,
+                f for f in [
+                    efinance,
+                    akshare,
+                    pytdx,
+                    baostock,
+                    yfinance,
+                    *optional_fetchers,
+                ] if f is not None
             ]
 
             # 按优先级排序
@@ -1401,11 +1402,6 @@ class DataFetcherManager:
             logger.debug("[预取] PREFETCH_REALTIME_QUOTES=false，跳过批量预取")
             return 0
 
-        # 如果实时行情被禁用，跳过预取
-        if not config.enable_realtime_quote:
-            logger.debug("[预取] 实时行情功能已禁用，跳过预取")
-            return 0
-        
         # 检查优先级中是否包含全量拉取数据源
         # 注意：新增全量接口（如 tushare_realtime）时需同步更新此列表
         # 全量接口特征：一次 API 调用拉取全市场 5000+ 股票数据
@@ -1480,11 +1476,6 @@ class DataFetcherManager:
         from src.config import get_config
 
         config = get_config()
-
-        # 如果实时行情功能被禁用，直接返回 None
-        if not config.enable_realtime_quote:
-            logger.debug(f"[实时行情] 功能已禁用，跳过 {stock_code}")
-            return None
 
         # ----------------------------------------------------------
         # 美股 / 港股专用路由：美股、指数、外汇和债券走 YFinance，港股走 AkShare。
@@ -1769,11 +1760,6 @@ class DataFetcherManager:
         from src.config import get_config
 
         config = get_config()
-
-        # 如果筹码分布功能被禁用，直接返回 None
-        if not config.enable_chip_distribution:
-            logger.debug(f"[筹码分布] 功能已禁用，跳过 {stock_code}")
-            return None
 
         circuit_breaker = get_chip_circuit_breaker()
 

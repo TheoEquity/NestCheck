@@ -170,10 +170,7 @@ class RunDiagnosticsP1TestCase(unittest.TestCase):
 
     def test_realtime_quote_provider_run_records_success(self) -> None:
         manager = DataFetcherManager(fetchers=[_EfinanceRealtimeFetcher()])
-        config = SimpleNamespace(
-            enable_realtime_quote=True,
-            realtime_source_priority="efinance",
-        )
+        config = SimpleNamespace(realtime_source_priority="efinance")
         token = activate_run_diagnostic_context(
             trace_id="trace-realtime",
             query_id="query-realtime",

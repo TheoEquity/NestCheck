@@ -137,51 +137,6 @@ def test_status_command_requires_primary_model_in_configured_router_models():
     assert "系统就绪" not in text
 
 
-def test_status_command_requires_primary_model_for_yaml_router_models():
-    config = Config(
-        stock_list=["600519"],
-        litellm_model="",
-        llm_models_source="litellm_config",
-        llm_model_list=[
-            {
-                "model_name": "yaml-primary",
-                "litellm_params": {
-                    "model": "openai/gpt-4o-mini",
-                    "api_key": "sk-test",
-                },
-            }
-        ],
-    )
-    command = StatusCommand()
-
-    status = command._collect_status(config)
-    text = command._format_status(status, "telegram")
-
-    assert status["ai_yaml"] is True
-    assert status["ai_available"] is False
-    assert "主模型: 未配置" in text
-    assert "AI 服务未配置" in text
-    assert "系统就绪" not in text
-
-
-def test_status_command_does_not_treat_invalid_yaml_path_as_active():
-    config = Config(
-        stock_list=["600519"],
-        litellm_config_path="missing.yaml",
-        llm_models_source="legacy_env",
-        llm_model_list=[],
-    )
-    command = StatusCommand()
-
-    status = command._collect_status(config)
-    text = command._format_status(status, "telegram")
-
-    assert status["ai_yaml"] is False
-    assert status["ai_available"] is False
-    assert "LiteLLM YAML: ❌" in text
-    assert "AI 服务未配置" in text
-
-
 def test_status_command_treats_direct_env_provider_model_as_ready():
     config = Config(
         stock_list=["600519"],
@@ -215,7 +170,6 @@ def test_status_command_supports_legacy_key_compatibility_without_explicit_litel
         "AIHUBMIX_KEY",
         "LITELLM_MODEL",
         "LLM_CHANNELS",
-        "LITELLM_CONFIG",
     ):
         monkeypatch.delenv(key, raising=False)
 

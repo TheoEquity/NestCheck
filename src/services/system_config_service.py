@@ -18,8 +18,6 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import requests
 
 from src.config import (
-    ANSPIRE_LLM_BASE_URL_DEFAULT,
-    ANSPIRE_LLM_MODEL_DEFAULT,
     SUPPORTED_LLM_CHANNEL_PROTOCOLS,
     Config,
     _get_litellm_provider,
@@ -28,11 +26,9 @@ from src.config import (
     channel_allows_empty_api_key,
     get_configured_llm_models,
     normalize_agent_litellm_model,
-    normalize_news_strategy_profile,
     normalize_llm_channel_model,
     parse_env_bool,
     parse_env_int,
-    resolve_news_window_days,
     resolve_llm_channel_protocol,
     setup_env,
 )
@@ -183,18 +179,19 @@ class SystemConfigService:
         if raw_value_exists:
             return raw_value
 
-        if field_schema.get("ui_control") == "switch":
-            default_value = field_schema.get("default_value")
-            if isinstance(default_value, str) and default_value:
-                return default_value
+        default_value = field_schema.get("default_value")
+        if isinstance(default_value, str) and default_value:
+            return default_value
+        if isinstance(default_value, bool):
+            return 'true' if default_value else 'false'
 
-        return raw_value
+        return ''
 
     def get_config(self, include_schema: bool = True, mask_token: str = "******") -> Dict[str, Any]:
         """Return current config values without server-side secret masking."""
         config_map = self._build_display_config_map(self._manager.read_config_map())
         registered_keys = set(get_registered_field_keys())
-        all_keys = set(config_map.keys()) | registered_keys
+        all_keys = registered_keys
 
         category_orders = {
             item["category"]: item["display_order"]
@@ -1213,27 +1210,6 @@ class SystemConfigService:
 
         current_map = self._manager.read_config_map()
 
-        if submitted_keys & {"NEWS_MAX_AGE_DAYS", "NEWS_STRATEGY_PROFILE"}:
-            raw_profile = current_map.get("NEWS_STRATEGY_PROFILE", "short")
-            profile = normalize_news_strategy_profile(raw_profile)
-            try:
-                max_age = max(1, int(current_map.get("NEWS_MAX_AGE_DAYS", "3") or "3"))
-            except (TypeError, ValueError):
-                max_age = 3
-            effective_days = resolve_news_window_days(
-                news_max_age_days=max_age,
-                news_strategy_profile=profile,
-            )
-            warnings.append(
-                (
-                    "新闻窗口已按策略计算："
-                    f"NEWS_STRATEGY_PROFILE={profile}, "
-                    f"NEWS_MAX_AGE_DAYS={max_age}, "
-                    f"effective_days={effective_days} "
-                    "(effective_days=min(profile_days, NEWS_MAX_AGE_DAYS))."
-                )
-            )
-
         if "MAX_WORKERS" in submitted_keys:
             try:
                 max_workers = max(1, int(current_map.get("MAX_WORKERS", "3") or "3"))
@@ -1254,17 +1230,7 @@ class SystemConfigService:
                     )
                 )
 
-        startup_only_run_keys = submitted_keys & {
-            "RUN_IMMEDIATELY",
-        }
-        if startup_only_run_keys:
-            warnings.append(
-                (
-                    f"{', '.join(sorted(startup_only_run_keys))} 已写入 .env。"
-                    "它属于启动期单次运行配置：当前已运行的 WebUI/API 进程不会因为本次保存立即触发分析；"
-                    "请重启当前进程后按新值生效。"
-                )
-            )
+        warnings = []
 
         startup_only_bind_keys = submitted_keys & {
             "WEBUI_HOST",
@@ -1501,21 +1467,6 @@ class SystemConfigService:
                     }
                 )
 
-        if validation.get("timezone") and value:
-            try:
-                validate_notification_timezone(value)
-            except ValueError as exc:
-                issues.append(
-                    {
-                        "key": key,
-                        "code": "invalid_timezone",
-                        "message": str(exc),
-                        "severity": "error",
-                        "expected": "valid IANA timezone or empty",
-                        "actual": value,
-                    }
-                )
-
         if "enum" in validation and value and value not in validation["enum"]:
             issues.append(
                 {
@@ -1572,38 +1523,6 @@ class SystemConfigService:
                         "actual": ", ".join(invalid_values[:3]),
                     }
                 )
-
-        if key == "NTFY_URL" and value.strip():
-            allowed_schemes = tuple(validation.get("allowed_schemes", ["http", "https"]))
-            if SystemConfigService._is_valid_url(value.strip(), allowed_schemes=allowed_schemes):
-                ntfy_server_url, ntfy_topic = resolve_ntfy_endpoint(value)
-                if not ntfy_server_url or not ntfy_topic:
-                    issues.append(
-                        {
-                            "key": key,
-                            "code": "invalid_ntfy_url",
-                            "message": "NTFY_URL must include a topic path, e.g. https://ntfy.sh/my-topic",
-                            "severity": "error",
-                            "expected": "ntfy publish endpoint with topic path",
-                            "actual": value,
-                        }
-                    )
-
-        if key == "GOTIFY_URL" and value.strip():
-            allowed_schemes = tuple(validation.get("allowed_schemes", ["http", "https"]))
-            if SystemConfigService._is_valid_url(value.strip(), allowed_schemes=allowed_schemes):
-                gotify_endpoint = resolve_gotify_message_endpoint(value)
-                if not gotify_endpoint:
-                    issues.append(
-                        {
-                            "key": key,
-                            "code": "invalid_gotify_url",
-                            "message": "GOTIFY_URL must be a Gotify server base URL and must not include /message",
-                            "severity": "error",
-                            "expected": "Gotify server base URL, e.g. https://gotify.example",
-                            "actual": value,
-                        }
-                    )
 
         return issues
 
@@ -1687,7 +1606,6 @@ class SystemConfigService:
     def _is_setup_relevant_env_key(key: str) -> bool:
         if key in {
             "DATABASE_PATH",
-            "LITELLM_CONFIG",
             "LITELLM_MODEL",
             "LITELLM_FALLBACK_MODELS",
             "AGENT_LITELLM_MODEL",
@@ -1697,6 +1615,13 @@ class SystemConfigService:
             "FEISHU_STREAM_ENABLED",
         }:
             return True
+        if key in {
+            "ENABLE_REALTIME_QUOTE",
+            "ENABLE_REALTIME_TECHNICAL_INDICATORS",
+            "ENABLE_CHIP_DISTRIBUTION",
+            "BIAS_THRESHOLD",
+        }:
+            return False
         prefixes = (
             "LLM_",
             "GEMINI_",
@@ -1706,17 +1631,9 @@ class SystemConfigService:
             "OLLAMA_",
             "FEISHU_",
             "TELEGRAM_",
-            "EMAIL_",
             "DISCORD_",
-            "SLACK_",
             "DINGTALK_",
             "WECHAT_",
-            "PUSHOVER_",
-            "NTFY_",
-            "GOTIFY_",
-            "PUSHPLUS_",
-            "SERVERCHAN",
-            "CUSTOM_WEBHOOK",
             "WECOM_",
             "ASTRBOT_",
         )
@@ -1741,19 +1658,6 @@ class SystemConfigService:
         return any((effective_map.get(key) or "").strip() for key in keys)
 
     @classmethod
-    def _anspire_legacy_llm_enabled(cls, effective_map: Dict[str, str]) -> bool:
-        if not parse_env_bool(effective_map.get("ANSPIRE_LLM_ENABLED"), default=True):
-            return False
-        for name in cls._split_csv(effective_map.get("LLM_CHANNELS") or ""):
-            if name.strip().lower() != "anspire":
-                continue
-            enabled_raw = effective_map.get("LLM_ANSPIRE_ENABLED")
-            if not (enabled_raw or "").strip():
-                enabled_raw = effective_map.get("ANSPIRE_LLM_ENABLED")
-            return parse_env_bool(enabled_raw, default=True)
-        return True
-
-    @classmethod
     def _provider_has_setup_credentials(cls, provider: str, effective_map: Dict[str, str]) -> bool:
         normalized = canonicalize_llm_channel_protocol(provider)
         if normalized == "ollama":
@@ -1766,11 +1670,6 @@ class SystemConfigService:
             return cls._has_any_config_value(effective_map, ("DEEPSEEK_API_KEYS", "DEEPSEEK_API_KEY"))
         if normalized == "openai":
             if cls._has_any_config_value(effective_map, ("OPENAI_API_KEYS", "OPENAI_API_KEY", "AIHUBMIX_KEY")):
-                return True
-            if (
-                cls._anspire_legacy_llm_enabled(effective_map)
-                and cls._has_any_config_value(effective_map, ("ANSPIRE_API_KEYS",))
-            ):
                 return True
             base_url = (effective_map.get("OPENAI_BASE_URL") or "").strip()
             return channel_allows_empty_api_key("openai", base_url)
@@ -1799,18 +1698,11 @@ class SystemConfigService:
                 continue
             prefix = f"LLM_{name.upper()}"
             enabled_raw = effective_map.get(f"{prefix}_ENABLED")
-            if name.lower() == "anspire" and not (enabled_raw or "").strip():
-                enabled_raw = effective_map.get("ANSPIRE_LLM_ENABLED")
             enabled = parse_env_bool(enabled_raw, default=True)
             if not enabled:
                 continue
 
             base_url = (effective_map.get(f"{prefix}_BASE_URL") or "").strip()
-            if name.lower() == "anspire" and not base_url:
-                base_url = (
-                    effective_map.get("ANSPIRE_LLM_BASE_URL")
-                    or ANSPIRE_LLM_BASE_URL_DEFAULT
-                ).strip()
             protocol = (effective_map.get(f"{prefix}_PROTOCOL") or "").strip()
             if name.lower() == "anspire" and not protocol:
                 protocol = "openai"
@@ -1821,13 +1713,6 @@ class SystemConfigService:
             if name.lower() == "anspire" and not api_key:
                 api_key = (effective_map.get("ANSPIRE_API_KEYS") or "").strip()
             raw_models = cls._split_csv(effective_map.get(f"{prefix}_MODELS") or "")
-            if name.lower() == "anspire" and not raw_models:
-                raw_models = [
-                    (
-                        effective_map.get("ANSPIRE_LLM_MODEL")
-                        or ANSPIRE_LLM_MODEL_DEFAULT
-                    ).strip()
-                ]
             resolved_protocol = resolve_llm_channel_protocol(
                 protocol,
                 base_url=base_url,
@@ -1859,16 +1744,6 @@ class SystemConfigService:
         if cls._has_any_config_value(effective_map, ("OPENAI_API_KEYS", "OPENAI_API_KEY", "AIHUBMIX_KEY")):
             model = (effective_map.get("OPENAI_MODEL") or "gpt-5.5").strip()
             return model if "/" in model else f"openai/{model}"
-        if (
-            cls._anspire_legacy_llm_enabled(effective_map)
-            and cls._has_any_config_value(effective_map, ("ANSPIRE_API_KEYS",))
-        ):
-            model = (
-                effective_map.get("ANSPIRE_LLM_MODEL")
-                or effective_map.get("OPENAI_MODEL")
-                or ANSPIRE_LLM_MODEL_DEFAULT
-            ).strip()
-            return model if "/" in model else f"openai/{model}"
         if (effective_map.get("OLLAMA_API_BASE") or "").strip():
             model = (effective_map.get("OLLAMA_MODEL") or "").strip()
             return model if model.startswith("ollama/") else (f"ollama/{model}" if model else "ollama/local")
@@ -1876,23 +1751,18 @@ class SystemConfigService:
 
     def _resolve_setup_primary_model(self, effective_map: Dict[str, str]) -> Tuple[str, str]:
         explicit_model = (effective_map.get("LITELLM_MODEL") or "").strip()
-        yaml_models = self._collect_yaml_models_from_map(effective_map)
         channel_models = self._collect_setup_channel_models(effective_map)
 
         if explicit_model:
             if _uses_direct_env_provider(explicit_model):
                 return explicit_model, "explicit"
             has_direct_source = self._has_setup_runtime_source_for_model(explicit_model, effective_map)
-            if yaml_models and explicit_model not in set(yaml_models):
-                return "", "主模型未出现在当前 LiteLLM YAML model_list 中"
             if channel_models and explicit_model not in set(channel_models):
                 return "", "主模型未出现在当前启用渠道模型列表中"
-            if yaml_models or channel_models or has_direct_source:
+            if channel_models or has_direct_source:
                 return explicit_model, "explicit"
             return "", "主模型缺少可用渠道或匹配的 API Key"
 
-        if yaml_models:
-            return yaml_models[0], "yaml"
         if channel_models:
             return channel_models[0], "channel"
 
@@ -1907,7 +1777,6 @@ class SystemConfigService:
         if model:
             source_label = {
                 "explicit": "显式主模型",
-                "yaml": "LiteLLM YAML",
                 "channel": "LLM 渠道",
                 "legacy": "legacy provider",
             }.get(source, source)
@@ -1926,7 +1795,7 @@ class SystemConfigService:
             True,
             "needs_action",
             source,
-            "请配置 LITELLM_MODEL、LLM_CHANNELS、LITELLM_CONFIG 或 legacy provider API Key。",
+            "请配置 LITELLM_MODEL、LLM_CHANNELS 或 legacy provider API Key。",
         )
 
     def _build_setup_agent_llm_check(
@@ -1956,8 +1825,7 @@ class SystemConfigService:
             )
 
         configured_models = set(
-            self._collect_yaml_models_from_map(effective_map)
-            or self._collect_setup_channel_models(effective_map)
+            self._collect_setup_channel_models(effective_map)
         )
         agent_model = normalize_agent_litellm_model(agent_model_raw, configured_models=configured_models)
         if _uses_direct_env_provider(agent_model):
@@ -2525,55 +2393,6 @@ class SystemConfigService:
                 }
             )
 
-        feishu_relevant_keys = {
-            "FEISHU_APP_ID",
-            "FEISHU_APP_SECRET",
-            "FEISHU_WEBHOOK_URL",
-            "FEISHU_WEBHOOK_SECRET",
-            "FEISHU_WEBHOOK_KEYWORD",
-            "FEISHU_STREAM_ENABLED",
-            "FEISHU_FOLDER_TOKEN",
-        }
-        has_feishu_app_id = bool((effective_map.get("FEISHU_APP_ID") or "").strip())
-        has_feishu_app_secret = bool((effective_map.get("FEISHU_APP_SECRET") or "").strip())
-        has_feishu_app_credentials = has_feishu_app_id or has_feishu_app_secret
-        has_feishu_webhook = bool((effective_map.get("FEISHU_WEBHOOK_URL") or "").strip())
-        has_feishu_folder_token = bool((effective_map.get("FEISHU_FOLDER_TOKEN") or "").strip())
-        has_feishu_full_cloud_doc_credentials = (
-            has_feishu_app_id
-            and has_feishu_app_secret
-            and has_feishu_folder_token
-        )
-        # Match runtime semantics: Config.from_env only enables stream mode
-        # when the value is exactly "true" (case-insensitive).
-        feishu_stream_enabled = (
-            (effective_map.get("FEISHU_STREAM_ENABLED") or "false")
-            .strip()
-            .lower()
-            == "true"
-        )
-        if (
-            has_feishu_app_credentials
-            and not has_feishu_full_cloud_doc_credentials
-            and not has_feishu_webhook
-            and not (feishu_stream_enabled and has_feishu_app_id and has_feishu_app_secret)
-            and (updated_keys & feishu_relevant_keys)
-        ):
-            issues.append(
-                {
-                    "key": "FEISHU_WEBHOOK_URL",
-                    "code": "feishu_mode_mismatch",
-                    "message": (
-                        "仅配置 FEISHU_APP_ID / FEISHU_APP_SECRET 不会开启飞书群 Webhook 推送；"
-                        "如需通知推送请填写 FEISHU_WEBHOOK_URL，若要使用应用机器人请同时开启 "
-                        "FEISHU_STREAM_ENABLED 并完成应用发布与权限配置。"
-                    ),
-                    "severity": "warning",
-                    "expected": "FEISHU_WEBHOOK_URL or FEISHU_STREAM_ENABLED=true",
-                    "actual": "app credentials only",
-                }
-            )
-
         issues.extend(
             SystemConfigService._validate_llm_channel_map(
                 effective_map=effective_map,
@@ -2582,30 +2401,12 @@ class SystemConfigService:
         )
         issues.extend(SystemConfigService._validate_llm_runtime_selection(effective_map=effective_map))
 
-        if parse_env_bool(effective_map.get("NOTIFICATION_DAILY_DIGEST_ENABLED"), default=False):
-            issues.append(
-                {
-                    "key": "NOTIFICATION_DAILY_DIGEST_ENABLED",
-                    "code": "reserved_notification_daily_digest",
-                    "message": (
-                        "NOTIFICATION_DAILY_DIGEST_ENABLED is reserved; "
-                        "the current P4 implementation does not send daily digests."
-                    ),
-                    "severity": "warning",
-                    "expected": "reserved flag only",
-                    "actual": effective_map.get("NOTIFICATION_DAILY_DIGEST_ENABLED", ""),
-                }
-            )
-
         return issues
 
     @staticmethod
     def _validate_llm_channel_map(effective_map: Dict[str, str], updated_keys: Set[str]) -> List[Dict[str, Any]]:
         """Validate channel-style LLM configuration stored in `.env`."""
         issues: List[Dict[str, Any]] = []
-        if SystemConfigService._uses_litellm_yaml(effective_map):
-            return issues
-
         raw_channels = (effective_map.get("LLM_CHANNELS") or "").strip()
         if not raw_channels:
             return issues
@@ -2652,11 +2453,6 @@ class SystemConfigService:
             if name.lower() == "anspire" and not protocol_value:
                 protocol_value = "openai"
             base_url_value = (effective_map.get(f"{prefix}_BASE_URL") or "").strip()
-            if name.lower() == "anspire" and not base_url_value:
-                base_url_value = (
-                    effective_map.get("ANSPIRE_LLM_BASE_URL")
-                    or ANSPIRE_LLM_BASE_URL_DEFAULT
-                ).strip()
             api_key_value = (
                 (effective_map.get(f"{prefix}_API_KEYS") or "").strip()
                 or (effective_map.get(f"{prefix}_API_KEY") or "").strip()
@@ -2668,16 +2464,7 @@ class SystemConfigService:
                 for model in (effective_map.get(f"{prefix}_MODELS") or "").split(",")
                 if model.strip()
             ]
-            if name.lower() == "anspire" and not models_value:
-                models_value = [
-                    (
-                        effective_map.get("ANSPIRE_LLM_MODEL")
-                        or ANSPIRE_LLM_MODEL_DEFAULT
-                    ).strip()
-                ]
             enabled_raw = effective_map.get(f"{prefix}_ENABLED")
-            if name.lower() == "anspire" and not (enabled_raw or "").strip():
-                enabled_raw = effective_map.get("ANSPIRE_LLM_ENABLED")
             enabled = parse_env_bool(enabled_raw, default=True)
             issues.extend(
                 SystemConfigService._validate_llm_channel_definition(
@@ -2710,18 +2497,11 @@ class SystemConfigService:
 
             prefix = f"LLM_{name.upper()}"
             enabled_raw = effective_map.get(f"{prefix}_ENABLED")
-            if name.lower() == "anspire" and not (enabled_raw or "").strip():
-                enabled_raw = effective_map.get("ANSPIRE_LLM_ENABLED")
             enabled = parse_env_bool(enabled_raw, default=True)
             if not enabled:
                 continue
 
             base_url_value = (effective_map.get(f"{prefix}_BASE_URL") or "").strip()
-            if name.lower() == "anspire" and not base_url_value:
-                base_url_value = (
-                    effective_map.get("ANSPIRE_LLM_BASE_URL")
-                    or ANSPIRE_LLM_BASE_URL_DEFAULT
-                ).strip()
             protocol_value = (effective_map.get(f"{prefix}_PROTOCOL") or "").strip()
             if name.lower() == "anspire" and not protocol_value:
                 protocol_value = "openai"
@@ -2730,13 +2510,6 @@ class SystemConfigService:
                 for model in (effective_map.get(f"{prefix}_MODELS") or "").split(",")
                 if model.strip()
             ]
-            if name.lower() == "anspire" and not raw_models:
-                raw_models = [
-                    (
-                        effective_map.get("ANSPIRE_LLM_MODEL")
-                        or ANSPIRE_LLM_MODEL_DEFAULT
-                    ).strip()
-                ]
             resolved_protocol = resolve_llm_channel_protocol(protocol_value, base_url=base_url_value, models=raw_models, channel_name=name)
             for model in raw_models:
                 normalized_model = normalize_llm_channel_model(model, resolved_protocol, base_url_value)
@@ -2746,22 +2519,6 @@ class SystemConfigService:
                 models.append(normalized_model)
 
         return models
-
-    @staticmethod
-    def _uses_litellm_yaml(effective_map: Dict[str, str]) -> bool:
-        """Return True when a valid LiteLLM YAML config takes precedence over channels."""
-        config_path = (effective_map.get("LITELLM_CONFIG") or "").strip()
-        if not config_path:
-            return False
-        return bool(Config._parse_litellm_yaml(config_path))
-
-    @staticmethod
-    def _collect_yaml_models_from_map(effective_map: Dict[str, str]) -> List[str]:
-        """Collect declared router model names from LiteLLM YAML config."""
-        config_path = (effective_map.get("LITELLM_CONFIG") or "").strip()
-        if not config_path:
-            return []
-        return get_configured_llm_models(Config._parse_litellm_yaml(config_path))
 
     @staticmethod
     def _has_legacy_key_for_provider(provider: str, effective_map: Dict[str, str]) -> bool:
@@ -2787,10 +2544,6 @@ class SystemConfigService:
                 (effective_map.get("OPENAI_API_KEYS") or "").strip()
                 or (effective_map.get("AIHUBMIX_KEY") or "").strip()
                 or (effective_map.get("OPENAI_API_KEY") or "").strip()
-                or (
-                    SystemConfigService._anspire_legacy_llm_enabled(effective_map)
-                    and (effective_map.get("ANSPIRE_API_KEYS") or "").strip()
-                )
             )
         return False
 
@@ -2808,8 +2561,7 @@ class SystemConfigService:
         issues: List[Dict[str, Any]] = []
 
         available_models = (
-            SystemConfigService._collect_yaml_models_from_map(effective_map)
-            or SystemConfigService._collect_llm_channel_models_from_map(effective_map)
+            SystemConfigService._collect_llm_channel_models_from_map(effective_map)
         )
         available_model_set = set(available_models)
         if not available_model_set:
@@ -2912,7 +2664,7 @@ class SystemConfigService:
                     "code": "unknown_model",
                     "message": (
                         "The selected primary model is not declared by the current enabled channels "
-                        "or advanced model routing config. "
+                            "or channel config. "
                         f"Available models: {', '.join(available_models[:6])}"
                     ),
                     "severity": "error",
@@ -2938,7 +2690,7 @@ class SystemConfigService:
                     "code": "unknown_model",
                     "message": (
                         "The selected Agent primary model is not declared by the current enabled channels "
-                        "or advanced model routing config. "
+                            "or channel config. "
                         f"Available models: {', '.join(available_models[:6])}"
                     ),
                     "severity": "error",

@@ -52,8 +52,6 @@ def _phase_payload() -> dict:
 def _make_pipeline(*, agent_mode: bool = False, save_context_snapshot: bool = True) -> StockAnalysisPipeline:
     pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
     pipeline.config = SimpleNamespace(
-        enable_realtime_quote=False,
-        enable_chip_distribution=False,
         realtime_source_priority=[],
         agent_mode=agent_mode,
         agent_skills=[],
@@ -65,6 +63,7 @@ def _make_pipeline(*, agent_mode: bool = False, save_context_snapshot: bool = Tr
     pipeline.source_message = None
     pipeline.query_id = None
     pipeline.query_source = "system"
+    pipeline.profile_id = None
     pipeline.save_context_snapshot = save_context_snapshot
     pipeline.progress_callback = None
     pipeline.analysis_skills = None

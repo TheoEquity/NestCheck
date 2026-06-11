@@ -994,7 +994,7 @@ class LLMUsage(Base):
     __tablename__ = 'llm_usage'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # 'analysis' | 'agent' | 'market_review'
+    # 'analysis' | 'agent'
     call_type = Column(String(32), nullable=False, index=True)
     model = Column(String(128), nullable=False)
     stock_code = Column(String(16), nullable=True)

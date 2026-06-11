@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, useSystemConfig } from '../hooks';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
@@ -19,7 +19,7 @@ import {
 } from '../components/settings';
 import { WEB_BUILD_INFO } from '../utils/constants';
 import { getCategoryDescriptionZh } from '../utils/systemConfigI18n';
-import type { SystemConfigCategory } from '../types/systemConfig';
+import type { SystemConfigCategory, SystemConfigItem } from '../types/systemConfig';
 
 type DesktopWindow = Window & {
   dsaDesktop?: {
@@ -310,19 +310,9 @@ const SettingsPage: React.FC = () => {
     };
   }, [canCheckDesktopUpdate, desktopRuntimeApi]);
 
-  const rawActiveItems = itemsByCategory[activeCategory] || [];
-  const rawActiveItemMap = new Map(rawActiveItems.map((item) => [item.key, String(item.value ?? '')]));
-  const hasConfiguredChannels = Boolean((rawActiveItemMap.get('LLM_CHANNELS') || '').trim());
-  const hasLitellmConfig = Boolean((rawActiveItemMap.get('LITELLM_CONFIG') || '').trim());
-
-  // Hide channel-managed and legacy provider-specific LLM keys from the
-  // generic form only when channel config is the active runtime source.
-  const LLM_CHANNEL_KEY_RE = /^LLM_[A-Z0-9]+_(PROTOCOL|BASE_URL|API_KEY|API_KEYS|MODELS|EXTRA_HEADERS|ENABLED)$/;
+  const LLM_CHANNEL_KEY_RE = /^(LLM_|LLM_CHANNELS)/;
   const AI_MODEL_HIDDEN_KEYS = new Set([
-    'LLM_CHANNELS',
-    'LLM_TEMPERATURE',
     'LITELLM_MODEL',
-    'AGENT_LITELLM_MODEL',
     'LITELLM_FALLBACK_MODELS',
     'AIHUBMIX_KEY',
     'DEEPSEEK_API_KEY',
@@ -349,22 +339,48 @@ const SettingsPage: React.FC = () => {
     'ADMIN_AUTH_ENABLED',
   ]);
   const AGENT_HIDDEN_KEYS = new Set<string>();
-  const activeItems =
-    activeCategory === 'ai_model'
-      ? rawActiveItems.filter((item) => {
-        if (hasConfiguredChannels && LLM_CHANNEL_KEY_RE.test(item.key)) {
-          return false;
-        }
-        if (hasConfiguredChannels && !hasLitellmConfig && AI_MODEL_HIDDEN_KEYS.has(item.key)) {
-          return false;
-        }
-        return true;
-      })
-      : activeCategory === 'system'
-        ? rawActiveItems.filter((item) => !SYSTEM_HIDDEN_KEYS.has(item.key))
-      : activeCategory === 'agent'
-        ? rawActiveItems.filter((item) => !AGENT_HIDDEN_KEYS.has(item.key))
-      : rawActiveItems;
+
+  const hasConfiguredChannels = useMemo(() => {
+    const aiItems = itemsByCategory['ai_model'] || [];
+    return aiItems.some((i) => i.key === 'LLM_CHANNELS' && i.value?.trim());
+  }, [itemsByCategory]);
+
+  const rawActiveItems = itemsByCategory[activeCategory] || [];
+
+  const isItemVisible = (category: string, item: SystemConfigItem) => {
+    if (category === 'ai_model') {
+      if (hasConfiguredChannels && LLM_CHANNEL_KEY_RE.test(item.key)) return false;
+      if (hasConfiguredChannels && AI_MODEL_HIDDEN_KEYS.has(item.key)) return false;
+    }
+    if (category === 'system' && SYSTEM_HIDDEN_KEYS.has(item.key)) return false;
+    if (category === 'agent' && AGENT_HIDDEN_KEYS.has(item.key)) return false;
+    return true;
+  };
+
+  const activeItems = useMemo(
+    () => rawActiveItems.filter((item) => isItemVisible(activeCategory, item)),
+    [rawActiveItems, activeCategory, hasConfiguredChannels],
+  );
+
+  const displayedCategories = useMemo(
+    () =>
+      categories.filter((cat) => {
+        const items = itemsByCategory[cat.category] || [];
+        return items.some((item) => isItemVisible(cat.category, item));
+      }),
+    [categories, itemsByCategory, hasConfiguredChannels],
+  );
+
+useEffect(() => {
+    if (activeCategory !== 'scheduler' && displayedCategories.length > 0) {
+      const isCurrentVisible = displayedCategories.some((c) => c.category === activeCategory);
+      if (!isCurrentVisible) {
+        const first =
+          displayedCategories.find((c) => c.category !== 'scheduler') || displayedCategories[0];
+        setActiveCategory(first.category);
+      }
+    }
+  }, [activeCategory, displayedCategories, setActiveCategory]);
   const isEnvBackupAllowed = isDesktopRuntime || authEnabled;
   const envBackupActionDisabled = isLoading || isSaving || isExportingEnv || isImportingEnv || !isEnvBackupAllowed;
 
@@ -532,7 +548,6 @@ const SettingsPage: React.FC = () => {
     />
   );
 
-  const rawCategories = categories;
   const schedulerCategory = {
     category: 'scheduler' as const,
     title: '定时管理',
@@ -540,7 +555,27 @@ const SettingsPage: React.FC = () => {
     displayOrder: 100,
     fields: [],
   };
-  const allCategories = [...rawCategories, schedulerCategory];
+  const agentMgmtCategory = {
+    category: 'agent_mgmt' as SystemConfigCategory,
+    title: 'Agent 管理',
+    description: '管理 Profiles、专业 Agent、Tools 和 Skills 配置。',
+    displayOrder: 56,
+    fields: [],
+  };
+  const allCategories = [...displayedCategories, agentMgmtCategory, schedulerCategory].sort(
+    (a, b) => a.displayOrder - b.displayOrder,
+  );
+
+  const handleCategorySelect = useCallback(
+    (category: string) => {
+      if (category === 'agent_mgmt') {
+        navigate('/agents');
+        return;
+      }
+      setActiveCategory(category);
+    },
+    [navigate, setActiveCategory],
+  );
 
   return (
     <div className="settings-page min-h-full px-4 pb-6 pt-4 md:px-6">
@@ -601,29 +636,16 @@ const SettingsPage: React.FC = () => {
           <aside className="lg:sticky lg:top-4 lg:self-start">
             <SettingsCategoryNav
               categories={allCategories}
-              itemsByCategory={{ ...itemsByCategory, scheduler: [] }}
+              itemsByCategory={{ ...itemsByCategory, scheduler: [], agent_mgmt: [] }}
               activeCategory={activeCategory}
-              onSelect={setActiveCategory}
+              onSelect={handleCategorySelect}
             />
           </aside>
 
           <section className="space-y-4">
             {activeCategory === 'system' ? <AuthSettingsCard /> : null}
-            {activeCategory === 'system' ? (
-              <SettingsSectionCard
-                title="高级配置入口"
-                description="将低频管理能力收敛到设置页，保持主菜单简洁。"
-              >
-                <div className="flex flex-col gap-3 rounded-2xl border settings-border bg-background/40 px-4 py-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Agent 管理</p>
-                    <p className="mt-1 text-xs leading-6 text-muted-text">管理 Profiles、专业 Agent、Tools 和 Skills 配置。</p>
-                  </div>
-                  <Button type="button" variant="settings-secondary" onClick={() => navigate('/agents')}>
-                    打开 Agent 管理
-                  </Button>
-                </div>
-              </SettingsSectionCard>
+            {activeCategory === 'system' && passwordChangeable ? (
+              <ChangePasswordCard />
             ) : null}
             {activeCategory === 'system' ? (
               <SettingsSectionCard
@@ -793,9 +815,6 @@ const SettingsPage: React.FC = () => {
                   disabled={isSaving || isLoading}
                 />
               </SettingsSectionCard>
-            ) : null}
-            {activeCategory === 'system' && passwordChangeable ? (
-              <ChangePasswordCard />
             ) : null}
             {activeCategory === 'scheduler' ? (
               <SchedulerTasksPanel />

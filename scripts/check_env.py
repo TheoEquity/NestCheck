@@ -215,105 +215,36 @@ def check_data_fetch(stock_code: str = "600519"):
 
 
 def check_llm():
-    """测试 LLM 调用"""
-    print_header("4. LLM (Gemini) 调用测试")
-    
-    from src.analyzer import GeminiAnalyzer
+    """测试 LLM 配置（Agent 模式）"""
+    print_header("4. Agent/LLM 配置测试")
+
     from src.config import get_config
-    import time
-    
+
     config = get_config()
-    
+
     print_section("模型配置")
-    print(f"  主模型: {config.gemini_model}")
-    print(f"  备选模型: {config.gemini_model_fallback}")
-    
+    agent_model = getattr(config, 'agent_litellm_model', None) or getattr(config, 'litellm_model', None)
+    print(f"  Agent 模型: {agent_model or '未配置'}")
+
     # 检查网络连接
     print_section("网络连接检查")
     try:
         import socket
         socket.setdefaulttimeout(10)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("generativelanguage.googleapis.com", 443))
-        print(f"  ✓ 可以连接到 Google API 服务器")
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("api.openai.com", 443))
+        print(f"  ✓ 可以连接到 OpenAI API 服务器")
     except Exception as e:
-        print(f"  ✗ 无法连接到 Google API 服务器: {e}")
+        print(f"  ✗ 无法连接到 OpenAI API 服务器: {e}")
         print(f"  提示: 请检查网络连接或配置代理")
         print(f"  提示: 可以设置环境变量 HTTPS_PROXY=http://your-proxy:port")
         return False
-    
-    analyzer = GeminiAnalyzer()
-    
-    print_section("模型初始化")
-    if analyzer.is_available():
-        print(f"  ✓ 模型初始化成功")
+
+    print_section("配置状态")
+    if agent_model:
+        print(f"  ✓ Agent 模型已配置: {agent_model}")
+        return True
     else:
-        print(f"  ✗ 模型初始化失败（请检查 API Key）")
-        return False
-    
-    # 构造测试上下文
-    test_context = {
-        'code': '600519',
-        'date': date.today().isoformat(),
-        'today': {
-            'open': 1420.0,
-            'high': 1435.0,
-            'low': 1415.0,
-            'close': 1428.0,
-            'volume': 5000000,
-            'amount': 7140000000,
-            'pct_chg': 0.56,
-            'ma5': 1425.0,
-            'ma10': 1418.0,
-            'ma20': 1410.0,
-            'volume_ratio': 1.1,
-        },
-        'ma_status': '多头排列 📈',
-        'volume_change_ratio': 1.05,
-        'price_change_ratio': 0.56,
-    }
-    
-    print_section("发送测试请求")
-    print(f"  测试股票: 贵州茅台 (600519)")
-    print(f"  正在调用 Gemini API（超时: 60秒）...")
-    
-    start_time = time.time()
-    
-    try:
-        result = analyzer.analyze(test_context)
-        
-        elapsed = time.time() - start_time
-        print(f"\n  ✓ API 调用成功 (耗时: {elapsed:.2f}秒)")
-        
-        print_section("分析结果")
-        print(f"  情绪评分: {result.sentiment_score}/100")
-        print(f"  趋势预测: {result.trend_prediction}")
-        print(f"  操作建议: {result.operation_advice}")
-        print(f"  技术分析: {result.technical_analysis[:80]}..." if len(result.technical_analysis) > 80 else f"  技术分析: {result.technical_analysis}")
-        print(f"  消息面: {result.news_summary[:80]}..." if len(result.news_summary) > 80 else f"  消息面: {result.news_summary}")
-        print(f"  综合摘要: {result.analysis_summary}")
-        
-        if not result.success:
-            print(f"\n  ⚠ 注意: {result.error_message}")
-        
-        return result.success
-        
-    except Exception as e:
-        elapsed = time.time() - start_time
-        print(f"\n  ✗ API 调用失败 (耗时: {elapsed:.2f}秒)")
-        print(f"  错误: {e}")
-        
-        # 提供更详细的错误提示
-        error_str = str(e).lower()
-        if 'timeout' in error_str or 'unavailable' in error_str:
-            print(f"\n  诊断: 网络超时，可能原因:")
-            print(f"    1. 网络不通（需要代理访问 Google）")
-            print(f"    2. API 服务暂时不可用")
-            print(f"    3. 请求量过大被限流")
-        elif 'invalid' in error_str or 'api key' in error_str:
-            print(f"\n  诊断: API Key 可能无效")
-        elif 'model' in error_str:
-            print(f"\n  诊断: 模型名称可能不正确，尝试修改 .env 中的 GEMINI_MODEL")
-        
+        print(f"  ✗ 未配置 Agent 模型")
         return False
 
 

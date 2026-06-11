@@ -97,7 +97,6 @@ class TestFetcherSourceOptimization(unittest.TestCase):
     @patch("src.config.get_config")
     def test_us_realtime_route_uses_yfinance(self, mock_get_config):
         mock_get_config.return_value = SimpleNamespace(
-            enable_realtime_quote=True,
             realtime_source_priority="efinance,akshare_em,tushare",
         )
 

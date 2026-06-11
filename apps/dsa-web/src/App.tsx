@@ -11,7 +11,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgentChatStore } from './stores/agentChatStore';
 import './App.css';
 
-const AssetDashboardPage = lazy(() => import('./pages/AssetDashboardPage'));
+import AssetDashboardPage from './pages/AssetDashboardPage';
 const AssetManagementPage = lazy(() => import('./pages/AssetManagementPage'));
 const AssetOpenDatesPage = lazy(() => import('./pages/AssetOpenDatesPage'));
 const AssetDiagnosisPage = lazy(() => import('./pages/AssetDiagnosisPage'));

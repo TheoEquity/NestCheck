@@ -495,15 +495,15 @@ def compute_effective_region(
     config_region: str, open_markets: Set[str]
 ) -> Optional[str]:
     """
-    Compute effective market review region given config and open markets.
+    Compute effective region given config and open markets.
 
     Args:
-        config_region: From MARKET_REVIEW_REGION ('cn' | 'hk' | 'us' | 'both')
+        config_region: Target region ('cn' | 'hk' | 'us' | 'both')
         open_markets: Markets open today
 
     Returns:
         None: caller uses config default (check disabled)
-        '': all relevant markets closed, skip market review
+        '': all relevant markets closed, skip processing
         'cn' | 'hk' | 'us' | 'both': effective subset for today
     """
     if config_region not in ("cn", "hk", "us", "both"):

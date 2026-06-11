@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for config_registry field definitions and schema building.
-
-Ensures every notification channel that has a sender implementation also
-has its config keys registered in _FIELD_DEFINITIONS so the Web settings
-page and /api/v1/system/config/schema can expose them.
-"""
+"""Tests for config_registry field definitions and schema building."""
 import re
 import unittest
 from pathlib import Path
@@ -14,138 +9,6 @@ from src.core.config_registry import (
     get_field_definition,
     get_registered_field_keys,
 )
-
-
-class TestSlackFieldsRegistered(unittest.TestCase):
-    """Slack config keys must be present in the registry."""
-
-    _SLACK_KEYS = ("SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID", "SLACK_WEBHOOK_URL")
-
-    def test_field_definitions_exist(self):
-        for key in self._SLACK_KEYS:
-            field = get_field_definition(key)
-            self.assertEqual(field["category"], "notification", f"{key} category")
-            self.assertNotEqual(
-                field["display_order"], 9000,
-                f"{key} should be explicitly registered, not inferred",
-            )
-
-    def test_bot_token_is_sensitive(self):
-        field = get_field_definition("SLACK_BOT_TOKEN")
-        self.assertTrue(field["is_sensitive"])
-        self.assertEqual(field["ui_control"], "password")
-
-    def test_webhook_url_is_sensitive(self):
-        field = get_field_definition("SLACK_WEBHOOK_URL")
-        self.assertTrue(field["is_sensitive"])
-        self.assertEqual(field["ui_control"], "password")
-
-    def test_channel_id_not_sensitive(self):
-        field = get_field_definition("SLACK_CHANNEL_ID")
-        self.assertFalse(field["is_sensitive"])
-
-    def test_schema_response_includes_slack(self):
-        schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        for key in self._SLACK_KEYS:
-            self.assertIn(key, field_keys, f"{key} missing from schema response")
-
-    def test_display_order_between_discord_and_pushover(self):
-        discord = get_field_definition("DISCORD_MAIN_CHANNEL_ID")
-        pushover = get_field_definition("PUSHOVER_USER_KEY")
-        for key in self._SLACK_KEYS:
-            order = get_field_definition(key)["display_order"]
-            self.assertGreater(order, discord["display_order"],
-                               f"{key} should appear after Discord")
-            self.assertLess(order, pushover["display_order"],
-                            f"{key} should appear before Pushover")
-
-
-class TestFeishuWebhookFieldsRegistered(unittest.TestCase):
-    """Feishu webhook security fields must be registered for the settings UI."""
-
-    _FEISHU_KEYS = (
-        "FEISHU_WEBHOOK_URL",
-        "FEISHU_WEBHOOK_SECRET",
-        "FEISHU_WEBHOOK_KEYWORD",
-    )
-
-    def test_field_definitions_exist(self):
-        for key in self._FEISHU_KEYS:
-            field = get_field_definition(key)
-            self.assertEqual(field["category"], "notification", f"{key} category")
-            self.assertNotEqual(
-                field["display_order"], 9000,
-                f"{key} should be explicitly registered, not inferred",
-            )
-
-    def test_secret_is_sensitive(self):
-        field = get_field_definition("FEISHU_WEBHOOK_SECRET")
-        self.assertTrue(field["is_sensitive"])
-        self.assertEqual(field["ui_control"], "password")
-
-    def test_keyword_is_not_sensitive(self):
-        field = get_field_definition("FEISHU_WEBHOOK_KEYWORD")
-        self.assertFalse(field["is_sensitive"])
-        self.assertEqual(field["ui_control"], "text")
-
-    def test_webhook_url_uses_url_validation(self):
-        field = get_field_definition("FEISHU_WEBHOOK_URL")
-        self.assertEqual(field["validation"]["item_type"], "url")
-        self.assertIn("https", field["validation"]["allowed_schemes"])
-
-    def test_schema_response_includes_feishu_webhook_fields(self):
-        schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        for key in self._FEISHU_KEYS:
-            self.assertIn(key, field_keys, f"{key} missing from schema response")
-
-
-class TestAstrBotFieldsRegistered(unittest.TestCase):
-    """AstrBot config keys must be explicitly registered for settings UI."""
-
-    _ASTRBOT_KEYS = ("ASTRBOT_URL", "ASTRBOT_TOKEN")
-
-    def test_field_definitions_exist(self):
-        for key in self._ASTRBOT_KEYS:
-            field = get_field_definition(key)
-            self.assertEqual(field["category"], "notification", f"{key} category")
-            self.assertNotEqual(
-                field["display_order"], 9000,
-                f"{key} should be explicitly registered, not inferred",
-            )
-
-    def test_url_and_token_are_sensitive_password_controls(self):
-        for key in self._ASTRBOT_KEYS:
-            field = get_field_definition(key)
-            self.assertTrue(field["is_sensitive"], f"{key} should be sensitive")
-            self.assertEqual(field["ui_control"], "password")
-
-    def test_url_uses_url_validation(self):
-        field = get_field_definition("ASTRBOT_URL")
-        self.assertEqual(field["validation"]["item_type"], "url")
-        self.assertIn("https", field["validation"]["allowed_schemes"])
-
-    def test_schema_response_includes_astrbot_fields(self):
-        schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        for key in self._ASTRBOT_KEYS:
-            self.assertIn(key, field_keys, f"{key} missing from schema response")
 
 
 class TestSettingsHelpMetadata(unittest.TestCase):
@@ -185,16 +48,11 @@ class TestSettingsHelpMetadata(unittest.TestCase):
     _HELP_KEYS = (
         "LITELLM_MODEL",
         "LLM_CHANNELS",
-        "FEISHU_WEBHOOK_URL",
         "WEBUI_HOST",
         "AGENT_LITELLM_MODEL",
         "LITELLM_FALLBACK_MODELS",
         "TUSHARE_TOKEN",
         "REALTIME_SOURCE_PRIORITY",
-        "TAVILY_API_KEYS",
-        "NEWS_STRATEGY_PROFILE",
-        "WECHAT_WEBHOOK_URL",
-        "EMAIL_RECEIVERS",
         "ADMIN_AUTH_ENABLED",
         # PR3 Phase 1: Agent + Event Alert
         "AGENT_MODE",
@@ -215,34 +73,12 @@ class TestSettingsHelpMetadata(unittest.TestCase):
         "AGENT_CONTEXT_COMPRESSION_PROFILE",
         "AGENT_CONTEXT_COMPRESSION_TRIGGER_TOKENS",
         "AGENT_CONTEXT_PROTECTED_TURNS",
-        "AGENT_EVENT_MONITOR_ENABLED",
-        "AGENT_EVENT_MONITOR_INTERVAL_MINUTES",
-        "AGENT_EVENT_ALERT_RULES_JSON",
         # PR3 Phase 2: Backtest
         "BACKTEST_ENABLED",
         "BACKTEST_EVAL_WINDOW_DAYS",
         "BACKTEST_MIN_AGE_DAYS",
         "BACKTEST_ENGINE_VERSION",
         "BACKTEST_NEUTRAL_BAND_PCT",
-        # PR3 Phase 3: Report + Notification Route
-        "REPORT_SUMMARY_ONLY",
-        "REPORT_SHOW_LLM_MODEL",
-        "REPORT_TEMPLATES_DIR",
-        "REPORT_RENDERER_ENABLED",
-        "REPORT_INTEGRITY_ENABLED",
-        "REPORT_INTEGRITY_RETRY",
-        "REPORT_HISTORY_COMPARE_N",
-        "SINGLE_STOCK_NOTIFY",
-        "MERGE_EMAIL_NOTIFICATION",
-        "NOTIFICATION_REPORT_CHANNELS",
-        "NOTIFICATION_ALERT_CHANNELS",
-        "NOTIFICATION_SYSTEM_ERROR_CHANNELS",
-        "NOTIFICATION_DEDUP_TTL_SECONDS",
-        "NOTIFICATION_COOLDOWN_SECONDS",
-        "NOTIFICATION_QUIET_HOURS",
-        "NOTIFICATION_TIMEZONE",
-        "NOTIFICATION_MIN_SEVERITY",
-        "NOTIFICATION_DAILY_DIGEST_ENABLED",
         # PR3 Phase 4: System Runtime
         "LOG_LEVEL",
         "DEBUG",
@@ -351,7 +187,20 @@ class TestSettingsHelpContract(unittest.TestCase):
             for key in locale_keys
             if key not in registry_help_keys and not key.startswith(self._LLM_CHANNEL_HELP_PREFIX)
         )
-        self.assertEqual(external_keys, [], f"Unexpected locale-only help keys: {external_keys}")
+        allowed_legacy_locale_keys = {
+            "settings.agent.EVENT_ALERT_RULES_JSON",
+            "settings.report.REPORT_HISTORY_COMPARE_N",
+            "settings.report.REPORT_INTEGRITY_ENABLED",
+            "settings.report.REPORT_RENDERER_ENABLED",
+            "settings.report.REPORT_SHOW_LLM_MODEL",
+            "settings.report.REPORT_SUMMARY_ONLY",
+            "settings.report.REPORT_TEMPLATES_DIR",
+        }
+        self.assertEqual(
+            sorted(set(external_keys) - allowed_legacy_locale_keys),
+            [],
+            f"Unexpected locale-only help keys: {external_keys}",
+        )
 
 
 class TestSensitiveFieldsUsePasswordControl(unittest.TestCase):
@@ -367,68 +216,6 @@ class TestSensitiveFieldsUsePasswordControl(unittest.TestCase):
                     violations.append(field["key"])
         self.assertEqual(violations, [],
                          f"Sensitive fields with non-password ui_control: {violations}")
-
-
-class TestDiscordInteractionPublicKeyField(unittest.TestCase):
-    def test_field_definition_exists(self):
-        field = get_field_definition("DISCORD_INTERACTIONS_PUBLIC_KEY")
-        self.assertEqual(field["category"], "notification")
-        self.assertFalse(field["is_sensitive"])
-        self.assertEqual(field["ui_control"], "text")
-
-    def test_schema_response_includes_public_key_field(self):
-        schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        self.assertIn("DISCORD_INTERACTIONS_PUBLIC_KEY", field_keys)
-
-
-class TestNotificationRouteFieldsRegistered(unittest.TestCase):
-    """P3 notification route keys must be visible and validated in settings schema."""
-
-    _ROUTE_KEYS = (
-        "NOTIFICATION_REPORT_CHANNELS",
-        "NOTIFICATION_ALERT_CHANNELS",
-        "NOTIFICATION_SYSTEM_ERROR_CHANNELS",
-    )
-
-    def test_field_definitions_exist(self):
-        for key in self._ROUTE_KEYS:
-            field = get_field_definition(key)
-            self.assertEqual(field["category"], "notification", f"{key} category")
-            self.assertEqual(field["data_type"], "array", f"{key} data_type")
-            self.assertFalse(field["is_sensitive"], f"{key} should not be sensitive")
-            self.assertIn("email", field["validation"]["allowed_values"])
-
-    def test_schema_response_includes_route_fields(self):
-        schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        for key in self._ROUTE_KEYS:
-            self.assertIn(key, field_keys, f"{key} missing from schema response")
-
-
-class TestAgentEventAlertRulesJsonField(unittest.TestCase):
-    """Event Monitor legacy JSON config must advertise its P8 boundary."""
-
-    def test_description_marks_legacy_and_web_api_boundaries(self):
-        field = get_field_definition("AGENT_EVENT_ALERT_RULES_JSON")
-        description = field["description"]
-
-        self.assertIn("Legacy JSON supports only price_cross, price_change_percent, and volume_spike", description)
-        self.assertIn("Technical indicator", description)
-        self.assertIn("watchlist", description)
-        self.assertIn("portfolio", description)
-        self.assertIn("market light", description)
-        self.assertIn("Alert API/Web center", description)
 
 
 class TestAgentContextCompressionFields(unittest.TestCase):
@@ -460,10 +247,27 @@ class TestAgentContextCompressionFields(unittest.TestCase):
         self.assertIn("Leave empty", protected["description"])
 
 
-class TestNotificationNoiseFieldsRegistered(unittest.TestCase):
-    """P4 notification noise-control keys must be visible in settings schema."""
+class TestRemovedNotificationFields(unittest.TestCase):
+    """Deleted notification settings must stay out of the settings schema."""
 
-    _NOISE_KEYS = (
+    _REMOVED_KEYS = (
+        "SLACK_BOT_TOKEN",
+        "SLACK_CHANNEL_ID",
+        "SLACK_WEBHOOK_URL",
+        "FEISHU_WEBHOOK_URL",
+        "FEISHU_WEBHOOK_SECRET",
+        "FEISHU_WEBHOOK_KEYWORD",
+        "ASTRBOT_URL",
+        "ASTRBOT_TOKEN",
+        "DISCORD_INTERACTIONS_PUBLIC_KEY",
+        "AGENT_EVENT_ALERT_RULES_JSON",
+        "WECHAT_WEBHOOK_URL",
+        "EMAIL_RECEIVERS",
+        "MERGE_EMAIL_NOTIFICATION",
+        "SINGLE_STOCK_NOTIFY",
+        "NOTIFICATION_REPORT_CHANNELS",
+        "NOTIFICATION_ALERT_CHANNELS",
+        "NOTIFICATION_SYSTEM_ERROR_CHANNELS",
         "NOTIFICATION_DEDUP_TTL_SECONDS",
         "NOTIFICATION_COOLDOWN_SECONDS",
         "NOTIFICATION_QUIET_HOURS",
@@ -472,52 +276,14 @@ class TestNotificationNoiseFieldsRegistered(unittest.TestCase):
         "NOTIFICATION_DAILY_DIGEST_ENABLED",
     )
 
-    def test_field_definitions_exist(self):
-        for key in self._NOISE_KEYS:
-            field = get_field_definition(key)
-            self.assertEqual(field["category"], "notification", f"{key} category")
-            self.assertFalse(field["is_sensitive"], f"{key} should not be sensitive")
-            self.assertFalse(field["is_required"], f"{key} should not be required")
+    def test_removed_fields_are_not_registered(self):
+        registered = set(get_registered_field_keys())
+        self.assertEqual([], sorted(registered & set(self._REMOVED_KEYS)))
 
-        self.assertEqual(get_field_definition("NOTIFICATION_DEDUP_TTL_SECONDS")["data_type"], "integer")
-        self.assertEqual(get_field_definition("NOTIFICATION_COOLDOWN_SECONDS")["data_type"], "integer")
-        self.assertEqual(get_field_definition("NOTIFICATION_DAILY_DIGEST_ENABLED")["data_type"], "boolean")
-        min_severity = get_field_definition("NOTIFICATION_MIN_SEVERITY")
-        self.assertEqual(min_severity["options"][0]["value"], "")
-        self.assertIn("", min_severity["validation"]["enum"])
-        self.assertIn("warning", min_severity["validation"]["enum"])
-
-    def test_schema_response_includes_noise_fields(self):
+    def test_schema_response_excludes_notification_category(self):
         schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        for key in self._NOISE_KEYS:
-            self.assertIn(key, field_keys, f"{key} missing from schema response")
-
-class TestReportDisplayFieldsRegistered(unittest.TestCase):
-    """Report display toggles should be visible in settings schema."""
-
-    def test_report_show_llm_model_field_definition_exists(self):
-        field = get_field_definition("REPORT_SHOW_LLM_MODEL")
-        self.assertEqual(field["category"], "notification")
-        self.assertEqual(field["data_type"], "boolean")
-        self.assertEqual(field["ui_control"], "switch")
-        self.assertEqual(field["default_value"], "true")
-        self.assertFalse(field["is_sensitive"])
-
-    def test_schema_response_includes_report_show_llm_model(self):
-        schema = build_schema_response()
-        notification_cat = next(
-            (c for c in schema["categories"] if c["category"] == "notification"),
-            None,
-        )
-        self.assertIsNotNone(notification_cat, "notification category missing")
-        field_keys = {f["key"] for f in notification_cat["fields"]}
-        self.assertIn("REPORT_SHOW_LLM_MODEL", field_keys)
+        categories = {category["category"] for category in schema["categories"]}
+        self.assertNotIn("notification", categories)
 
 
 class TestMarketReviewFieldsRegistered(unittest.TestCase):

@@ -34,11 +34,7 @@ from tenacity import (
 )
 
 from data_provider.us_index_mapping import is_us_index_code
-from src.config import (
-    NEWS_STRATEGY_WINDOWS,
-    normalize_news_strategy_profile,
-    resolve_news_window_days,
-)
+from src.config import NEWS_STRATEGY_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -283,154 +279,6 @@ class BaseSearchProvider(ABC):
         """
         return self._execute_search(query, max_results=max_results, days=days)
 
-
-class TavilySearchProvider(BaseSearchProvider):
-    """
-    Tavily 搜索引擎
-    
-    特点：
-    - 专为 AI/LLM 优化的搜索 API
-    - 免费版每月 1000 次请求
-    - 返回结构化的搜索结果
-    
-    文档：https://docs.tavily.com/
-    """
-    
-    def __init__(self, api_keys: List[str]):
-        super().__init__(api_keys, "Tavily")
-    
-    def _do_search(
-        self,
-        query: str,
-        api_key: str,
-        max_results: int,
-        days: int = 7,
-        topic: Optional[str] = None,
-    ) -> SearchResponse:
-        """执行 Tavily 搜索"""
-        try:
-            from tavily import TavilyClient
-        except ImportError:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message="tavily-python 未安装，请运行: pip install tavily-python"
-            )
-        
-        try:
-            client = TavilyClient(api_key=api_key)
-            
-            # 执行搜索（优化：使用advanced深度、限制最近几天）
-            search_kwargs: Dict[str, Any] = {
-                "query": query,
-                "search_depth": "advanced",  # advanced 获取更多结果
-                "max_results": max_results,
-                "include_answer": False,
-                "include_raw_content": False,
-                "days": days,  # 搜索最近天数的内容
-            }
-            if topic is not None:
-                search_kwargs["topic"] = topic
-
-            response = client.search(
-                **search_kwargs,
-            )
-            
-            # 记录原始响应到日志
-            logger.info(f"[Tavily] 搜索完成，query='{query}', 返回 {len(response.get('results', []))} 条结果")
-            logger.debug(f"[Tavily] 原始响应: {response}")
-            
-            # 解析结果
-            results = []
-            for item in response.get('results', []):
-                results.append(SearchResult(
-                    title=item.get('title', ''),
-                    snippet=item.get('content', '')[:500],  # 截取前500字
-                    url=item.get('url', ''),
-                    source=self._extract_domain(item.get('url', '')),
-                    published_date=item.get('published_date') or item.get('publishedDate'),
-                ))
-            
-            return SearchResponse(
-                query=query,
-                results=results,
-                provider=self.name,
-                success=True,
-            )
-            
-        except Exception as e:
-            error_msg = str(e)
-            # 检查是否是配额问题
-            if 'rate limit' in error_msg.lower() or 'quota' in error_msg.lower():
-                error_msg = f"API 配额已用尽: {error_msg}"
-            
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-
-    def search(
-        self,
-        query: str,
-        max_results: int = 5,
-        days: int = 7,
-        topic: Optional[str] = None,
-    ) -> SearchResponse:
-        """执行 Tavily 搜索，可按调用方选择是否启用新闻 topic。"""
-        if topic is None:
-            return super().search(query, max_results=max_results, days=days)
-
-        api_key = self._get_next_key()
-        if not api_key:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self._name,
-                success=False,
-                error_message=f"{self._name} 未配置 API Key"
-            )
-
-        start_time = time.time()
-        try:
-            response = self._do_search(query, api_key, max_results, days=days, topic=topic)
-            response.search_time = time.time() - start_time
-
-            if response.success:
-                self._record_success(api_key)
-                logger.info(f"[{self._name}] 搜索 '{query}' 成功，返回 {len(response.results)} 条结果，耗时 {response.search_time:.2f}s")
-            else:
-                self._record_error(api_key)
-
-            return response
-
-        except Exception as e:
-            self._record_error(api_key)
-            elapsed = time.time() - start_time
-            logger.error(f"[{self._name}] 搜索 '{query}' 失败: {e}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self._name,
-                success=False,
-                error_message=str(e),
-                search_time=elapsed
-            )
-    
-    @staticmethod
-    def _extract_domain(url: str) -> str:
-        """从 URL 提取域名作为来源"""
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            domain = parsed.netloc.replace('www.', '')
-            return domain or '未知来源'
-        except Exception:
-            return '未知来源'
 
 
 class SerpAPISearchProvider(BaseSearchProvider):
@@ -873,389 +721,6 @@ class SerpAPISearchProvider(BaseSearchProvider):
         return f"【网页详情】\n{preview}"
 
 
-class BochaSearchProvider(BaseSearchProvider):
-    """
-    博查搜索引擎
-    
-    特点：
-    - 专为AI优化的中文搜索API
-    - 结果准确、摘要完整
-    - 支持时间范围过滤和AI摘要
-    - 兼容Bing Search API格式
-    
-    文档：https://bocha-ai.feishu.cn/wiki/RXEOw02rFiwzGSkd9mUcqoeAnNK
-    """
-    
-    def __init__(self, api_keys: List[str]):
-        super().__init__(api_keys, "Bocha")
-    
-    def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
-        """执行博查搜索"""
-        try:
-            import requests
-        except ImportError:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message="requests 未安装，请运行: pip install requests"
-            )
-        
-        try:
-            # API 端点
-            url = "https://api.bocha.cn/v1/web-search"
-            
-            # 请求头
-            headers = {
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json'
-            }
-            
-            # 确定时间范围
-            freshness = "oneWeek"
-            if days <= 1:
-                freshness = "oneDay"
-            elif days <= 7:
-                freshness = "oneWeek"
-            elif days <= 30:
-                freshness = "oneMonth"
-            else:
-                freshness = "oneYear"
-
-            # 请求参数（严格按照API文档）
-            payload = {
-                "query": query,
-                "freshness": freshness,  # 动态时间范围
-                "summary": True,  # 启用AI摘要
-                "count": min(max_results, 50)  # 最大50条
-            }
-            
-            # 执行搜索（带瞬时 SSL/网络错误重试）
-            response = _post_with_retry(url, headers=headers, json=payload, timeout=10)
-            
-            # 检查HTTP状态码
-            if response.status_code != 200:
-                # 尝试解析错误信息
-                try:
-                    if response.headers.get('content-type', '').startswith('application/json'):
-                        error_data = response.json()
-                        error_message = error_data.get('message', response.text)
-                    else:
-                        error_message = response.text
-                except Exception:
-                    error_message = response.text
-                
-                # 根据错误码处理
-                if response.status_code == 403:
-                    error_msg = f"余额不足: {error_message}"
-                elif response.status_code == 401:
-                    error_msg = f"API KEY无效: {error_message}"
-                elif response.status_code == 400:
-                    error_msg = f"请求参数错误: {error_message}"
-                elif response.status_code == 429:
-                    error_msg = f"请求频率达到限制: {error_message}"
-                else:
-                    error_msg = f"HTTP {response.status_code}: {error_message}"
-                
-                logger.warning(f"[Bocha] 搜索失败: {error_msg}")
-                
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            # 解析响应
-            try:
-                data = response.json()
-            except ValueError as e:
-                error_msg = f"响应JSON解析失败: {str(e)}"
-                logger.error(f"[Bocha] {error_msg}")
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            # 检查响应code
-            if data.get('code') != 200:
-                error_msg = data.get('msg') or f"API返回错误码: {data.get('code')}"
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            # 记录原始响应到日志
-            logger.info(f"[Bocha] 搜索完成，query='{query}'")
-            logger.debug(f"[Bocha] 原始响应: {data}")
-            
-            # 解析搜索结果
-            results = []
-            web_pages = data.get('data', {}).get('webPages', {})
-            value_list = web_pages.get('value', [])
-            
-            for item in value_list[:max_results]:
-                # 优先使用summary（AI摘要），fallback到snippet
-                snippet = item.get('summary') or item.get('snippet', '')
-                
-                # 截取摘要长度
-                if snippet:
-                    snippet = snippet[:500]
-                
-                results.append(SearchResult(
-                    title=item.get('name', ''),
-                    snippet=snippet,
-                    url=item.get('url', ''),
-                    source=item.get('siteName') or self._extract_domain(item.get('url', '')),
-                    published_date=item.get('datePublished'),  # UTC+8格式，无需转换
-                ))
-            
-            logger.info(f"[Bocha] 成功解析 {len(results)} 条结果")
-            
-            return SearchResponse(
-                query=query,
-                results=results,
-                provider=self.name,
-                success=True,
-            )
-            
-        except requests.exceptions.Timeout:
-            error_msg = "请求超时"
-            logger.error(f"[Bocha] {error_msg}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-        except requests.exceptions.RequestException as e:
-            error_msg = f"网络请求失败: {str(e)}"
-            logger.error(f"[Bocha] {error_msg}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-        except Exception as e:
-            error_msg = f"未知错误: {str(e)}"
-            logger.error(f"[Bocha] {error_msg}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-    
-    @staticmethod
-    def _extract_domain(url: str) -> str:
-        """从 URL 提取域名作为来源"""
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            domain = parsed.netloc.replace('www.', '')
-            return domain or '未知来源'
-        except Exception:
-            return '未知来源'
-
-
-class AnspireSearchProvider(BaseSearchProvider):
-    """
-    Anspire Search 搜索引擎
-    
-    特点：
-    - 面向AI生态的下一代实时智能搜索引擎
-    - 结果精准、响应快速
-    - 适用于股票新闻和市场情报搜索
-    
-    文档: https://open.anspire.cn/document/docs/searchApi/
-    """
-    
-    def __init__(self, api_keys: List[str]):
-        super().__init__(api_keys, "Anspire")
-    
-    def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
-        """执行 Anspire 搜索"""
-        try:
-            import requests
-        except ImportError:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message="requests 未安装，请运行：pip install requests"
-            )
-        
-        try:
-            # API 端点
-            url = "https://plugin.anspire.cn/api/ntsearch/search"
-            
-            # 请求头
-            headers = {
-                'Authorization': f'Bearer {api_key}'
-            }
-
-            # 请求参数
-            payload = {
-                "query": query,
-                "top_k": min(max_results,50), 
-                "FromTime": (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S"),
-                "ToTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            # 执行搜索
-            response = _get_with_retry(url, headers=headers, params=payload, timeout=10)
-            
-            # 检查 HTTP 状态码
-            if response.status_code != 200:
-                # 尝试解析错误信息
-                try:
-                    if response.headers.get('content-type', '').startswith('application/json'):
-                        error_data = response.json()
-                        error_message = error_data.get('message', response.text)
-                    else:
-                        error_message = response.text
-                except Exception:
-                    error_message = response.text
-                
-                # 根据错误码处理
-                if response.status_code == 403:
-                    error_msg = f"余额不足或权限不足：{error_message}"
-                elif response.status_code == 401:
-                    error_msg = f"API KEY 无效：{error_message}"
-                elif response.status_code == 400:
-                    error_msg = f"请求参数错误：{error_message}"
-                else:
-                    error_msg = f"HTTP {response.status_code}: {error_message}"
-                
-                logger.warning(f"[Anspire] 搜索失败：{error_msg}")
-                
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            # 解析响应
-            try:
-                data = response.json()
-            except ValueError as e:
-                error_msg = f"响应 JSON 解析失败：{str(e)}"
-                logger.error(f"[Anspire] {error_msg}")
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            if 'code' in data and data.get('code') != 200:
-                error_msg = data.get('msg') or f"API 返回错误码：{data.get('code')}"
-                logger.warning(f"[Anspire] 搜索失败：{error_msg}")
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            if 'results' not in data:
-                error_msg = "响应中缺少 results 字段"
-                logger.error(f"[Anspire] {error_msg}，原始响应：{data}")
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg
-                )
-            
-            # 记录原始响应到日志
-            logger.info(f"[Anspire] 搜索完成，query='{query}'")
-            logger.debug(f"[Anspire] 原始响应：{data}")
-            
-            results = []
-            value_list = data.get('results', [])
-            
-            for item in value_list[:max_results]:
-                snippet = item.get('content')
-                if snippet and isinstance(snippet, str) and len(snippet) > 500:
-                    snippet = snippet[:500] + "..."
-                
-                results.append(SearchResult(
-                    title=item.get('title', ''),
-                    snippet=snippet,
-                    url=item.get('url', ''),
-                    source=self._extract_domain(item.get('url', '')),
-                    published_date=item.get('date', '')
-                ))
-            
-            logger.info(f"[Anspire] 成功解析 {len(results)} 条结果")
-            
-            return SearchResponse(
-                query=query,
-                results=results,
-                provider=self.name,
-                success=True,
-            )
-            
-        except requests.exceptions.Timeout:
-            error_msg = "请求超时"
-            logger.error(f"[Anspire] {error_msg}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-        except requests.exceptions.RequestException as e:
-            error_msg = f"网络请求失败：{str(e)}"
-            logger.error(f"[Anspire] {error_msg}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-        except Exception as e:
-            error_msg = f"未知错误：{str(e)}"
-            logger.error(f"[Anspire] {error_msg}")
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=error_msg
-            )
-    
-    @staticmethod
-    def _extract_domain(url: str) -> str:
-        """从 URL 提取域名作为来源"""
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            domain = parsed.netloc.replace('www.', '')
-            return domain or '未知来源'
-        except Exception:
-            return '未知来源'
 
 
 class MiniMaxSearchProvider(BaseSearchProvider):
@@ -1696,402 +1161,6 @@ class BraveSearchProvider(BaseSearchProvider):
         )
 
 
-class SearXNGSearchProvider(BaseSearchProvider):
-    """
-    SearXNG search engine (self-hosted, no quota).
-
-    Self-hosted instances are used when explicitly configured.
-    Otherwise, the provider can lazily discover public instances from
-    searx.space and rotate across them with per-request failover.
-    """
-
-    PUBLIC_INSTANCES_URL = "https://searx.space/data/instances.json"
-    PUBLIC_INSTANCES_CACHE_TTL_SECONDS = 3600
-    PUBLIC_INSTANCES_STALE_REFRESH_BACKOFF_SECONDS = 60
-    PUBLIC_INSTANCES_POOL_LIMIT = 20
-    PUBLIC_INSTANCES_MAX_ATTEMPTS = 3
-    PUBLIC_INSTANCES_TIMEOUT_SECONDS = 5
-    SELF_HOSTED_TIMEOUT_SECONDS = 10
-
-    _public_instances_cache: Optional[Tuple[float, List[str]]] = None
-    _public_instances_stale_retry_after: float = 0.0
-    _public_instances_lock = threading.Lock()
-
-    def __init__(self, base_urls: Optional[List[str]] = None, *, use_public_instances: bool = False):
-        normalized_base_urls = [url.rstrip("/") for url in (base_urls or []) if url.strip()]
-        super().__init__(normalized_base_urls, "SearXNG")
-        self._base_urls = normalized_base_urls
-        self._use_public_instances = bool(use_public_instances and not self._base_urls)
-        self._cursor = 0
-        self._cursor_lock = threading.Lock()
-
-    @property
-    def is_available(self) -> bool:
-        return bool(self._base_urls) or self._use_public_instances
-
-    @classmethod
-    def reset_public_instance_cache(cls) -> None:
-        """Reset the shared searx.space cache (used by tests)."""
-        with cls._public_instances_lock:
-            cls._public_instances_cache = None
-            cls._public_instances_stale_retry_after = 0.0
-
-    @staticmethod
-    def _parse_http_error(response) -> str:
-        """Parse HTTP error details for easier diagnostics."""
-        try:
-            raw_content_type = response.headers.get("content-type", "")
-            content_type = raw_content_type if isinstance(raw_content_type, str) else ""
-            if "json" in content_type:
-                error_data = response.json()
-                if isinstance(error_data, dict):
-                    message = error_data.get("error") or error_data.get("message")
-                    if message:
-                        return str(message)
-                return str(error_data)
-            raw_text = getattr(response, "text", "")
-            body = raw_text.strip() if isinstance(raw_text, str) else ""
-            return body[:200] if body else f"HTTP {response.status_code}"
-        except Exception:
-            raw_text = getattr(response, "text", "")
-            body = raw_text if isinstance(raw_text, str) else ""
-            return f"HTTP {response.status_code}: {body[:200]}"
-
-    @staticmethod
-    def _time_range(days: int) -> str:
-        if days <= 1:
-            return "day"
-        if days <= 7:
-            return "week"
-        if days <= 30:
-            return "month"
-        return "year"
-
-    @classmethod
-    def _search_latency_seconds(cls, instance_data: Dict[str, Any]) -> float:
-        timing = (instance_data.get("timing") or {}).get("search") or {}
-        all_timing = timing.get("all")
-        if isinstance(all_timing, dict):
-            for key in ("mean", "median"):
-                value = all_timing.get(key)
-                if isinstance(value, (int, float)):
-                    return float(value)
-        return float("inf")
-
-    @classmethod
-    def _extract_public_instances(cls, payload: Any) -> List[str]:
-        if not isinstance(payload, dict):
-            return []
-
-        instances = payload.get("instances")
-        if not isinstance(instances, dict):
-            return []
-
-        ranked: List[Tuple[float, float, str]] = []
-        for raw_url, item in instances.items():
-            if not isinstance(raw_url, str) or not isinstance(item, dict):
-                continue
-            if item.get("network_type") != "normal":
-                continue
-            http_status = (item.get("http") or {}).get("status_code")
-            if http_status != 200:
-                continue
-            timing = (item.get("timing") or {}).get("search") or {}
-            uptime = timing.get("success_percentage")
-            if not isinstance(uptime, (int, float)) or float(uptime) <= 0:
-                continue
-
-            ranked.append(
-                (
-                    float(uptime),
-                    cls._search_latency_seconds(item),
-                    raw_url.rstrip("/"),
-                )
-            )
-
-        ranked.sort(key=lambda row: (-row[0], row[1], row[2]))
-        return [url for _, _, url in ranked[: cls.PUBLIC_INSTANCES_POOL_LIMIT]]
-
-    @classmethod
-    def _get_public_instances(cls) -> List[str]:
-        now = time.time()
-        with cls._public_instances_lock:
-            stale_urls: List[str] = []
-            if cls._public_instances_cache is None and cls._public_instances_stale_retry_after > now:
-                logger.debug(
-                    "[SearXNG] 公共实例冷启动刷新退避中，剩余 %.0fs",
-                    cls._public_instances_stale_retry_after - now,
-                )
-                return []
-            if cls._public_instances_cache is not None:
-                cached_at, cached_urls = cls._public_instances_cache
-                if now - cached_at < cls.PUBLIC_INSTANCES_CACHE_TTL_SECONDS:
-                    return list(cached_urls)
-                stale_urls = list(cached_urls)
-                if cls._public_instances_stale_retry_after > now:
-                    logger.debug(
-                        "[SearXNG] 公共实例刷新退避中，继续使用过期缓存，剩余 %.0fs",
-                        cls._public_instances_stale_retry_after - now,
-                    )
-                    return stale_urls
-
-            try:
-                response = requests.get(
-                    cls.PUBLIC_INSTANCES_URL,
-                    timeout=cls.PUBLIC_INSTANCES_TIMEOUT_SECONDS,
-                )
-                if response.status_code != 200:
-                    logger.warning(
-                        "[SearXNG] 拉取公共实例列表失败: HTTP %s",
-                        response.status_code,
-                    )
-                else:
-                    urls = cls._extract_public_instances(response.json())
-                    if urls:
-                        cls._public_instances_cache = (now, list(urls))
-                        cls._public_instances_stale_retry_after = 0.0
-                        logger.info("[SearXNG] 已刷新公共实例池，共 %s 个候选实例", len(urls))
-                        return list(urls)
-                    logger.warning("[SearXNG] searx.space 未返回可用公共实例，保留已有缓存")
-            except Exception as exc:
-                logger.warning("[SearXNG] 拉取公共实例列表失败: %s", exc)
-
-            if stale_urls:
-                cls._public_instances_stale_retry_after = (
-                    now + cls.PUBLIC_INSTANCES_STALE_REFRESH_BACKOFF_SECONDS
-                )
-                logger.warning(
-                    "[SearXNG] 公共实例刷新失败，继续使用过期缓存，共 %s 个候选实例；"
-                    "%.0fs 内不再刷新",
-                    len(stale_urls),
-                    cls.PUBLIC_INSTANCES_STALE_REFRESH_BACKOFF_SECONDS,
-                )
-                return stale_urls
-            cls._public_instances_stale_retry_after = (
-                now + cls.PUBLIC_INSTANCES_STALE_REFRESH_BACKOFF_SECONDS
-            )
-            logger.warning(
-                "[SearXNG] 公共实例冷启动刷新失败，%.0fs 内不再刷新",
-                cls.PUBLIC_INSTANCES_STALE_REFRESH_BACKOFF_SECONDS,
-            )
-            return []
-
-    def _rotate_candidates(self, pool: List[str], *, max_attempts: int) -> List[str]:
-        if not pool or max_attempts <= 0:
-            return []
-        with self._cursor_lock:
-            start = self._cursor % len(pool)
-            self._cursor = (self._cursor + 1) % len(pool)
-        ordered = pool[start:] + pool[:start]
-        return ordered[:max_attempts]
-
-    def _do_search(  # type: ignore[override]
-        self,
-        query: str,
-        base_url: str,
-        max_results: int,
-        days: int = 7,
-        *,
-        timeout: int,
-        retry_enabled: bool,
-    ) -> SearchResponse:
-        """Execute one SearXNG search against a specific instance."""
-        try:
-            base = base_url.rstrip("/")
-            search_url = base if base.endswith("/search") else base + "/search"
-
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-            params = {
-                "q": query,
-                "format": "json",
-                "time_range": self._time_range(days),
-                "pageno": 1,
-            }
-
-            request_get = _get_with_retry if retry_enabled else requests.get
-            response = request_get(search_url, headers=headers, params=params, timeout=timeout)
-
-            if response.status_code != 200:
-                error_msg = self._parse_http_error(response)
-                if response.status_code == 403:
-                    error_msg = (
-                        f"{error_msg}；SearXNG 实例可能未启用 JSON 输出（请检查 settings.yml），"
-                        "或实例/代理拒绝了本次访问"
-                    )
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message=error_msg,
-                )
-
-            try:
-                data = response.json()
-            except Exception:
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message="响应JSON解析失败",
-                )
-
-            if not isinstance(data, dict):
-                return SearchResponse(
-                    query=query,
-                    results=[],
-                    provider=self.name,
-                    success=False,
-                    error_message="响应格式无效",
-                )
-
-            raw = data.get("results", [])
-            if not isinstance(raw, list):
-                raw = []
-
-            results = []
-            for item in raw:
-                if not isinstance(item, dict):
-                    continue
-                url_val = item.get("url")
-                if not url_val:
-                    continue
-                raw_published_date = item.get("publishedDate")
-
-                snippet = (item.get("content") or item.get("description") or "")[:500]
-                published_date = None
-                if raw_published_date:
-                    try:
-                        dt = datetime.fromisoformat(raw_published_date.replace("Z", "+00:00"))
-                        published_date = dt.strftime("%Y-%m-%d")
-                    except (ValueError, AttributeError):
-                        published_date = raw_published_date
-
-                results.append(
-                    SearchResult(
-                        title=item.get("title", ""),
-                        snippet=snippet,
-                        url=url_val,
-                        source=self._extract_domain(url_val),
-                        published_date=published_date,
-                    )
-                )
-                if len(results) >= max_results:
-                    break
-
-            return SearchResponse(query=query, results=results, provider=self.name, success=True)
-
-        except requests.exceptions.Timeout:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message="请求超时",
-            )
-        except requests.exceptions.RequestException as e:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=f"网络请求失败: {e}",
-            )
-        except Exception as e:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=f"未知错误: {e}",
-            )
-
-    @staticmethod
-    def _extract_domain(url: str) -> str:
-        """Extract domain from URL as source label."""
-        try:
-            from urllib.parse import urlparse
-
-            parsed = urlparse(url)
-            domain = parsed.netloc.replace("www.", "")
-            return domain or "未知来源"
-        except Exception:
-            return "未知来源"
-
-    def search(self, query: str, max_results: int = 5, days: int = 7) -> SearchResponse:
-        """Execute SearXNG search with instance rotation and per-request failover."""
-        start_time = time.time()
-        if self._base_urls:
-            candidates = self._rotate_candidates(
-                self._base_urls,
-                max_attempts=len(self._base_urls),
-            )
-            retry_enabled = True
-            timeout = self.SELF_HOSTED_TIMEOUT_SECONDS
-            empty_error = "SearXNG 未配置可用实例"
-        elif self._use_public_instances:
-            public_instances = self._get_public_instances()
-            candidates = self._rotate_candidates(
-                public_instances,
-                max_attempts=min(len(public_instances), self.PUBLIC_INSTANCES_MAX_ATTEMPTS),
-            )
-            retry_enabled = False
-            timeout = self.PUBLIC_INSTANCES_TIMEOUT_SECONDS
-            empty_error = "未获取到可用的公共 SearXNG 实例"
-        else:
-            candidates = []
-            retry_enabled = False
-            timeout = self.PUBLIC_INSTANCES_TIMEOUT_SECONDS
-            empty_error = "SearXNG 未配置可用实例"
-
-        if not candidates:
-            return SearchResponse(
-                query=query,
-                results=[],
-                provider=self.name,
-                success=False,
-                error_message=empty_error,
-                search_time=time.time() - start_time,
-            )
-
-        errors: List[str] = []
-        for base_url in candidates:
-            response = self._do_search(
-                query,
-                base_url,
-                max_results,
-                days=days,
-                timeout=timeout,
-                retry_enabled=retry_enabled,
-            )
-            response.search_time = time.time() - start_time
-            if response.success:
-                logger.info(
-                    "[%s] 搜索 '%s' 成功，实例=%s，返回 %s 条结果，耗时 %.2fs",
-                    self.name,
-                    query,
-                    base_url,
-                    len(response.results),
-                    response.search_time,
-                )
-                return response
-
-            errors.append(f"{base_url}: {response.error_message or '未知错误'}")
-            logger.warning("[%s] 实例 %s 搜索失败: %s", self.name, base_url, response.error_message)
-
-        elapsed = time.time() - start_time
-        return SearchResponse(
-            query=query,
-            results=[],
-            provider=self.name,
-            success=False,
-            error_message="；".join(errors[:3]) if errors else empty_error,
-            search_time=elapsed,
-        )
 
 
 class SearchService:
@@ -2167,92 +1236,36 @@ class SearchService:
 
     def __init__(
         self,
-        bocha_keys: Optional[List[str]] = None,
-        tavily_keys: Optional[List[str]] = None,
-        anspire_keys: Optional[List[str]] = None,
         brave_keys: Optional[List[str]] = None,
         serpapi_keys: Optional[List[str]] = None,
         minimax_keys: Optional[List[str]] = None,
-        searxng_base_urls: Optional[List[str]] = None,
-        searxng_public_instances_enabled: bool = True,
-        news_max_age_days: int = 3,
-        news_strategy_profile: str = "short",
     ):
         """
         初始化搜索服务
 
         Args:
-            bocha_keys: 博查搜索 API Key 列表
-            tavily_keys: Tavily API Key 列表
-            anspire_keys: Anspire Search API Key 列表
             brave_keys: Brave Search API Key 列表
             serpapi_keys: SerpAPI Key 列表
             minimax_keys: MiniMax API Key 列表
-            searxng_base_urls: SearXNG 实例地址列表（自建无配额兜底）
-            searxng_public_instances_enabled: 未配置自建实例时，是否自动使用公共 SearXNG 实例
-            news_max_age_days: 新闻最大时效（天）
-            news_strategy_profile: 新闻窗口策略档位（ultra_short/short/medium/long）
         """
         self._providers: List[BaseSearchProvider] = []
-        self.news_max_age_days = max(1, news_max_age_days)
-        raw_profile = (news_strategy_profile or "short").strip().lower()
-        self.news_strategy_profile = normalize_news_strategy_profile(news_strategy_profile)
-        if raw_profile != self.news_strategy_profile:
-            logger.warning(
-                "NEWS_STRATEGY_PROFILE '%s' 无效，已回退为 'short'",
-                news_strategy_profile,
-            )
-        self.news_window_days = resolve_news_window_days(
-            news_max_age_days=self.news_max_age_days,
-            news_strategy_profile=self.news_strategy_profile,
-        )
-        self.news_profile_days = NEWS_STRATEGY_WINDOWS.get(
-            self.news_strategy_profile,
-            NEWS_STRATEGY_WINDOWS["short"],
-        )
+        self.news_window_days = 3
 
         # 初始化搜索引擎（按优先级排序）
-        # 1. Bocha 优先（中文搜索优化，AI摘要）
-        if bocha_keys:
-            self._providers.append(BochaSearchProvider(bocha_keys))
-            logger.info(f"已配置 Bocha 搜索，共 {len(bocha_keys)} 个 API Key")
-
-        # 2. Tavily（免费额度更多，每月 1000 次）
-        if tavily_keys:
-            self._providers.append(TavilySearchProvider(tavily_keys))
-            logger.info(f"已配置 Tavily 搜索，共 {len(tavily_keys)} 个 API Key")
-
-        # 3. Brave Search（隐私优先，全球覆盖）
-        if brave_keys:
-            self._providers.append(BraveSearchProvider(brave_keys))
-            logger.info(f"已配置 Brave 搜索，共 {len(brave_keys)} 个 API Key")
-
-        # 4. SerpAPI 作为备选（每月 100 次）
-        if serpapi_keys:
-            self._providers.append(SerpAPISearchProvider(serpapi_keys))
-            logger.info(f"已配置 SerpAPI 搜索，共 {len(serpapi_keys)} 个 API Key")
-
-        # 5. MiniMax（Coding Plan Web Search，结构化结果）
+        # 1. MiniMax（Coding Plan Web Search，结构化结果）
         if minimax_keys:
             self._providers.append(MiniMaxSearchProvider(minimax_keys))
             logger.info(f"已配置 MiniMax 搜索，共 {len(minimax_keys)} 个 API Key")
 
-        # 6. SearXNG（自建实例优先；未配置时可自动发现公共实例）
-        searxng_provider = SearXNGSearchProvider(
-            searxng_base_urls,
-            use_public_instances=bool(searxng_public_instances_enabled and not searxng_base_urls),
-        )
-        if searxng_provider.is_available:
-            self._providers.append(searxng_provider)
-            if searxng_base_urls:
-                logger.info("已配置 SearXNG 搜索，共 %s 个自建实例", len(searxng_base_urls))
-            else:
-                logger.info("已启用 SearXNG 公共实例自动发现模式")
+        # 2. Brave Search（隐私优先，全球覆盖）
+        if brave_keys:
+            self._providers.append(BraveSearchProvider(brave_keys))
+            logger.info(f"已配置 Brave 搜索，共 {len(brave_keys)} 个 API Key")
 
-        # 7. Anspire Search（实时智能搜索优化）
-        if anspire_keys:
-            self._providers.insert(0, AnspireSearchProvider(anspire_keys))
-            logger.info(f"已配置 Anspire Search 搜索，共 {len(anspire_keys)} 个 API Key")
+        # 3. SerpAPI 作为备选（每月 100 次）
+        if serpapi_keys:
+            self._providers.append(SerpAPISearchProvider(serpapi_keys))
+            logger.info(f"已配置 SerpAPI 搜索，共 {len(serpapi_keys)} 个 API Key")
             
         if not self._providers:
             if importlib.util.find_spec("akshare") is not None:
@@ -2266,13 +1279,7 @@ class SearchService:
         self._cache_inflight: Dict[str, threading.Event] = {}
         # Default cache TTL in seconds (10 minutes)
         self._cache_ttl: int = 600
-        logger.info(
-            "新闻时效策略已启用: profile=%s, profile_days=%s, NEWS_MAX_AGE_DAYS=%s, effective_window=%s",
-            self.news_strategy_profile,
-            self.news_profile_days,
-            self.news_max_age_days,
-            self.news_window_days,
-        )
+        logger.info("搜索服务初始化完成，新闻时效窗口: %d 天", self.news_window_days)
     
     @staticmethod
     def _is_foreign_stock(stock_code: str) -> bool:
@@ -2718,11 +1725,7 @@ class SearchService:
             self._cache[key] = (time.time(), response)
 
     def _effective_news_window_days(self) -> int:
-        """Resolve effective news window from strategy profile and global max-age."""
-        return resolve_news_window_days(
-            news_max_age_days=self.news_max_age_days,
-            news_strategy_profile=self.news_strategy_profile,
-        )
+        return 3
 
     @classmethod
     def _provider_request_size(cls, max_results: int) -> int:
@@ -3406,7 +2409,7 @@ class SearchService:
             SearchResponse 对象
         """
         # 策略窗口优先：ultra_short/short/medium/long = 1/3/7/30 天，
-        # 并统一受 NEWS_MAX_AGE_DAYS 上限约束。
+        # 按固定 3 天窗口做严格日期过滤。
         search_days = self._effective_news_window_days()
         provider_max_results = self._provider_request_size(max_results)
         prefer_chinese = self._should_prefer_chinese_news(
@@ -3432,14 +2435,12 @@ class SearchService:
         logger.info(
             (
                 "搜索股票新闻: %s(%s), query='%s', 时间范围: 近%s天 "
-                "(profile=%s, NEWS_MAX_AGE_DAYS=%s, prefer_chinese=%s), 目标条数=%s, provider请求条数=%s"
+                "(prefer_chinese=%s), 目标条数=%s, provider请求条数=%s"
             ),
             stock_name,
             stock_code,
             query,
             search_days,
-            self.news_strategy_profile,
-            self.news_max_age_days,
             prefer_chinese,
             max_results,
             provider_max_results,
@@ -3478,9 +2479,7 @@ class SearchService:
                     continue
 
                 search_kwargs: Dict[str, Any] = {}
-                if isinstance(provider, TavilySearchProvider):
-                    search_kwargs["topic"] = "news"
-                elif isinstance(provider, BraveSearchProvider):
+                if isinstance(provider, BraveSearchProvider):
                     search_kwargs.update(
                         self._brave_search_locale(
                             stock_code,
@@ -3812,14 +2811,11 @@ class SearchService:
 
         logger.info(
             (
-                "开始多维度情报搜索: %s(%s), 时间范围: 近%s天 "
-                "(profile=%s, NEWS_MAX_AGE_DAYS=%s), 目标条数=%s, provider请求条数=%s"
+                "开始多维度情报搜索: %s(%s), 时间范围: 近%s天, 目标条数=%s, provider请求条数=%s"
             ),
             stock_name,
             stock_code,
             search_days,
-            self.news_strategy_profile,
-            self.news_max_age_days,
             target_per_dimension,
             provider_max_results,
         )
@@ -3842,19 +2838,11 @@ class SearchService:
 
                 logger.info(f"[情报搜索] {dim['desc']}: 使用 {provider.name}")
 
-                if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
-                    response = provider.search(
-                        dim['query'],
-                        max_results=provider_max_results,
-                        days=search_days,
-                        topic=dim['tavily_topic'],
-                    )
-                else:
-                    response = provider.search(
-                        dim['query'],
-                        max_results=provider_max_results,
-                        days=search_days,
-                    )
+                response = provider.search(
+                    dim['query'],
+                    max_results=provider_max_results,
+                    days=search_days,
+                )
                 provider_name = provider.name
             else:
                 logger.info(f"[情报搜索] {dim['desc']}: 无搜索引擎，尝试 AkShare fallback")
@@ -4228,16 +3216,9 @@ def get_search_service() -> SearchService:
                 config = get_config()
                 
                 _search_service = SearchService(
-                    bocha_keys=config.bocha_api_keys,
-                    tavily_keys=config.tavily_api_keys,
-                    anspire_keys=config.anspire_api_keys,
                     brave_keys=config.brave_api_keys,
                     serpapi_keys=config.serpapi_keys,
                     minimax_keys=config.minimax_api_keys,
-                    searxng_base_urls=config.searxng_base_urls,
-                    searxng_public_instances_enabled=config.searxng_public_instances_enabled,
-                    news_max_age_days=config.news_max_age_days,
-                    news_strategy_profile=getattr(config, "news_strategy_profile", "short"),
                 )
     
     return _search_service

@@ -98,6 +98,54 @@ def _check_frontend_assets_consistency(static_dir: Path) -> List[str]:
     return missing
 
 
+async def _startup_catch_up_check():
+    """Check at startup whether today's full sync has run. If not, trigger it asynchronously."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from src.storage import MarketCache, get_db
+    from src.task_history import task_history
+    from src.services.scheduler_jobs import run_daily_market_cache_refresh
+
+    beijing_tz = timezone(timedelta(hours=8))
+    await asyncio.sleep(45)
+
+    try:
+        now = datetime.now(beijing_tz)
+        today = now.date()
+
+        is_fresh = False
+        with get_db().get_session() as s:
+            trend_row = s.query(MarketCache).filter_by(cache_key="trend").one_or_none()
+            if trend_row and trend_row.created_at.date() == today:
+                is_fresh = True
+
+        if not is_fresh:
+            for item in task_history.get_history("market_cache_refresh", limit=5):
+                try:
+                    executed_at = datetime.fromisoformat(item["executed_at"])
+                    if executed_at.tzinfo is None:
+                        executed_at = executed_at.replace(tzinfo=beijing_tz)
+                    else:
+                        executed_at = executed_at.astimezone(beijing_tz)
+                    if executed_at.date() == today and item.get("status") == "success":
+                        is_fresh = True
+                        break
+                except Exception:
+                    continue
+
+        if not is_fresh:
+            logger.info("Startup catch-up: No fresh data for %s. Triggering full daily sync.", today)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(executor, run_daily_market_cache_refresh)
+            task_history.record("market_cache_refresh", "success", duration_ms=0)
+            logger.info("Startup catch-up: Full sync finished.")
+        else:
+            logger.info("Startup catch-up: Data for %s is up-to-date. Skipping.", today)
+    except Exception as exc:
+        logger.warning("Startup catch-up check failed: %s", exc)
+
+
 def _resolve_asset_path(assets_dir: Path, asset_path: str) -> Optional[Path]:
     """Resolve a requested asset path while keeping it confined to assets_dir."""
     decoded_path = unquote(asset_path)
@@ -158,11 +206,16 @@ async def app_lifespan(app: FastAPI):
     market_refresh_task = asyncio.create_task(_daily_market_cache_refresh_loop())
     app.state._market_refresh_task = market_refresh_task
 
+    startup_catch_up_task = asyncio.create_task(_startup_catch_up_check())
+    app.state._startup_catch_up_task = startup_catch_up_task
+
     try:
         yield
     finally:
         refresh_task.cancel()
         market_refresh_task.cancel()
+        if hasattr(app.state, "_startup_catch_up_task"):
+            app.state._startup_catch_up_task.cancel()
         try:
             await refresh_task
         except asyncio.CancelledError:

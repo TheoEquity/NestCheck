@@ -18,7 +18,6 @@ def _build_config(**overrides):
         litellm_fallback_models=["openai/gpt-4o-mini"],
         llm_model_list=[],
         llm_channels=[],
-        litellm_config_path=None,
         llm_models_source="legacy_env",
         openai_base_url=None,
     )
@@ -28,10 +27,10 @@ def _build_config(**overrides):
 
 
 class AgentModelsApiTestCase(unittest.TestCase):
-    def test_models_endpoint_returns_litellm_config_deployments(self) -> None:
+    def test_models_endpoint_returns_channel_deployments(self) -> None:
         config = _build_config(
-            litellm_config_path="config/litellm.yaml",
-            llm_models_source="litellm_config",
+            llm_models_source="llm_channels",
+            llm_channels=[{"name": "primary"}],
             llm_model_list=[
                 {
                     "model_name": "gemini-primary",
@@ -47,7 +46,7 @@ class AgentModelsApiTestCase(unittest.TestCase):
         deployments = list_agent_model_deployments(config)
 
         self.assertEqual(len(deployments), 2)
-        self.assertEqual(deployments[0]["source"], "litellm_config")
+        self.assertEqual(deployments[0]["source"], "llm_channels")
         self.assertTrue(deployments[0]["is_primary"])
         self.assertFalse("api_key" in str(deployments))
 
@@ -336,14 +335,11 @@ class AgentSkillsEndpointTestCase(unittest.TestCase):
         self.assertEqual(payload["content"], "ok")
 class AgentModelsSourceDetectionTestCase(unittest.TestCase):
     @patch("src.config.setup_env")
-    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-    def test_load_from_env_marks_channels_as_actual_source_after_yaml_fallback(
+    def test_load_from_env_marks_channels_as_actual_source(
         self,
-        _mock_parse_yaml,
         _mock_setup_env,
     ) -> None:
         env = {
-            "LITELLM_CONFIG": "config/missing.yaml",
             "LLM_CHANNELS": "primary",
             "LLM_PRIMARY_API_KEY": "channel-secret-key",
             "LLM_PRIMARY_MODELS": "openai/gpt-4o-mini",
@@ -361,14 +357,11 @@ class AgentModelsSourceDetectionTestCase(unittest.TestCase):
         self.assertEqual(config.llm_model_list[0]["litellm_params"]["model"], "openai/gpt-4o-mini")
 
     @patch("src.config.setup_env")
-    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-    def test_load_from_env_marks_legacy_as_actual_source_after_yaml_fallback(
+    def test_load_from_env_marks_legacy_as_actual_source(
         self,
-        _mock_parse_yaml,
         _mock_setup_env,
     ) -> None:
         env = {
-            "LITELLM_CONFIG": "config/missing.yaml",
             "LLM_CHANNELS": "",
             "OPENAI_API_KEY": "legacy-openai-key",
             "LITELLM_MODEL": "gpt-4o-mini",

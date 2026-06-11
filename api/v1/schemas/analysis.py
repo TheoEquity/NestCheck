@@ -251,10 +251,6 @@ class TaskStatus(BaseModel):
         None, 
         description="分析结果（仅在 completed 时存在）"
     )
-    market_review_report: Optional[str] = Field(
-        None,
-        description="大盘复盘任务返回的报告文本（仅大盘复盘任务）",
-    )
     error: Optional[str] = Field(
         None, 
         description="错误信息（仅在 failed 时存在）"
@@ -274,7 +270,6 @@ class TaskStatus(BaseModel):
             "status": "completed",
             "progress": 100,
             "result": None,
-            "market_review_report": None,
             "error": None,
             "stock_name": "贵州茅台",
             "original_query": "茅台",

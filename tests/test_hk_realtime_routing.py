@@ -34,7 +34,6 @@ class TestHKRealtimeRouting(unittest.TestCase):
     @patch("src.config.get_config")
     def test_manager_routes_hk_suffix_only_to_akshare_once(self, mock_get_config):
         mock_get_config.return_value = SimpleNamespace(
-            enable_realtime_quote=True,
             realtime_source_priority="tencent,akshare_sina,efinance,akshare_em,tushare",
         )
 
@@ -46,7 +45,7 @@ class TestHKRealtimeRouting(unittest.TestCase):
         quote = manager.get_realtime_quote("1810.HK")
 
         self.assertIsNone(quote)
-        self.assertEqual(akshare.calls, [(("HK01810",), {"source": "hk"})])
+        self.assertEqual(akshare.calls, [(("1810.HK",), {"source": "hk"})])
         self.assertEqual(efinance.calls, [])
         self.assertEqual(tushare.calls, [])
 

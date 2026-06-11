@@ -114,10 +114,7 @@ class ConfigStorage:
 
     def _default_settings(self) -> Dict[str, Any]:
         """默认系统设置"""
-        return {
-            "market_review_enabled": True,
-            "market_review_region": "cn",
-        }
+        return {}
 
     def get_settings(self) -> Dict[str, Any]:
         """获取系统设置"""
@@ -210,10 +207,7 @@ class ConfigStorage:
         settings = self.get_settings()
 
         # 映射关系到环境变量
-        env_mapping = {
-            "MARKET_REVIEW_ENABLED": str(settings.get("market_review_enabled", True)).lower(),
-            "MARKET_REVIEW_REGION": settings.get("market_review_region", "cn"),
-        }
+        env_mapping = {}
 
         for key, value in env_mapping.items():
             if value is not None and key not in os.environ:

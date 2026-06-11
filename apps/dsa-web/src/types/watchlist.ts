@@ -50,17 +50,6 @@ export interface WatchlistSignalLight {
 export interface WatchlistItemListResponse {
   items: WatchlistItem[];
   total: number;
-  marketReview?: WatchlistMarketReview | null;
-}
-
-export interface WatchlistMarketReview {
-  latestAnalysisId?: number | null;
-  latestAnalysisAt?: string | null;
-  latestAnalysisSummary?: string | null;
-  latestAnalysisContent?: string | null;
-  latestAnalysisSections?: Record<string, string> | null;
-  latestOperationAdvice?: string | null;
-  latestTrendPrediction?: string | null;
 }
 
 export interface WatchlistItemInput {

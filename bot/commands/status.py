@@ -78,10 +78,6 @@ class StatusCommand(BotCommand):
             for channel in llm_channels
             if str(channel.get("name") or "").strip()
         ]
-        status["ai_yaml"] = (
-            getattr(config, "llm_models_source", "") == "litellm_config"
-            and bool(llm_model_list)
-        )
         status["ai_legacy_keys"] = {
             "Gemini": bool(getattr(config, "gemini_api_keys", [])),
             "OpenAI": bool(getattr(config, "openai_api_keys", [])),
@@ -138,7 +134,6 @@ class StatusCommand(BotCommand):
             f"• 主模型: {status['ai_primary_model'] or '未配置'}",
             f"• Agent 模型: {status['ai_agent_model'] or '未配置'}",
             f"• LLM 渠道: {', '.join(status['ai_channels']) if status['ai_channels'] else '未配置'}",
-            f"• LiteLLM YAML: {icon(status['ai_yaml'])}",
             "• Legacy Key: "
             + ", ".join(
                 f"{name}{icon(enabled)}"
@@ -166,7 +161,7 @@ class StatusCommand(BotCommand):
                 "",
                 "---",
                 "⚠️ **AI 服务未配置，分析功能不可用**",
-                "请配置 LITELLM_MODEL、LLM_CHANNELS、LITELLM_CONFIG 或任一 provider API Key",
+                "请配置 LITELLM_MODEL、LLM_CHANNELS 或任一 provider API Key",
             ])
         
         return "\n".join(lines)

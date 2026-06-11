@@ -172,7 +172,6 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --debug            # 调试模式
   python main.py --dry-run          # 仅获取数据，不进行 AI 分析
   python main.py --stocks 600519,000001  # 指定分析特定股票
-  python main.py --market-review    # 仅运行大盘复盘
         '''
     )
 
@@ -199,18 +198,6 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=None,
         help='并发线程数（默认使用配置值）'
-    )
-
-    parser.add_argument(
-        '--market-review',
-        action='store_true',
-        help='仅运行大盘复盘分析'
-    )
-
-    parser.add_argument(
-        '--no-market-review',
-        action='store_true',
-        help='跳过大盘复盘分析'
     )
 
     parser.add_argument(
@@ -299,13 +286,13 @@ def _compute_trading_day_filter(
     stock_codes: List[str],
 ) -> Tuple[List[str], Optional[str], bool]:
     """
-    Compute filtered stock list and effective market review region (Issue #373).
+    Compute filtered stock list and effective region (Issue #373).
 
     Returns:
         (filtered_codes, effective_region, should_skip_all)
         - effective_region None = use config default (check disabled)
-        - effective_region '' = all relevant markets closed, skip market review
-        - should_skip_all: skip entire run when no stocks and no market review to run
+        - effective_region '' = all relevant markets closed, skip analysis
+        - should_skip_all: skip entire run when no stocks to analyze
     """
     force_run = getattr(args, 'force_run', False)
     if force_run or not getattr(config, 'trading_day_check_enabled', True):
@@ -324,36 +311,8 @@ def _compute_trading_day_filter(
         if mkt in open_markets or mkt is None:
             filtered_codes.append(code)
 
-    if config.market_review_enabled and not getattr(args, 'no_market_review', False):
-        effective_region = compute_effective_region(
-            getattr(config, 'market_review_region', 'cn') or 'cn', open_markets
-        )
-    else:
-        effective_region = None
-
-    should_skip_all = (not filtered_codes) and (effective_region or '') == ''
-    return (filtered_codes, effective_region, should_skip_all)
-
-
-def _run_market_review_with_shared_lock(
-    config: Config,
-    run_market_review_func: Callable[..., Optional[str]],
-    **kwargs: Any,
-) -> Optional[str]:
-    from src.core.market_review_lock import (
-        release_market_review_lock,
-        try_acquire_market_review_lock,
-    )
-
-    lock_token = try_acquire_market_review_lock(config)
-    if lock_token is None:
-        logger.warning("大盘复盘正在执行中，跳过本次大盘复盘")
-        return None
-
-    try:
-        return run_market_review_func(**kwargs)
-    finally:
-        release_market_review_lock(lock_token)
+    should_skip_all = not filtered_codes
+    return (filtered_codes, should_skip_all)
 
 
 def run_full_analysis(
@@ -362,19 +321,18 @@ def run_full_analysis(
     stock_codes: Optional[List[str]] = None
 ):
     """
-    执行完整的分析流程（个股 + 大盘复盘）
+    执行完整的分析流程（个股）
 
     这是定时任务调用的主函数
     """
     # Import pipeline modules outside the broad try/except so that import-time
     # failures propagate to the caller instead of being silently swallowed.
-    from src.core.market_review import run_market_review
     from src.core.pipeline import StockAnalysisPipeline
 
     try:
         # Issue #373: Trading day filter (per-stock, per-market)
         effective_codes = stock_codes or []
-        filtered_codes, effective_region, should_skip = _compute_trading_day_filter(
+        filtered_codes, should_skip = _compute_trading_day_filter(
             config, args, effective_codes
         )
         if should_skip:
@@ -400,7 +358,7 @@ def run_full_analysis(
             save_context_snapshot=save_context_snapshot
         )
 
-        # 1. 运行个股分析
+        # 运行个股分析
         results = []
         if stock_codes:
             results = pipeline.run(
@@ -409,36 +367,6 @@ def run_full_analysis(
             )
         else:
             logger.info("未通过 --stocks 指定股票，跳过个股分析")
-
-        # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
-        analysis_delay = getattr(config, 'analysis_delay', 0)
-        if (
-            analysis_delay > 0
-            and config.market_review_enabled
-            and not args.no_market_review
-            and effective_region != ''
-        ):
-            logger.info(f"等待 {analysis_delay} 秒后执行大盘复盘（避免API限流）...")
-            time.sleep(analysis_delay)
-
-        # 2. 运行大盘复盘（如果启用且不是仅个股模式）
-        market_report = ""
-        if (
-            config.market_review_enabled
-            and not args.no_market_review
-            and effective_region != ''
-        ):
-            review_result = _run_market_review_with_shared_lock(
-                config,
-                run_market_review,
-                notifier=pipeline.notifier,
-                analyzer=pipeline.analyzer,
-                search_service=pipeline.search_service,
-                override_region=effective_region,
-            )
-            # 如果有结果，赋值给 market_report 用于后续飞书文档生成
-            if review_result:
-                market_report = review_result
 
         # 输出摘要
         if results:
@@ -457,7 +385,7 @@ def run_full_analysis(
             from src.feishu_doc import FeishuDocManager
 
             feishu_doc = FeishuDocManager()
-            if feishu_doc.is_configured() and (results or market_report):
+            if feishu_doc.is_configured() and results:
                 logger.info("正在创建飞书云文档...")
 
                 # 1. 准备标题 "01-01 13:01大盘复盘"
@@ -698,43 +626,8 @@ def main() -> int:
             )
             return 0
 
-        # 模式1: 仅大盘复盘
-        if args.market_review:
-            from src.core.market_review import run_market_review
-            from src.core.market_review_runtime import build_market_review_runtime
-
-            # Issue #373: Trading day check for market-review-only mode.
-            # Do NOT use _compute_trading_day_filter here: that helper checks
-            # config.market_review_enabled, which would wrongly block an
-            # explicit --market-review invocation when the flag is disabled.
-            effective_region = None
-            if not getattr(args, 'force_run', False) and getattr(config, 'trading_day_check_enabled', True):
-                from src.core.trading_calendar import get_open_markets_today, compute_effective_region as _compute_region
-                open_markets = get_open_markets_today()
-                effective_region = _compute_region(
-                    getattr(config, 'market_review_region', 'cn') or 'cn', open_markets
-                )
-                if effective_region == '':
-                    logger.info("今日大盘复盘相关市场均为非交易日，跳过执行。可使用 --force-run 强制执行。")
-                    return 0
-
-            logger.info("模式: 仅大盘复盘")
-            analyzer, search_service = build_market_review_runtime(config)
-
-            _run_market_review_with_shared_lock(
-                config,
-                run_market_review,
-                analyzer=analyzer,
-                search_service=search_service,
-                override_region=effective_region,
-            )
-            return 0
-
-        # 模式2: 正常单次运行
-        if config.run_immediately:
-            run_full_analysis(config, args, stock_codes)
-        else:
-            logger.info("配置为不立即运行分析 (RUN_IMMEDIATELY=false)")
+        # 正常单次运行
+        run_full_analysis(config, args, stock_codes)
 
         logger.info("\n程序执行完成")
 

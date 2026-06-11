@@ -339,6 +339,19 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": ["provider_priority_order"],
     },
+    "FIRECRAWL_API_KEY": {
+        "help_key": "settings.data_source.search_api_keys",
+        "examples": [
+            "FIRECRAWL_API_KEY=fc-your_key_here",
+        ],
+        "docs": [
+            {
+                "label": "Firecrawl 文档",
+                "href": "https://docs.firecrawl.dev/",
+            },
+        ],
+        "warning_codes": ["secret_value"],
+    },
     "TUSHARE": {
         "title": "Tushare",
         "description": "是否启用 Tushare 数据源（需填写 Token）。用于获取 A 股/指数的高频行情、财务数据与资金流向。",
@@ -422,6 +435,31 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 29,
+    },
+    "FIRECRAWL_API_KEY": {
+        "title": "Firecrawl API Key",
+        "description": "Firecrawl API key used to scrape article URLs after a news URL is discovered.",
+        "category": "data_source",
+        "data_type": "string",
+        "ui_control": "password",
+        "is_sensitive": True,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": None,
+        "options": [],
+        "validation": {},
+        "display_order": 54,
+        "help_key": "settings.data_source.search_api_keys",
+        "examples": [
+            "FIRECRAWL_API_KEY=fc-your_key_here",
+        ],
+        "docs": [
+            {
+                "label": "Firecrawl 文档",
+                "href": "https://docs.firecrawl.dev/",
+            },
+        ],
+        "warning_codes": ["secret_value"],
     },
     "GEMINI_API_KEY": {
         "title": "Gemini API Key",

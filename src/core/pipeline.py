@@ -1882,7 +1882,7 @@ class StockAnalysisPipeline:
         3. 收集分析结果
 
         Args:
-            stock_codes: 股票代码列表（可选，默认使用配置中的自选股）
+            stock_codes: 股票代码列表
             dry_run: 是否仅获取数据不分析
 
         Returns:
@@ -1890,12 +1890,11 @@ class StockAnalysisPipeline:
         """
         start_time = time.time()
         
-        # 使用配置中的股票列表
         if stock_codes is None:
-            stock_codes = list(self.config.stock_list)
+            stock_codes = []
         
         if not stock_codes:
-            logger.error("未配置自选股列表")
+            logger.error("未指定股票列表")
             return []
         
         logger.info(f"===== 开始分析 {len(stock_codes)} 只股票 =====")

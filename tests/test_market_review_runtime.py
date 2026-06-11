@@ -42,19 +42,15 @@ class TestMarketReviewRuntimeCompatibility(unittest.TestCase):
     def test_build_market_review_runtime_includes_legacy_provider_configs(self) -> None:
         config = self._base_config()
         config.openai_api_key = "openai-key"
-        notifier = MagicMock()
         analyzer = MagicMock()
         analyzer.is_available.return_value = True
 
         with patch("src.analyzer.GeminiAnalyzer", return_value=analyzer) as analyzer_cls, \
-             patch("src.notification.NotificationService", return_value=notifier) as notifier_cls, \
              patch("src.search_service.SearchService") as search_cls:
-            runtime_notifier, runtime_analyzer, runtime_search = build_market_review_runtime(config)
+            runtime_analyzer, runtime_search = build_market_review_runtime(config)
 
-        notifier_cls.assert_called_once_with(source_message=None)
         analyzer_cls.assert_called_once_with(config=config)
         search_cls.assert_not_called()
-        self.assertIs(runtime_notifier, notifier)
         self.assertIs(runtime_analyzer, analyzer)
         self.assertIsNone(runtime_search)
 
@@ -71,19 +67,15 @@ class TestMarketReviewRuntimeCompatibility(unittest.TestCase):
                 },
             }
         ]
-        notifier = MagicMock()
         analyzer = MagicMock()
         analyzer.is_available.return_value = True
 
         with patch("src.analyzer.GeminiAnalyzer", return_value=analyzer) as analyzer_cls, \
-             patch("src.notification.NotificationService", return_value=notifier) as notifier_cls, \
              patch("src.search_service.SearchService") as search_cls:
-            runtime_notifier, runtime_analyzer, runtime_search = build_market_review_runtime(config)
+            runtime_analyzer, runtime_search = build_market_review_runtime(config)
 
-        notifier_cls.assert_called_once_with(source_message=None)
         analyzer_cls.assert_called_once_with(config=config)
         search_cls.assert_not_called()
-        self.assertIs(runtime_notifier, notifier)
         self.assertIs(runtime_analyzer, analyzer)
         self.assertIsNone(runtime_search)
 
@@ -91,19 +83,15 @@ class TestMarketReviewRuntimeCompatibility(unittest.TestCase):
         config = self._base_config()
         config.litellm_model = "openai/gpt-5.5"
 
-        notifier = MagicMock()
         analyzer = MagicMock()
         analyzer.is_available.return_value = True
 
         with patch("src.analyzer.GeminiAnalyzer", return_value=analyzer) as analyzer_cls, \
-             patch("src.notification.NotificationService", return_value=notifier) as notifier_cls, \
              patch("src.search_service.SearchService") as search_cls:
-            runtime_notifier, runtime_analyzer, runtime_search = build_market_review_runtime(config)
+            runtime_analyzer, runtime_search = build_market_review_runtime(config)
 
-        notifier_cls.assert_called_once_with(source_message=None)
         analyzer_cls.assert_called_once_with(config=config)
         search_cls.assert_not_called()
-        self.assertIs(runtime_notifier, notifier)
         self.assertIs(runtime_analyzer, analyzer)
         self.assertIsNone(runtime_search)
 

@@ -49,7 +49,7 @@ class AlertApiTestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519",
+                    "CUSTOM_NOTE=sample",
                     "GEMINI_API_KEY=test",
                     "ADMIN_AUTH_ENABLED=false",
                     'AGENT_EVENT_ALERT_RULES_JSON=[{"stock_code":"000001","alert_type":"price_cross","direction":"above","price":10}]',
@@ -320,12 +320,6 @@ class AlertApiTestCase(unittest.TestCase):
         )
         valid_cases = [
             {
-                "target_scope": "watchlist",
-                "target": "default",
-                "alert_type": "price_cross",
-                "parameters": {"direction": "above", "price": 10},
-            },
-            {
                 "target_scope": "portfolio_holdings",
                 "target": str(account["id"]),
                 "alert_type": "rsi_threshold",
@@ -346,7 +340,7 @@ class AlertApiTestCase(unittest.TestCase):
         invalid_cases = [
             {
                 "target_scope": "watchlist",
-                "target": "600519",
+                "target": "default",
                 "alert_type": "price_cross",
                 "parameters": {"direction": "above", "price": 10},
             },
@@ -374,34 +368,18 @@ class AlertApiTestCase(unittest.TestCase):
             self.assertEqual(resp.status_code, 400, resp.text)
             self.assertEqual(resp.json()["error"], "validation_error")
 
-    def test_p6_watchlist_dry_run_aggregates_targets_without_stock_code_validation(self) -> None:
+    def test_p6_portfolio_holdings_dry_run_timeout_counts_target_as_skipped(self) -> None:
+        account = PortfolioService().create_account(
+            name="Slow",
+            broker="Demo",
+            market="cn",
+            base_currency="CNY",
+        )
+        PortfolioService().add_position(account_id=account["id"], symbol="600519", quantity=1, cost_price=10)
         rule = self._create_rule({
-            "name": "Watchlist breakout",
-            "target_scope": "watchlist",
-            "target": "default",
-            "alert_type": "price_cross",
-            "parameters": {"direction": "above", "price": 10},
-        })
-
-        async def _quote(_monitor, stock_code):
-            return SimpleNamespace(price=11.0 if stock_code == "600519" else 9.0)
-
-        with patch("src.agent.events.EventMonitor._get_realtime_quote", new=_quote):
-            resp = self.client.post(f"/api/v1/alerts/rules/{rule['id']}/test")
-
-        self.assertEqual(resp.status_code, 200, resp.text)
-        payload = resp.json()
-        self.assertEqual(payload["target_scope"], "watchlist")
-        self.assertTrue(payload["triggered"])
-        self.assertGreaterEqual(payload["evaluated_count"], 1)
-        self.assertEqual(payload["triggered_count"], 1)
-        self.assertEqual(payload["target_results"][0]["target"], "600519")
-
-    def test_p6_watchlist_dry_run_timeout_counts_target_as_skipped(self) -> None:
-        rule = self._create_rule({
-            "name": "Watchlist slow",
-            "target_scope": "watchlist",
-            "target": "default",
+            "name": "Holdings slow",
+            "target_scope": "portfolio_holdings",
+            "target": str(account["id"]),
             "alert_type": "price_cross",
             "parameters": {"direction": "above", "price": 10},
         })

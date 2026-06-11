@@ -217,11 +217,10 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             anthropic_api_keys=["sk-ant-test-value"],
         )
 
-        with patch("src.notification.NotificationService"), \
-             patch("src.analyzer.GeminiAnalyzer") as analyzer_cls:
+        with patch("src.analyzer.GeminiAnalyzer") as analyzer_cls:
             analyzer_cls.return_value.is_available.return_value = True
 
-            _, analyzer, search_service = analysis_endpoint_module._build_market_review_runtime(config)
+            analyzer, search_service = analysis_endpoint_module._build_market_review_runtime(config)
 
         analyzer_cls.assert_called_once_with(config=config)
         self.assertIs(analyzer, analyzer_cls.return_value)
@@ -231,16 +230,14 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         if analysis_endpoint_module is None:
             self.skipTest("analysis endpoint helpers unavailable in this environment")
 
-        runtime_notifier = MagicMock()
         runtime_search = MagicMock()
         runtime_analyzer = MagicMock()
         with patch.object(
             analysis_endpoint_module,
             "_build_market_review_runtime",
-            return_value=(runtime_notifier, runtime_analyzer, runtime_search),
+            return_value=(runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review", return_value="report") as run_market_review:
             result = analysis_endpoint_module._run_market_review_background(
-                send_notification=False,
                 override_region="cn",
                 lock_token=None,
                 config=SimpleNamespace(),
@@ -248,10 +245,8 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
         self.assertEqual(result, {"result": "report"})
         run_market_review.assert_called_once_with(
-            notifier=runtime_notifier,
             analyzer=runtime_analyzer,
             search_service=runtime_search,
-            send_notification=False,
             override_region="cn",
         )
 

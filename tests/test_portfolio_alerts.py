@@ -213,20 +213,5 @@ class PortfolioAlertsTestCase(unittest.TestCase):
         self.assertEqual([item.symbol for item in targets], ["SH000001", "SZ000001", "000001", "SH600519"])
         self.assertEqual(overflow, 0)
 
-    def test_watchlist_expansion_uses_config_stock_list(self) -> None:
-        class Config:
-            stock_list = ["000001", "000001", "hk00700"]
-
-        config = Config()
-        targets, overflow = expand_symbol_targets(
-            target_scope="watchlist",
-            target="default",
-            config=config,
-        )
-
-        self.assertEqual([item.symbol for item in targets], ["000001", "HK00700"])
-        self.assertEqual(overflow, 0)
-
-
 if __name__ == "__main__":
     unittest.main()

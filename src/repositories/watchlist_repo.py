@@ -6,12 +6,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, delete, desc, func, or_, select
+from sqlalchemy import and_, delete, desc, func, select
 from sqlalchemy.exc import IntegrityError
 
 from src.storage import (
-    AlertRuleRecord,
-    AlertTriggerRecord,
     AnalysisHistory,
     DatabaseManager,
     FundDailyNav,
@@ -168,37 +166,6 @@ class WatchlistRepository:
             session.commit()
             return bool(result.rowcount)
 
-    def alert_summary_for_items(self, items: List[WatchlistItem]) -> Dict[int, Dict[str, Any]]:
-        summary = {
-            item.id: {
-                "alert_rule_count": 0,
-                "alert_trigger_count": 0,
-                "latest_alert_triggered_at": None,
-            }
-            for item in items
-        }
-        if not items:
-            return summary
-
-        with self.db.get_session() as session:
-            for item in items:
-                targets = self._targets_for_item(item)
-                rule_count = session.execute(
-                    select(func.count(AlertRuleRecord.id)).where(AlertRuleRecord.target.in_(targets))
-                ).scalar() or 0
-                trigger_count = session.execute(
-                    select(func.count(AlertTriggerRecord.id)).where(AlertTriggerRecord.target.in_(targets))
-                ).scalar() or 0
-                latest = session.execute(
-                    select(func.max(AlertTriggerRecord.triggered_at)).where(AlertTriggerRecord.target.in_(targets))
-                ).scalar()
-                summary[item.id] = {
-                    "alert_rule_count": int(rule_count),
-                    "alert_trigger_count": int(trigger_count),
-                    "latest_alert_triggered_at": latest.isoformat() if latest else None,
-                }
-        return summary
-
     def quote_summary_for_items(self, items: List[WatchlistItem]) -> Dict[int, Dict[str, Any]]:
         stock_items = [item for item in items if item.asset_category == "stock"]
         fund_items = [item for item in items if item.asset_category == "fund"]
@@ -300,35 +267,6 @@ class WatchlistRepository:
                 "latest_operation_advice": row.operation_advice,
                 "latest_trend_prediction": row.trend_prediction,
             }
-
-    def related_alerts(self, item: WatchlistItem, *, limit: int = 20) -> Dict[str, List[Any]]:
-        targets = self._targets_for_item(item)
-        safe_limit = max(1, min(int(limit), 100))
-        with self.db.get_session() as session:
-            rules = session.execute(
-                select(AlertRuleRecord)
-                .where(or_(AlertRuleRecord.target.in_(targets), AlertRuleRecord.target_scope == "watchlist"))
-                .order_by(desc(AlertRuleRecord.updated_at), desc(AlertRuleRecord.id))
-                .limit(safe_limit)
-            ).scalars().all()
-            triggers = session.execute(
-                select(AlertTriggerRecord)
-                .where(AlertTriggerRecord.target.in_(targets))
-                .order_by(desc(AlertTriggerRecord.triggered_at), desc(AlertTriggerRecord.id))
-                .limit(safe_limit)
-            ).scalars().all()
-            return {"rules": list(rules), "triggers": list(triggers)}
-
-    @staticmethod
-    def _targets_for_item(item: WatchlistItem) -> List[str]:
-        values = {
-            str(item.symbol or "").strip(),
-            f"{item.market}:{item.symbol}".strip(),
-            f"{item.asset_category}:{item.market}:{item.symbol}".strip(),
-            str(item.id),
-            f"watchlist:{item.id}",
-        }
-        return [value for value in values if value and value != ":" and value != "::"]
 
     @staticmethod
     def _market_review_excerpt(text: Optional[str]) -> Optional[str]:

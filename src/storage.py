@@ -1004,86 +1004,6 @@ class LLMUsage(Base):
     called_at = Column(DateTime, default=datetime.now, index=True)
 
 
-class AlertRuleRecord(Base):
-    """Persisted alert rule managed through the Alert API."""
-
-    __tablename__ = 'alert_rules'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(64), nullable=False)
-    target_scope = Column(String(32), nullable=False, default='single_symbol', index=True)
-    target = Column(String(64), nullable=False, index=True)
-    alert_type = Column(String(32), nullable=False, index=True)
-    parameters = Column(Text, nullable=False, default='{}')
-    severity = Column(String(16), nullable=False, default='warning', index=True)
-    enabled = Column(Boolean, nullable=False, default=True, index=True)
-    source = Column(String(16), nullable=False, default='api', index=True)
-    cooldown_policy = Column(Text)
-    notification_policy = Column(Text)
-    created_at = Column(DateTime, default=datetime.now, index=True)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
-
-    __table_args__ = (
-        Index('ix_alert_rule_type_target', 'alert_type', 'target'),
-    )
-
-
-class AlertTriggerRecord(Base):
-    """Alert trigger history row.
-
-    P1 exposes read APIs and table shape; runtime writer integration lands in
-    later phases.
-    """
-
-    __tablename__ = 'alert_triggers'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    rule_id = Column(Integer, index=True)
-    target = Column(String(64), nullable=False, index=True)
-    observed_value = Column(Float)
-    threshold = Column(Float)
-    reason = Column(Text)
-    data_source = Column(String(64))
-    data_timestamp = Column(DateTime, index=True)
-    triggered_at = Column(DateTime, default=datetime.now, index=True)
-    status = Column(String(16), nullable=False, default='triggered', index=True)
-    diagnostics = Column(Text)
-
-    __table_args__ = (
-        Index('ix_alert_notification_rule_time', 'rule_id', 'triggered_at'),
-    )
-
-
-class AlertCooldownRecord(Base):
-    """Alert cooldown tracking per rule/target/severity."""
-
-    __tablename__ = 'alert_cooldowns'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    rule_id = Column(Integer, index=True, nullable=False)
-    rule_key = Column(String(64))
-    target = Column(String(64), nullable=False)
-    severity = Column(String(16))
-    last_triggered_at = Column(DateTime)
-    cooldown_until = Column(DateTime)
-    reason = Column(Text)
-    state = Column(String(16), nullable=False, default='active')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-
-class AlertNotificationRecord(Base):
-    """Alert notification delivery tracking."""
-
-    __tablename__ = 'alert_notifications'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    trigger_id = Column(Integer, index=True, nullable=False)
-    channel = Column(String(32), nullable=False)
-    success = Column(Integer)  # 0/1 boolean proxy
-    details = Column(Text)
-    created_at = Column(DateTime, default=datetime.now, index=True)
-
-
 # === 基金模块数据模型 ===
 
 class FundInfo(Base):
@@ -2199,15 +2119,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         query_id: str,
         code: Optional[str] = None,
         diagnostics: Optional[Dict[str, Any]] = None,
-        notification_runs: Optional[List[Dict[str, Any]]] = None,
     ) -> int:
-        """
-        更新已保存分析历史的运行诊断快照。
-
-        通知结果通常在分析历史落库后才产生，因此这里仅补写
-        context_snapshot.diagnostics，不改变报告正文或其它历史字段。
-        """
-        if not query_id or (diagnostics is None and not notification_runs):
+        """更新已保存分析历史的运行诊断快照。"""
+        if not query_id or diagnostics is None:
             return 0
 
         try:
@@ -2234,28 +2148,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     except Exception:
                         context_snapshot = {}
 
-                if diagnostics is not None:
-                    context_snapshot["diagnostics"] = diagnostics
-                else:
-                    existing_diagnostics = context_snapshot.get("diagnostics")
-                    if not isinstance(existing_diagnostics, dict):
-                        existing_diagnostics = {
-                            "query_id": query_id,
-                            "stock_code": code,
-                            "notification_runs": [],
-                        }
-                    runs = existing_diagnostics.get("notification_runs")
-                    if not isinstance(runs, list):
-                        runs = []
-                    trace_id = existing_diagnostics.get("trace_id")
-                    for run in notification_runs or []:
-                        if isinstance(run, dict):
-                            run_payload = dict(run)
-                            if trace_id and not run_payload.get("trace_id"):
-                                run_payload["trace_id"] = trace_id
-                            runs.append(run_payload)
-                    existing_diagnostics["notification_runs"] = runs
-                    context_snapshot["diagnostics"] = existing_diagnostics
+                context_snapshot["diagnostics"] = diagnostics
                 row.context_snapshot = self._safe_json_dumps(context_snapshot)
                 return 1
 

@@ -182,11 +182,10 @@ class TaskService:
                 save_context_snapshot=save_context_snapshot
             )
 
-            # 执行单只股票分析（启用单股推送）
+            # 执行单只股票分析
             result = pipeline.process_single_stock(
                 code=code,
                 skip_analysis=False,
-                single_stock_notify=True,
                 report_type=report_type
             )
 

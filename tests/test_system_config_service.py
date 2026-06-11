@@ -27,7 +27,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519,000001",
+                    "CUSTOM_NOTE=desktop sample",
                     "GEMINI_API_KEY=secret-key-value",
                     "RUN_IMMEDIATELY=true",
                     "LOG_LEVEL=INFO",
@@ -75,7 +75,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertFalse(items["REPORT_SHOW_LLM_MODEL"]["raw_value_exists"])
 
         self._rewrite_env(
-            "STOCK_LIST=600519,000001",
+            "CUSTOM_NOTE=desktop sample",
             "GEMINI_API_KEY=secret-key-value",
             "RUN_IMMEDIATELY=true",
             "LOG_LEVEL=INFO",
@@ -90,7 +90,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_get_config_preserves_explicit_empty_switch_value(self) -> None:
         self._rewrite_env(
-            "STOCK_LIST=600519,000001",
+            "CUSTOM_NOTE=desktop sample",
             "GEMINI_API_KEY=secret-key-value",
             "RUN_IMMEDIATELY=true",
             "LOG_LEVEL=INFO",
@@ -105,7 +105,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_get_config_preserves_explicit_empty_report_show_llm_model_value(self) -> None:
         self._rewrite_env(
-            "STOCK_LIST=600519,000001",
+            "CUSTOM_NOTE=desktop sample",
             "GEMINI_API_KEY=secret-key-value",
             "RUN_IMMEDIATELY=true",
             "LOG_LEVEL=INFO",
@@ -128,13 +128,11 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertFalse(status["ready_for_smoke"])
         self.assertEqual(status["next_step_key"], "llm_primary")
         self.assertIn("llm_primary", status["required_missing_keys"])
-        self.assertIn("stock_list", status["required_missing_keys"])
 
     def test_get_setup_status_marks_minimal_config_complete(self) -> None:
         self._rewrite_env(
             "LITELLM_MODEL=gemini/gemini-3-flash-preview",
             "GEMINI_API_KEY=secret-key-value",
-            "STOCK_LIST=600519",
         )
 
         with patch.dict(os.environ, {}, clear=True):
@@ -145,13 +143,10 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertTrue(status["ready_for_smoke"])
         self.assertEqual(checks["llm_primary"]["status"], "configured")
         self.assertEqual(checks["llm_agent"]["status"], "inherited")
-        self.assertEqual(checks["stock_list"]["status"], "configured")
-        self.assertEqual(checks["notification"]["status"], "optional")
 
     def test_get_setup_status_accepts_anspire_one_key_llm(self) -> None:
         self._rewrite_env(
             "ANSPIRE_API_KEYS=sk-anspire-test-value",
-            "STOCK_LIST=600519",
         )
 
         with patch.dict(os.environ, {}, clear=True):
@@ -168,7 +163,6 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             "LLM_ANSPIRE_ENABLED=",
             "ANSPIRE_LLM_ENABLED=false",
             "ANSPIRE_API_KEYS=sk-anspire-test-value",
-            "STOCK_LIST=600519",
         )
 
         with patch.dict(os.environ, {}, clear=True):
@@ -184,7 +178,6 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             "LLM_CHANNELS=anspire",
             "LLM_ANSPIRE_ENABLED=false",
             "ANSPIRE_API_KEYS=sk-anspire-test-value",
-            "STOCK_LIST=600519",
         )
 
         with patch.dict(os.environ, {}, clear=True):
@@ -198,7 +191,6 @@ class SystemConfigServiceTestCase(unittest.TestCase):
     def test_get_setup_status_accepts_direct_env_primary_without_provider_key(self) -> None:
         self._rewrite_env(
             "LITELLM_MODEL=minimax/MiniMax-M1",
-            "STOCK_LIST=600519",
         )
 
         with patch.dict(os.environ, {}, clear=True):
@@ -213,7 +205,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         base_lines = [
             "LITELLM_MODEL=gemini/gemini-3-flash-preview",
             "GEMINI_API_KEY=secret-key-value",
-            "STOCK_LIST=600519",
+            "CUSTOM_NOTE=sample",
         ]
 
         self._rewrite_env(*base_lines, "PUSHOVER_USER_KEY=user-key")
@@ -278,7 +270,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             {
                 "LITELLM_MODEL": "gemini/gemini-3-flash-preview",
                 "GEMINI_API_KEY": "runtime-secret",
-                "STOCK_LIST": "600519",
+                "CUSTOM_NOTE": "600519",
             },
             clear=True,
         ), patch("src.services.system_config_service.Config.reset_instance") as mock_reset, \
@@ -295,7 +287,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self._rewrite_env(
             "LITELLM_MODEL=gemini/gemini-3-flash-preview",
             "GEMINI_API_KEY=secret-key-value",
-            "STOCK_LIST=600519",
+            "CUSTOM_NOTE=sample",
             f"DATABASE_PATH={db_path}",
         )
 
@@ -308,7 +300,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_export_desktop_env_returns_raw_text(self) -> None:
         self.env_path.write_text(
-            "# Desktop config\nSTOCK_LIST=600519,000001\n\nGEMINI_API_KEY=secret-key-value\n",
+            "# Desktop config\nCUSTOM_NOTE=desktop sample\n\nGEMINI_API_KEY=secret-key-value\n",
             encoding="utf-8",
         )
 
@@ -316,7 +308,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
         self.assertEqual(
             payload["content"],
-            "# Desktop config\nSTOCK_LIST=600519,000001\n\nGEMINI_API_KEY=secret-key-value\n",
+            "# Desktop config\nCUSTOM_NOTE=desktop sample\n\nGEMINI_API_KEY=secret-key-value\n",
         )
         self.assertEqual(payload["config_version"], self.manager.get_config_version())
 
@@ -325,13 +317,12 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
         payload = self.service.import_desktop_env(
             config_version=current_version,
-            content="STOCK_LIST=300750\nCUSTOM_NOTE=desktop backup\n",
+            content="CUSTOM_NOTE=desktop backup\n",
             reload_now=False,
         )
 
         self.assertTrue(payload["success"])
         current_map = self.manager.read_config_map()
-        self.assertEqual(current_map["STOCK_LIST"], "300750")
         self.assertEqual(current_map["CUSTOM_NOTE"], "desktop backup")
         self.assertEqual(current_map["GEMINI_API_KEY"], "secret-key-value")
 
@@ -352,12 +343,12 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
         self.service.import_desktop_env(
             config_version=current_version,
-            content="STOCK_LIST=000001\nSTOCK_LIST=300750\n",
+            content="CUSTOM_NOTE=first sample\nCUSTOM_NOTE=desktop backup\n",
             reload_now=False,
         )
 
         current_map = self.manager.read_config_map()
-        self.assertEqual(current_map["STOCK_LIST"], "300750")
+        self.assertEqual(current_map["CUSTOM_NOTE"], "desktop backup")
 
     def test_import_desktop_env_allows_empty_assignment(self) -> None:
         current_version = self.manager.get_config_version()
@@ -383,7 +374,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         with self.assertRaises(ConfigConflictError):
             self.service.import_desktop_env(
                 config_version="stale-version",
-                content="STOCK_LIST=300750\n",
+                content="CUSTOM_NOTE=desktop backup\n",
                 reload_now=False,
             )
 
@@ -393,7 +384,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             config_version=old_version,
             items=[
                 {"key": "GEMINI_API_KEY", "value": "******"},
-                {"key": "STOCK_LIST", "value": "600519,300750"},
+                {"key": "CUSTOM_NOTE", "value": "updated sample"},
             ],
             mask_token="******",
             reload_now=False,
@@ -402,10 +393,10 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertTrue(response["success"])
         self.assertEqual(response["applied_count"], 1)
         self.assertEqual(response["skipped_masked_count"], 1)
-        self.assertIn("STOCK_LIST", response["updated_keys"])
+        self.assertIn("CUSTOM_NOTE", response["updated_keys"])
 
         current_map = self.manager.read_config_map()
-        self.assertEqual(current_map["STOCK_LIST"], "600519,300750")
+        self.assertEqual(current_map["CUSTOM_NOTE"], "updated sample")
         self.assertEqual(current_map["GEMINI_API_KEY"], "secret-key-value")
 
     def test_validate_reports_invalid_time(self) -> None:
@@ -1112,318 +1103,6 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertFalse(validation["valid"])
         self.assertTrue(any(issue["key"] == "LITELLM_MODEL" and issue["code"] == "missing_runtime_source" for issue in validation["issues"]))
 
-    @staticmethod
-    def _mock_http_response(status_code: int, json_body: Optional[Dict[str, Any]] = None):
-        response = Mock()
-        response.status_code = status_code
-        response.text = "ok" if status_code == 200 else "error"
-        response.json.return_value = json_body or {"errcode": 0}
-        return response
-
-    def _notification_test_env(self):
-        return patch.dict(os.environ, {"ENV_FILE": str(self.env_path)}, clear=True)
-
-    @patch("src.notification_sender.wechat_sender.requests.post")
-    def test_test_notification_channel_uses_temporary_items_without_persisting(self, mock_post) -> None:
-        mock_post.return_value = self._mock_http_response(200, {"errcode": 0})
-
-        with self._notification_test_env():
-            before_instance = Config.get_instance()
-            payload = self.service.test_notification_channel(
-                channel="wechat",
-                items=[{"key": "WECHAT_WEBHOOK_URL", "value": "https://qyapi.example.com/cgi-bin/webhook/send?key=secret"}],
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-            self.assertIs(Config.get_instance(), before_instance)
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["attempts"][0]["latency_ms"] >= 0, True)
-        self.assertIn("key=***", payload["attempts"][0]["target"])
-        self.assertNotIn("WECHAT_WEBHOOK_URL", self.env_path.read_text(encoding="utf-8"))
-        self.assertEqual(mock_post.call_args.kwargs["timeout"], 3)
-
-    def test_test_notification_channel_reports_missing_config(self) -> None:
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="telegram",
-                items=[{"key": "TELEGRAM_BOT_TOKEN", "value": "token"}],
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-
-        self.assertFalse(payload["success"])
-        self.assertEqual(payload["error_code"], "config_missing")
-        self.assertIn("TELEGRAM_CHAT_ID", payload["message"])
-
-    @patch("src.notification_sender.wechat_sender.requests.post")
-    def test_test_notification_channel_skips_masked_secret_overwrite(self, mock_post) -> None:
-        self._rewrite_env("WECHAT_WEBHOOK_URL=https://saved.example.com/hook?key=savedsecret")
-        mock_post.return_value = self._mock_http_response(200, {"errcode": 0})
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="wechat",
-                items=[{"key": "WECHAT_WEBHOOK_URL", "value": "******"}],
-                mask_token="******",
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(mock_post.call_args[0][0], "https://saved.example.com/hook?key=savedsecret")
-
-    @patch("src.notification_sender.custom_webhook_sender.requests.post")
-    def test_test_notification_channel_returns_custom_webhook_attempts(self, mock_post) -> None:
-        mock_post.side_effect = [
-            self._mock_http_response(500),
-            self._mock_http_response(200),
-        ]
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="custom",
-                items=[
-                    {
-                        "key": "CUSTOM_WEBHOOK_URLS",
-                        "value": (
-                            "https://example.com/robot/send?access_token=first,"
-                            "https://example.com/verylongsecrettoken1234567890"
-                        ),
-                    }
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=4,
-            )
-
-        self.assertTrue(payload["success"])
-        self.assertIn("部分成功", payload["message"])
-        self.assertIn("1/2", payload["message"])
-        self.assertEqual(len(payload["attempts"]), 2)
-        self.assertFalse(payload["attempts"][0]["success"])
-        self.assertTrue(payload["attempts"][1]["success"])
-        self.assertIn("access_token=***", payload["attempts"][0]["target"])
-        self.assertNotIn("verylongsecrettoken1234567890", payload["attempts"][1]["target"])
-        self.assertNotIn("access_token=first", str(payload))
-        self.assertEqual(mock_post.call_args_list[0].kwargs["timeout"], 4)
-
-    @patch("src.notification_sender.custom_webhook_sender.requests.post")
-    def test_test_notification_channel_custom_webhook_all_failures_are_retryable(self, mock_post) -> None:
-        mock_post.side_effect = [
-            self._mock_http_response(500),
-            self._mock_http_response(429),
-        ]
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="custom",
-                items=[
-                    {
-                        "key": "CUSTOM_WEBHOOK_URLS",
-                        "value": (
-                            "https://example.com/robot/send?access_token=first,"
-                            "https://example.com/robot/send?token=second"
-                        ),
-                    }
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=4,
-            )
-
-        self.assertFalse(payload["success"])
-        self.assertEqual(payload["error_code"], "send_failed")
-        self.assertTrue(payload["retryable"])
-        self.assertIn("失败", payload["message"])
-        self.assertIn("0/2", payload["message"])
-        self.assertEqual(len(payload["attempts"]), 2)
-        self.assertTrue(all(attempt["retryable"] for attempt in payload["attempts"]))
-        self.assertNotIn("access_token=first", str(payload))
-        self.assertNotIn("token=second", str(payload))
-
-    @patch("src.notification_sender.ntfy_sender.requests.post")
-    def test_test_notification_channel_supports_ntfy_and_masks_topic_target(self, mock_post) -> None:
-        mock_post.return_value = self._mock_http_response(200)
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="ntfy",
-                items=[
-                    {"key": "NTFY_URL", "value": "https://ntfy.sh/private-topic"},
-                    {"key": "NTFY_TOKEN", "value": "secret-token"},
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=4,
-            )
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(mock_post.call_args.args[0], "https://ntfy.sh")
-        self.assertEqual(mock_post.call_args.kwargs["json"]["topic"], "private-topic")
-        self.assertEqual(mock_post.call_args.kwargs["headers"]["Authorization"], "Bearer secret-token")
-        self.assertEqual(mock_post.call_args.kwargs["timeout"], 4)
-        self.assertIn("https://ntfy.sh/***", payload["attempts"][0]["target"])
-        self.assertNotIn("private-topic", str(payload))
-        self.assertNotIn("NTFY_URL", self.env_path.read_text(encoding="utf-8"))
-
-    @patch("src.notification_sender.ntfy_sender.requests.post")
-    def test_test_notification_channel_rejects_ntfy_url_without_topic(self, mock_post) -> None:
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="ntfy",
-                items=[{"key": "NTFY_URL", "value": "https://ntfy.sh"}],
-                title="Test title",
-                content="hello",
-                timeout_seconds=4,
-            )
-
-        self.assertFalse(payload["success"])
-        self.assertEqual(payload["error_code"], "config_invalid")
-        self.assertEqual(payload["stage"], "config_validation")
-        self.assertIn("NTFY_URL", payload["message"])
-        mock_post.assert_not_called()
-
-    @patch("src.notification_sender.gotify_sender.requests.post")
-    def test_test_notification_channel_supports_gotify_and_keeps_token_out_of_url(self, mock_post) -> None:
-        mock_post.return_value = self._mock_http_response(200)
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="gotify",
-                items=[
-                    {"key": "GOTIFY_URL", "value": "https://gotify.example"},
-                    {"key": "GOTIFY_TOKEN", "value": "secret-token"},
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=4,
-            )
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(mock_post.call_args.args[0], "https://gotify.example/message")
-        self.assertEqual(mock_post.call_args.kwargs["headers"]["X-Gotify-Key"], "secret-token")
-        self.assertEqual(mock_post.call_args.kwargs["timeout"], 4)
-        self.assertEqual(payload["attempts"][0]["target"], "https://gotify.example")
-        self.assertNotIn("secret-token", str(payload))
-        self.assertNotIn("GOTIFY_URL", self.env_path.read_text(encoding="utf-8"))
-
-    @patch("src.notification_sender.gotify_sender.requests.post")
-    def test_test_notification_channel_rejects_gotify_message_endpoint(self, mock_post) -> None:
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="gotify",
-                items=[
-                    {"key": "GOTIFY_URL", "value": "https://gotify.example/message"},
-                    {"key": "GOTIFY_TOKEN", "value": "secret-token"},
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=4,
-            )
-
-        self.assertFalse(payload["success"])
-        self.assertEqual(payload["error_code"], "config_invalid")
-        self.assertEqual(payload["stage"], "config_validation")
-        self.assertIn("GOTIFY_URL", payload["message"])
-        mock_post.assert_not_called()
-
-    @patch(
-        "src.notification_sender.WechatSender.send_to_wechat",
-        side_effect=requests.exceptions.Timeout(
-            "timeout for https://qyapi.example.com/cgi-bin/webhook/send?key=secret token=abc123"
-        ),
-    )
-    def test_test_notification_channel_classifies_escaped_timeout(self, _mock_send) -> None:
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="wechat",
-                items=[
-                    {
-                        "key": "WECHAT_WEBHOOK_URL",
-                        "value": "https://qyapi.example.com/cgi-bin/webhook/send?key=secret",
-                    }
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-
-        self.assertFalse(payload["success"])
-        self.assertEqual(payload["error_code"], "timeout")
-        self.assertTrue(payload["retryable"])
-        self.assertEqual(payload["attempts"][0]["error_code"], "timeout")
-        self.assertIn("key=***", payload["attempts"][0]["target"])
-        self.assertNotIn("key=secret", str(payload))
-        self.assertNotIn("abc123", str(payload))
-
-    @patch("src.notification_sender.telegram_sender.requests.post")
-    def test_test_notification_channel_masks_short_sensitive_target(self, mock_post) -> None:
-        mock_post.return_value = self._mock_http_response(200, {"ok": True})
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="telegram",
-                items=[
-                    {"key": "TELEGRAM_BOT_TOKEN", "value": "tok123"},
-                    {"key": "TELEGRAM_CHAT_ID", "value": "chat-id"},
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["attempts"][0]["target"], "***")
-        self.assertNotIn("tok123", str(payload))
-
-    @patch("src.notification_sender.wechat_sender.requests.post")
-    def test_test_notification_channel_strips_url_userinfo_from_target(self, mock_post) -> None:
-        mock_post.return_value = self._mock_http_response(200, {"errcode": 0})
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="wechat",
-                items=[
-                    {
-                        "key": "WECHAT_WEBHOOK_URL",
-                        "value": "https://user:password@example.com/cgi-bin/webhook/send?key=secret",
-                    }
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-
-        self.assertTrue(payload["success"])
-        target = payload["attempts"][0]["target"]
-        self.assertIn("https://example.com/cgi-bin/webhook/send?key=***", target)
-        self.assertNotIn("user", target)
-        self.assertNotIn("password", target)
-
-    @patch("src.notification_sender.discord_sender.requests.post")
-    def test_test_notification_channel_prefers_discord_main_channel_alias(self, mock_post) -> None:
-        mock_post.return_value = self._mock_http_response(200)
-
-        with self._notification_test_env():
-            payload = self.service.test_notification_channel(
-                channel="discord",
-                items=[
-                    {"key": "DISCORD_BOT_TOKEN", "value": "bot-token"},
-                    {"key": "DISCORD_MAIN_CHANNEL_ID", "value": "main-channel"},
-                    {"key": "DISCORD_CHANNEL_ID", "value": "legacy-channel"},
-                ],
-                title="Test title",
-                content="hello",
-                timeout_seconds=3,
-            )
-
-        self.assertTrue(payload["success"])
-        self.assertIn("/channels/main-channel/messages", mock_post.call_args[0][0])
-
     @patch("litellm.completion")
     def test_test_llm_channel_returns_success_payload(self, mock_completion) -> None:
         mock_completion.return_value = type(
@@ -1544,7 +1223,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_update_runtime_model_cleanup_does_not_rewrite_temperature(self) -> None:
         self._rewrite_env(
-            "STOCK_LIST=600519,000001",
+            "CUSTOM_NOTE=desktop sample",
             "LLM_CHANNELS=deepseek",
             "LLM_DEEPSEEK_PROTOCOL=deepseek",
             "LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com",
@@ -2150,7 +1829,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
     ) -> None:
         response = self.service.update(
             config_version=self.manager.get_config_version(),
-            items=[{"key": "STOCK_LIST", "value": "600519"}],
+            items=[{"key": "RUN_IMMEDIATELY", "value": "false"}],
             reload_now=True,
         )
 
@@ -2158,22 +1837,22 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         mock_reload_runtime_singletons.assert_called_once()
 
     def test_update_with_reload_applies_updated_env_file_when_process_env_is_stale(self) -> None:
-        os.environ["STOCK_LIST"] = "600519,000001"
+        os.environ["RUN_IMMEDIATELY"] = "true"
 
         response = self.service.update(
             config_version=self.manager.get_config_version(),
-            items=[{"key": "STOCK_LIST", "value": "300750,TSLA"}],
+            items=[{"key": "RUN_IMMEDIATELY", "value": "false"}],
             reload_now=True,
         )
 
         self.assertTrue(response["success"])
-        self.assertEqual(Config.get_instance().stock_list, ["300750", "TSLA"])
+        self.assertFalse(Config.get_instance().run_immediately)
 
     def test_update_raises_conflict_for_stale_version(self) -> None:
         with self.assertRaises(ConfigConflictError):
             self.service.update(
                 config_version="stale-version",
-                items=[{"key": "STOCK_LIST", "value": "600519"}],
+                items=[{"key": "RUN_IMMEDIATELY", "value": "false"}],
                 reload_now=False,
             )
 
@@ -2248,7 +1927,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_update_warns_when_runtime_model_references_are_cleared(self) -> None:
         self._rewrite_env(
-            "STOCK_LIST=600519,000001",
+            "CUSTOM_NOTE=desktop sample",
             "LLM_CHANNELS=deepseek",
             "LLM_DEEPSEEK_PROTOCOL=deepseek",
             "LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com",
@@ -2283,7 +1962,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_import_desktop_env_restores_runtime_models_after_cleanup(self) -> None:
         self._rewrite_env(
-            "STOCK_LIST=600519,000001",
+            "CUSTOM_NOTE=desktop sample",
             "LLM_CHANNELS=deepseek",
             "LLM_DEEPSEEK_PROTOCOL=deepseek",
             "LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com",

@@ -64,8 +64,6 @@ class StatusCommand(BotCommand):
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
             "platform": platform.system(),
-            "stock_count": len(config.stock_list),
-            "stock_list": config.stock_list[:5],  # 只显示前5个
         }
         
         # AI 配置状态
@@ -129,15 +127,10 @@ class StatusCommand(BotCommand):
             "",
             "---",
             "",
-            "**📈 自选股配置**",
-            f"• 股票数量: {status['stock_count']} 只",
+            "**📈 个股分析**",
+            "• 默认股票列表: 已移除",
+            "• 运行方式: CLI 使用 --stocks，API 请求传入 stock_code 或 stock_codes",
         ]
-        
-        if status['stock_list']:
-            stocks_preview = ", ".join(status['stock_list'])
-            if status['stock_count'] > 5:
-                stocks_preview += f" ... 等 {status['stock_count']} 只"
-            lines.append(f"• 股票列表: {stocks_preview}")
         
         lines.extend([
             "",

@@ -305,12 +305,6 @@ def trigger_scheduler_task(task_name: str) -> Dict[str, Any]:
                             refresh_trend_realtime_quotes()
                         else:
                             refresh_market_cache(cache_key)
-                elif task_name == "seasonality_cache_refresh":
-                    logger.warning("全年择时缓存刷新已合并到价格刷新任务中，不再单独触发")
-                    return {"status": "skipped", "message": "全年择时缓存刷新已合并到价格刷新任务"}
-                elif task_name == "agent_event_monitor":
-                    logger.warning("Agent 事件监控为后台常驻任务，不支持手动触发")
-                    return {"status": "skipped", "message": "Agent 事件监控为后台常驻任务"}
                 else:
                     raise ValueError(f"未知任务：{task_name}")
 

@@ -92,7 +92,7 @@ class TestFundamentalContext(unittest.TestCase):
             pb_ratio=58.2,
             total_mv=3.4e12,
             circ_mv=3.4e12,
-            source=SimpleNamespace(value="longbridge"),
+            source=SimpleNamespace(value="yfinance"),
         )
         bundle = {
             "status": "partial",

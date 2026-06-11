@@ -4,7 +4,7 @@
 批量分析命令
 ===================================
 
-批量分析自选股列表中的所有股票。
+批量分析显式传入的股票列表。
 """
 
 import logging
@@ -22,11 +22,11 @@ class BatchCommand(BotCommand):
     """
     批量分析命令
     
-    批量分析配置中的自选股列表，生成汇总报告。
+    批量分析显式传入的股票列表，生成汇总报告。
     
     用法：
-        /batch      - 分析所有自选股
-        /batch 3    - 只分析前3只
+        /batch      - 提示传入股票列表
+        /batch 600519 000001 - 分析指定股票
     """
     
     @property
@@ -39,7 +39,7 @@ class BatchCommand(BotCommand):
     
     @property
     def description(self) -> str:
-        return "批量分析自选股"
+        return "批量分析股票"
     
     @property
     def usage(self) -> str:
@@ -52,30 +52,14 @@ class BatchCommand(BotCommand):
     
     def execute(self, message: BotMessage, args: List[str]) -> BotResponse:
         """执行批量分析命令"""
-        from src.config import get_config
+        from data_provider.base import normalize_stock_code
         
-        config = get_config()
-        
-        stock_list = list(config.stock_list)
+        stock_list = [normalize_stock_code(item) for item in args if item.strip()]
         
         if not stock_list:
             return BotResponse.error_response(
-                "自选股列表为空"
+                "请在 /batch 后传入股票代码，例如：/batch 600519 000001"
             )
-        
-        # 解析数量参数
-        limit = None
-        if args:
-            try:
-                limit = int(args[0])
-                if limit <= 0:
-                    return BotResponse.error_response("数量必须大于0")
-            except ValueError:
-                return BotResponse.error_response(f"无效的数量: {args[0]}")
-        
-        # 限制分析数量
-        if limit:
-            stock_list = stock_list[:limit]
         
         logger.info(f"[BatchCommand] 开始批量分析 {len(stock_list)} 只股票")
         

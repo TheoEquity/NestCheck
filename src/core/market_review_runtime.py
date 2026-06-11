@@ -7,7 +7,7 @@ entrypoints share one initialization path for 大盘复盘.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Tuple
+from typing import Any, Tuple
 
 from src.config import Config
 
@@ -43,16 +43,13 @@ def has_configured_llm_runtime(config: Config) -> bool:
 
 def build_market_review_runtime(
     config: Config,
-    source_message: Optional[Any] = None,
-) -> Tuple[Any, Any, Any]:
+    source_message: Any = None,
+) -> Tuple[Any, Any]:
     """
-    Build shared NotificationService, GeminiAnalyzer and SearchService instances.
+    Build shared GeminiAnalyzer and SearchService instances.
     """
     from src.analyzer import GeminiAnalyzer
-    from src.notification import NotificationService
     from src.search_service import SearchService
-
-    notifier = NotificationService(source_message=source_message)
 
     search_service = None
     has_search_capability = getattr(config, "has_search_capability_enabled", None)
@@ -83,4 +80,4 @@ def build_market_review_runtime(
     else:
         logger.warning("未检测到 LLM 模型配置，将仅使用模板生成报告")
 
-    return notifier, analyzer, search_service
+    return analyzer, search_service

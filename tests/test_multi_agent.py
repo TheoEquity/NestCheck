@@ -1429,8 +1429,7 @@ class TestEventMonitorConfigIntegration(unittest.TestCase):
             agent_event_alert_rules_json='[{"stock_code":"600519","alert_type":"price_cross","direction":"above","price":1800}]',
         )
 
-        with patch("src.notification.NotificationService", return_value=MagicMock()):
-            monitor = build_event_monitor_from_config(config=config)
+        monitor = build_event_monitor_from_config(config=config, notifier=MagicMock())
 
         self.assertIsNotNone(monitor)
         self.assertEqual(len(monitor.rules), 1)
@@ -1465,8 +1464,7 @@ class TestEventMonitorConfigIntegration(unittest.TestCase):
             ),
         )
 
-        with patch("src.notification.NotificationService", return_value=MagicMock()):
-            monitor = build_event_monitor_from_config(config=config)
+        monitor = build_event_monitor_from_config(config=config, notifier=MagicMock())
 
         self.assertIsNotNone(monitor)
         self.assertEqual(len(monitor.rules), 1)
@@ -1495,8 +1493,7 @@ class TestEventMonitorConfigIntegration(unittest.TestCase):
             ),
         )
 
-        with patch("src.notification.NotificationService", return_value=MagicMock()):
-            monitor = build_event_monitor_from_config(config=config)
+        monitor = build_event_monitor_from_config(config=config, notifier=MagicMock())
 
         self.assertIsNotNone(monitor)
         self.assertEqual(len(monitor.rules), 1)
@@ -1513,8 +1510,7 @@ class TestEventMonitorConfigIntegration(unittest.TestCase):
             ),
         )
 
-        with patch("src.notification.NotificationService", return_value=MagicMock()):
-            monitor = build_event_monitor_from_config(config=config)
+        monitor = build_event_monitor_from_config(config=config, notifier=MagicMock())
 
         self.assertIsNotNone(monitor)
         self.assertEqual(len(monitor.rules), 1)

@@ -70,7 +70,6 @@ def check_config():
     config = get_config()
     
     print_section("基础配置")
-    print(f"  股票列表: {config.stock_list}")
     print(f"  数据库路径: {config.database_path}")
     print(f"  最大并发数: {config.max_workers}")
     print(f"  调试模式: {config.debug}")
@@ -321,48 +320,10 @@ def check_llm():
 def check_notification():
     """测试通知推送"""
     print_header("5. 通知推送测试")
-    
-    from src.notification import NotificationService
-    from src.config import get_config
-    
-    config = get_config()
-    service = NotificationService()
-    
+
     print_section("配置检查")
-    if service.is_available():
-        print(f"  ✓ 企业微信 Webhook 已配置")
-        webhook_preview = config.wechat_webhook_url[:50] + "..." if len(config.wechat_webhook_url) > 50 else config.wechat_webhook_url
-        print(f"    URL: {webhook_preview}")
-    else:
-        print(f"  ✗ 企业微信 Webhook 未配置")
-        return False
-    
-    print_section("发送测试消息")
-    
-    test_message = f"""## 🧪 系统测试消息
-
-这是一条来自 **A股自选股智能分析系统** 的测试消息。
-
-- 测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-- 测试目的: 验证企业微信 Webhook 配置
-
-如果您收到此消息，说明通知功能配置正确 ✓"""
-    
-    print(f"  正在发送...")
-    
-    try:
-        success = service.send_to_wechat(test_message)
-        
-        if success:
-            print(f"  ✓ 消息发送成功，请检查企业微信")
-        else:
-            print(f"  ✗ 消息发送失败")
-        
-        return success
-        
-    except Exception as e:
-        print(f"  ✗ 发送异常: {e}")
-        return False
+    print("  - 通知子系统已移除，跳过通知推送测试")
+    return True
 
 
 def run_all_tests():

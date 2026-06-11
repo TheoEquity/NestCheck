@@ -128,12 +128,11 @@ class MarketCommand(BotCommand):
             from src.core.market_review_runtime import build_market_review_runtime
             from src.core.market_review import run_market_review
 
-            notifier, analyzer, search_service = build_market_review_runtime(
+            analyzer, search_service = build_market_review_runtime(
                 config,
                 source_message=message,
             )
             review_report = run_market_review(
-                notifier=notifier,
                 analyzer=analyzer,
                 search_service=search_service,
                 override_region=override_region,

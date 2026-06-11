@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from src.repositories.watchlist_repo import WatchlistConflictError, WatchlistRepository
 from src.services.watchlist_signal_service import WatchlistSignalService
-from src.storage import AlertRuleRecord, AlertTriggerRecord, WatchlistItem
+from src.storage import WatchlistItem
 
 
 VALID_MARKETS = {"cn", "hk", "us"}
@@ -51,7 +51,6 @@ class WatchlistService:
         watch_enabled: Optional[bool] = None,
     ) -> Dict[str, Any]:
         rows, total = self.repo.list_items(asset_category=asset_category, watch_enabled=watch_enabled)
-        summaries = self.repo.alert_summary_for_items(rows)
         quote_summaries = self.repo.quote_summary_for_items(rows)
         analysis_summaries = self.repo.stock_analysis_summary_for_items(rows)
         signal_summaries = WatchlistSignalService().latest_signals_for_items([row.id for row in rows])
@@ -59,7 +58,6 @@ class WatchlistService:
             "items": [
                 self._serialize_item(
                     row,
-                    summaries.get(row.id),
                     analysis_summaries.get(row.id),
                     quote_summaries.get(row.id),
                     signal_summaries.get(row.id),
@@ -74,11 +72,10 @@ class WatchlistService:
         row = self.repo.get_item(item_id)
         if row is None:
             raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
-        summary = self.repo.alert_summary_for_items([row]).get(row.id)
         analysis_summary = self.repo.stock_analysis_summary_for_items([row]).get(row.id)
         quote_summary = self.repo.quote_summary_for_items([row]).get(row.id)
         signal_summary = WatchlistSignalService().latest_signals_for_items([row.id]).get(row.id)
-        return self._serialize_item(row, summary, analysis_summary, quote_summary, signal_summary)
+        return self._serialize_item(row, analysis_summary, quote_summary, signal_summary)
 
     def update_item(self, item_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         fields = self._normalize_payload(payload, partial=True)
@@ -100,16 +97,6 @@ class WatchlistService:
         if row is None:
             raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
         return self.get_item(row.id)
-
-    def related_alerts(self, item_id: int) -> Dict[str, List[Dict[str, Any]]]:
-        row = self.repo.get_item(item_id)
-        if row is None:
-            raise WatchlistNotFoundError(f"关注标的不存在: {item_id}")
-        related = self.repo.related_alerts(row)
-        return {
-            "rules": [self._serialize_alert_rule(item) for item in related["rules"]],
-            "triggers": [self._serialize_alert_trigger(item) for item in related["triggers"]],
-        }
 
     def _normalize_payload(self, payload: Dict[str, Any], *, partial: bool = False) -> Dict[str, Any]:
         fields: Dict[str, Any] = {}
@@ -203,12 +190,10 @@ class WatchlistService:
     def _serialize_item(
         self,
         row: WatchlistItem,
-        summary: Optional[Dict[str, Any]] = None,
         analysis_summary: Optional[Dict[str, Any]] = None,
         quote_summary: Optional[Dict[str, Any]] = None,
         signal_summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        summary = summary or {}
         analysis_summary = analysis_summary or {}
         quote_summary = quote_summary or {}
         signal_summary = signal_summary or {}
@@ -228,13 +213,9 @@ class WatchlistService:
             "watch_enabled": row.watch_enabled,
             "analysis_enabled": row.analysis_enabled,
             "analysis_frequency": row.analysis_frequency,
-            "alert_enabled": row.alert_enabled,
             "source": row.source,
             "sort_order": int(row.sort_order or 0),
             "notes": row.notes,
-            "alert_rule_count": int(summary.get("alert_rule_count") or 0),
-            "alert_trigger_count": int(summary.get("alert_trigger_count") or 0),
-            "latest_alert_triggered_at": summary.get("latest_alert_triggered_at"),
             "latest_price": quote_summary.get("latest_price"),
             "latest_change_pct": quote_summary.get("latest_change_pct"),
             "signal_as_of_date": signal_summary.get("as_of_date"),
@@ -335,35 +316,6 @@ class WatchlistService:
         if market == "hk" and symbol.isdigit():
             return f"{symbol.zfill(5)}.HK"
         return upper
-
-    @staticmethod
-    def _serialize_alert_rule(row: AlertRuleRecord) -> Dict[str, Any]:
-        return {
-            "id": row.id,
-            "name": row.name,
-            "target_scope": row.target_scope,
-            "target": row.target,
-            "alert_type": row.alert_type,
-            "severity": row.severity,
-            "enabled": row.enabled,
-            "source": row.source,
-            "updated_at": WatchlistService._dt(row.updated_at),
-        }
-
-    @staticmethod
-    def _serialize_alert_trigger(row: AlertTriggerRecord) -> Dict[str, Any]:
-        return {
-            "id": row.id,
-            "rule_id": row.rule_id,
-            "target": row.target,
-            "observed_value": row.observed_value,
-            "threshold": row.threshold,
-            "reason": row.reason,
-            "data_source": row.data_source,
-            "data_timestamp": WatchlistService._dt(row.data_timestamp),
-            "triggered_at": WatchlistService._dt(row.triggered_at),
-            "status": row.status,
-        }
 
     @staticmethod
     def _dt(value: Optional[datetime]) -> Optional[str]:

@@ -117,8 +117,6 @@ class ConfigStorage:
         return {
             "market_review_enabled": True,
             "market_review_region": "cn",
-            "agent_event_monitor_enabled": False,
-            "agent_event_monitor_interval_minutes": 5,
         }
 
     def get_settings(self) -> Dict[str, Any]:
@@ -215,8 +213,6 @@ class ConfigStorage:
         env_mapping = {
             "MARKET_REVIEW_ENABLED": str(settings.get("market_review_enabled", True)).lower(),
             "MARKET_REVIEW_REGION": settings.get("market_review_region", "cn"),
-            "AGENT_EVENT_MONITOR_ENABLED": str(settings.get("agent_event_monitor_enabled", False)).lower(),
-            "AGENT_EVENT_MONITOR_INTERVAL_MINUTES": str(settings.get("agent_event_monitor_interval_minutes", 5)),
         }
 
         for key, value in env_mapping.items():

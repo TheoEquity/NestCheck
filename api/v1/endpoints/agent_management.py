@@ -182,7 +182,6 @@ def get_agent_management_overview() -> Dict[str, Any]:
             "skill_dir": config.agent_skill_dir,
             "effective_model": effective_model,
             "chat_entrypoint": "/api/v1/agent/chat/stream",
-            "analysis_entrypoint": "/api/v1/analysis/analyze",
         },
         "profiles": profiles,
         "agents": agents,

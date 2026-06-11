@@ -21,10 +21,7 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
     ):
         with patch.dict(
             os.environ,
-            {
-                "STOCK_LIST": "600519",
-                "TICKFLOW_API_KEY": "tf-secret",
-            },
+            {"TICKFLOW_API_KEY": "tf-secret"},
             clear=True,
         ):
             config = Config._load_from_env()
@@ -36,13 +33,7 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
     def test_load_from_env_keeps_default_behavior_without_tickflow_api_key(
         self, _mock_parse_litellm_yaml, _mock_setup_env
     ):
-        with patch.dict(
-            os.environ,
-            {
-                "STOCK_LIST": "600519",
-            },
-            clear=True,
-        ):
+        with patch.dict(os.environ, {}, clear=True):
             config = Config._load_from_env()
 
         self.assertIsNone(config.tickflow_api_key)
@@ -56,13 +47,7 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
     def test_load_from_env_uses_stable_fundamental_timeout_defaults(
         self, _mock_parse_litellm_yaml, _mock_setup_env
     ):
-        with patch.dict(
-            os.environ,
-            {
-                "STOCK_LIST": "600519",
-            },
-            clear=True,
-        ):
+        with patch.dict(os.environ, {}, clear=True):
             config = Config._load_from_env()
 
         self.assertEqual(config.fundamental_stage_timeout_seconds, 8.0)
@@ -109,7 +94,7 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / ".env"
-            env_path.write_text("STOCK_LIST=600519\nRUN_IMMEDIATELY=true\n", encoding="utf-8")
+            env_path.write_text("RUN_IMMEDIATELY=true\n", encoding="utf-8")
 
             with patch.dict(
                 os.environ,
@@ -213,7 +198,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
             env_path.write_text(
                 "\n".join(
                         [
-                            "STOCK_LIST=600519",
                             "RUN_IMMEDIATELY=true",
                         ]
                 )
@@ -225,7 +209,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
                 os.environ,
                 {
                     "ENV_FILE": str(env_path),
-                    "STOCK_LIST": "600519",
                     "RUN_IMMEDIATELY": "true",
                 },
                 clear=True,
@@ -234,7 +217,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
                 env_path.write_text(
                     "\n".join(
                         [
-                            "STOCK_LIST=300750,TSLA",
                             "RUN_IMMEDIATELY=false",
                         ]
                     )
@@ -245,7 +227,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
                 setup_env(override=True)
                 config = Config._load_from_env()
 
-        self.assertEqual(config.stock_list, ["300750", "TSLA"])
         self.assertFalse(config.run_immediately)
         self.assertFalse(config.schedule_run_immediately)
 
@@ -264,7 +245,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
             env_path.write_text(
                 "\n".join(
                         [
-                            "STOCK_LIST=300750,TSLA",
                             "RUN_IMMEDIATELY=false",
                         ]
                 )
@@ -276,7 +256,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
                 os.environ,
                 {
                     "ENV_FILE": str(env_path),
-                    "STOCK_LIST": "600519,000001",
                     "RUN_IMMEDIATELY": "true",
                 },
                 clear=True,
@@ -284,7 +263,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
                 config = Config._load_from_env()
 
         # Explicit process env overrides win when values differ from .env
-        self.assertEqual(config.stock_list, ["600519", "000001"])
         self.assertTrue(config.run_immediately)
         self.assertTrue(config.schedule_run_immediately)
 
@@ -298,20 +276,20 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / ".env"
-            # .env has no STOCK_LIST key at all
             env_path.write_text("LOG_LEVEL=INFO\n", encoding="utf-8")
 
             with patch.dict(
                 os.environ,
                 {
                     "ENV_FILE": str(env_path),
-                    "STOCK_LIST": "600519,000001",
+                    "RUN_IMMEDIATELY": "true",
                 },
                 clear=True,
             ):
                 config = Config._load_from_env()
 
-        self.assertEqual(config.stock_list, ["600519", "000001"])
+        self.assertTrue(config.run_immediately)
+        self.assertTrue(config.schedule_run_immediately)
 
     def test_parse_report_language_accepts_known_alias_without_warning(self) -> None:
         with self.assertNoLogs("src.config", level="WARNING"):
@@ -340,56 +318,6 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
         self.assertEqual(config.news_max_age_days, 3)
         self.assertEqual(config.max_workers, 3)
         self.assertEqual(config.webui_port, 8000)
-
-    @patch("src.config.setup_env")
-    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-    def test_stock_email_groups_support_case_insensitive_env_names(
-        self,
-        _mock_parse_yaml,
-        _mock_setup_env,
-    ) -> None:
-        env = {
-            "STOCK_LIST": "600519,300750",
-            "Stock_Group_1": "600519",
-            "Email_Group_1": "user1@example.com",
-            "stock_group_2": "300750",
-            "email_group_2": "user2@example.com",
-        }
-
-        with patch.dict(os.environ, env, clear=True):
-            config = Config._load_from_env()
-
-        self.assertEqual(
-            config.stock_email_groups,
-            [
-                (["600519"], ["user1@example.com"]),
-                (["300750"], ["user2@example.com"]),
-            ],
-        )
-
-    @patch("src.config.setup_env")
-    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-    def test_stock_email_groups_normalize_codes_at_parse_time(
-        self,
-        _mock_parse_yaml,
-        _mock_setup_env,
-    ) -> None:
-        """STOCK_GROUP codes are canonicalized at parse time so that
-        runtime email routing matches the same equivalence used in
-        validate_structured()."""
-        env = {
-            "STOCK_LIST": "600519,HK00700",
-            "STOCK_GROUP_1": "SH600519,1810.HK",
-            "EMAIL_GROUP_1": "user@example.com",
-        }
-
-        with patch.dict(os.environ, env, clear=True):
-            config = Config._load_from_env()
-
-        stocks, emails = config.stock_email_groups[0]
-        self.assertEqual(stocks, ["600519", "HK01810"])
-        self.assertEqual(emails, ["user@example.com"])
-
 
 if __name__ == "__main__":
     unittest.main()

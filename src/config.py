@@ -16,7 +16,7 @@ import os
 import re
 import importlib.util
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import unquote, urlparse
 from dotenv import load_dotenv, dotenv_values
 from dataclasses import dataclass, field
@@ -594,11 +594,6 @@ class Config:
     # === 数据源 API Token ===
     tushare_token: Optional[str] = None
     tickflow_api_key: Optional[str] = None
-    finnhub_api_key: Optional[str] = None
-    alphavantage_api_key: Optional[str] = None
-    longbridge_app_key: Optional[str] = None
-    longbridge_app_secret: Optional[str] = None
-    longbridge_access_token: Optional[str] = None
 
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
@@ -696,9 +691,6 @@ class Config:
     agent_context_compression_profile: str = AGENT_CONTEXT_COMPRESSION_DEFAULT_PROFILE
     agent_context_compression_trigger_tokens: int = 12000
     agent_context_protected_turns: int = 4
-    agent_event_monitor_enabled: bool = False  # Enable periodic event-driven alert checks in system tasks
-    agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
-    agent_event_alert_rules_json: str = ""  # JSON array of serialized EventMonitor rules
 
     # 报告类型：simple(精简) 或 full(完整)
     report_type: str = "simple"
@@ -797,8 +789,6 @@ class Config:
     fundamental_cache_max_entries: int = 256
 
     # === Portfolio PR2: import/risk/fx settings ===
-    stock_list: List[str] = field(default_factory=lambda: ['600519', '000001', '300750'])
-    stock_email_groups: List[Tuple[List[str], List[str]]] = field(default_factory=list)
     portfolio_risk_concentration_alert_pct: float = 35.0
     portfolio_risk_drawdown_alert_pct: float = 15.0
     portfolio_risk_stop_loss_alert_pct: float = 10.0
@@ -1248,11 +1238,6 @@ class Config:
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
             tushare_token=os.getenv('TUSHARE_TOKEN'),
             tickflow_api_key=os.getenv('TICKFLOW_API_KEY'),
-            finnhub_api_key=os.getenv('FINNHUB_API_KEY') or None,
-            alphavantage_api_key=os.getenv('ALPHAVANTAGE_API_KEY') or None,
-            longbridge_app_key=os.getenv('LONGBRIDGE_APP_KEY') or None,
-            longbridge_app_secret=os.getenv('LONGBRIDGE_APP_SECRET') or None,
-            longbridge_access_token=os.getenv('LONGBRIDGE_ACCESS_TOKEN') or None,
             litellm_model=litellm_model,
             litellm_fallback_models=litellm_fallback_models,
             llm_temperature=resolve_unified_llm_temperature(litellm_model),
@@ -1358,14 +1343,6 @@ class Config:
             agent_context_compression_profile=agent_context_compression_profile,
             agent_context_compression_trigger_tokens=agent_context_compression_trigger_tokens,
             agent_context_protected_turns=agent_context_protected_turns,
-            agent_event_monitor_enabled=os.getenv('AGENT_EVENT_MONITOR_ENABLED', 'false').lower() == 'true',
-            agent_event_monitor_interval_minutes=parse_env_int(
-                os.getenv('AGENT_EVENT_MONITOR_INTERVAL_MINUTES'),
-                5,
-                field_name='AGENT_EVENT_MONITOR_INTERVAL_MINUTES',
-                minimum=1,
-            ),
-            agent_event_alert_rules_json=os.getenv('AGENT_EVENT_ALERT_RULES_JSON', ''),
             report_type=cls._parse_report_type(os.getenv('REPORT_TYPE', 'simple')),
             report_language=cls._parse_report_language(report_language_raw),
             report_summary_only=os.getenv('REPORT_SUMMARY_ONLY', 'false').lower() == 'true',
@@ -1766,40 +1743,6 @@ class Config:
         return model_list
 
     @classmethod
-    def _parse_stock_email_groups(cls) -> List[Tuple[List[str], List[str]]]:
-        """
-        Parse STOCK_GROUP_N and EMAIL_GROUP_N from environment.
-        Returns [(stocks, emails), ...] ordered by group index.
-        Stock codes are canonicalized via normalize_stock_code so that
-        runtime routing matches the same equivalence used in validation.
-        """
-        from data_provider.base import normalize_stock_code
-
-        groups: dict = {}
-        stock_re = re.compile(r'^STOCK_GROUP_(\d+)$', re.IGNORECASE)
-        email_re = re.compile(r'^EMAIL_GROUP_(\d+)$', re.IGNORECASE)
-        for key in os.environ:
-            m = stock_re.match(key)
-            if m:
-                idx = int(m.group(1))
-                val = os.environ[key].strip()
-                groups.setdefault(idx, {})['stocks'] = [
-                    normalize_stock_code(c.strip())
-                    for c in val.split(',') if c.strip()
-                ]
-            m = email_re.match(key)
-            if m:
-                idx = int(m.group(1))
-                val = os.environ[key].strip()
-                groups.setdefault(idx, {})['emails'] = [e.strip() for e in val.split(',') if e.strip()]
-        result = []
-        for idx in sorted(groups.keys()):
-            g = groups[idx]
-            if 'stocks' in g and 'emails' in g and g['stocks'] and g['emails']:
-                result.append((g['stocks'], g['emails']))
-        return result
-
-    @classmethod
     def _parse_report_type(cls, value: str) -> str:
         """Parse REPORT_TYPE, fallback to simple for invalid values (supports brief)."""
         v = (value or 'simple').strip().lower()
@@ -2083,39 +2026,6 @@ class Config:
         """
         issues: List[ConfigIssue] = []
 
-        # --- Stock email group routing consistency ---
-        if self.stock_email_groups:
-            from data_provider.base import normalize_stock_code
-            configured_stock_set = {
-                normalize_stock_code(code)
-                for code in self.stock_list
-                if (code or "").strip()
-            }
-            missing_group_stocks_dict: Dict[str, None] = {}
-            for stocks, _emails in self.stock_email_groups:
-                for stock in stocks:
-                    raw = (stock or "").strip()
-                    if not raw:
-                        continue
-                    normalized_stock = normalize_stock_code(stock)
-                    if normalized_stock in configured_stock_set:
-                        continue
-                    if normalized_stock in missing_group_stocks_dict:
-                        continue
-                    missing_group_stocks_dict[normalized_stock] = None
-            missing_group_stocks = list(missing_group_stocks_dict.keys())
-            if missing_group_stocks:
-                issues.append(ConfigIssue(
-                    severity="warning",
-                    message=(
-                        "检测到 STOCK_GROUP_N 中存在未包含在自选股列表内的股票："
-                        f"{', '.join(missing_group_stocks[:6])}。"
-                        "STOCK_GROUP_N 仅用于邮件路由，不会扩大分析范围；"
-                        "请先将这些股票加入自选股列表。"
-                    ),
-                    field="STOCK_GROUP_N",
-                ))
-
         # --- Data sources (informational only) ---
         if not self.tushare_token:
             issues.append(ConfigIssue(
@@ -2382,7 +2292,6 @@ if __name__ == "__main__":
     # 测试配置加载
     config = get_config()
     print("=== 配置加载测试 ===")
-    print(f"自选股列表: {config.stock_list}")
     print(f"数据库路径: {config.database_path}")
     print(f"最大并发数: {config.max_workers}")
     print(f"调试模式: {config.debug}")

@@ -27,7 +27,6 @@ const initialForm: FormState = {
   watchEnabled: true,
   analysisEnabled: true,
   analysisFrequency: 'daily',
-  alertEnabled: true,
   source: 'manual',
   notes: '',
 };

@@ -20,13 +20,9 @@ export interface WatchlistItem {
   watchEnabled: boolean;
   analysisEnabled: boolean;
   analysisFrequency: WatchlistAnalysisFrequency | string;
-  alertEnabled: boolean;
   source: string;
   sortOrder: number;
   notes?: string | null;
-  alertRuleCount: number;
-  alertTriggerCount: number;
-  latestAlertTriggeredAt?: string | null;
   latestPrice?: number | null;
   latestChangePct?: number | null;
   signalAsOfDate?: string | null;
@@ -81,39 +77,8 @@ export interface WatchlistItemInput {
   watchEnabled: boolean;
   analysisEnabled: boolean;
   analysisFrequency: WatchlistAnalysisFrequency | string;
-  alertEnabled: boolean;
   source?: string;
   notes?: string;
-}
-
-export interface WatchlistAlertRule {
-  id: number;
-  name: string;
-  targetScope: string;
-  target: string;
-  alertType: string;
-  severity: string;
-  enabled: boolean;
-  source: string;
-  updatedAt?: string | null;
-}
-
-export interface WatchlistAlertTrigger {
-  id: number;
-  ruleId?: number | null;
-  target: string;
-  observedValue?: number | null;
-  threshold?: number | null;
-  reason?: string | null;
-  dataSource?: string | null;
-  dataTimestamp?: string | null;
-  triggeredAt?: string | null;
-  status: string;
-}
-
-export interface WatchlistRelatedAlertsResponse {
-  rules: WatchlistAlertRule[];
-  triggers: WatchlistAlertTrigger[];
 }
 
 export interface WatchlistRefreshResponse {

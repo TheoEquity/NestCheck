@@ -373,7 +373,7 @@ def run_full_analysis(
 
     try:
         # Issue #373: Trading day filter (per-stock, per-market)
-        effective_codes = stock_codes if stock_codes is not None else list(config.stock_list)
+        effective_codes = stock_codes or []
         filtered_codes, effective_region, should_skip = _compute_trading_day_filter(
             config, args, effective_codes
         )
@@ -401,10 +401,14 @@ def run_full_analysis(
         )
 
         # 1. 运行个股分析
-        results = pipeline.run(
-            stock_codes=stock_codes,
-            dry_run=args.dry_run,
-        )
+        results = []
+        if stock_codes:
+            results = pipeline.run(
+                stock_codes=stock_codes,
+                dry_run=args.dry_run,
+            )
+        else:
+            logger.info("未通过 --stocks 指定股票，跳过个股分析")
 
         # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
         analysis_delay = getattr(config, 'analysis_delay', 0)
@@ -468,7 +472,7 @@ def run_full_analysis(
                 if market_report:
                     full_content += f"# 📈 大盘复盘\n\n{market_report}\n\n---\n\n"
 
-                # 添加个股决策仪表盘（使用 NotificationService 生成，按 report_type 分支）
+                # 添加个股决策仪表盘（按 report_type 分支）
                 if results:
                     dashboard_content = pipeline.notifier.generate_aggregate_report(
                         results,
@@ -664,7 +668,6 @@ def main() -> int:
     if args.serve_only:
         logger.info("模式：仅 Web 服务")
         logger.info(f"Web 服务运行中：http://{args.host}:{args.port}")
-        logger.info("通过 /api/v1/analysis/analyze 接口触发分析")
         logger.info(f"API 文档：http://{args.host}:{args.port}/docs")
         logger.info("按 Ctrl+C 退出...")
         # 使用 uvicorn 启动 FastAPI，激活 lifespan 和后台任务（价格刷新、市场缓存刷新等）
@@ -716,12 +719,11 @@ def main() -> int:
                     return 0
 
             logger.info("模式: 仅大盘复盘")
-            notifier, analyzer, search_service = build_market_review_runtime(config)
+            analyzer, search_service = build_market_review_runtime(config)
 
             _run_market_review_with_shared_lock(
                 config,
                 run_market_review,
-                notifier=notifier,
                 analyzer=analyzer,
                 search_service=search_service,
                 override_region=effective_region,

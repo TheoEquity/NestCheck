@@ -47,20 +47,12 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
             gemini_api_key=None,
             openai_api_key=None,
         )
-        notifier = MagicMock()
-        notifier.is_available.return_value = True
-        notifier.send.return_value = True
-
-        notification_module = MagicMock()
-        notification_module.NotificationService.return_value = notifier
         config_module = MagicMock()
         config_module.get_config.return_value = config
         runtime_module = MagicMock()
-        runtime_notifier = MagicMock()
         runtime_analyzer = MagicMock()
         runtime_search = MagicMock()
         runtime_module.build_market_review_runtime.return_value = (
-            runtime_notifier,
             runtime_analyzer,
             runtime_search,
         )
@@ -79,7 +71,6 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
                 sys.modules,
                 {
                     "src.config": config_module,
-                    "src.notification": notification_module,
                     "src.core.market_review": market_review_module,
                     "src.core.market_review_runtime": runtime_module,
                     "src.search_service": search_module,
@@ -93,18 +84,16 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
         self.addCleanup(lambda: [p.stop() for p in patches])
         return (
             config,
-            runtime_notifier,
             runtime_analyzer,
             runtime_search,
             market_review_module,
             runtime_module,
-            notifier,
         )
 
     def test_both_with_cn_us_open_passes_override_region_cn_us(self) -> None:
         """MARKET_REVIEW_REGION=both + open markets {cn, us} -> override_region='cn,us'."""
         message = _make_message()
-        config, notifier, runtime_analyzer, runtime_search, market_review_module, runtime_module, _ = self._patch_dependencies(
+        config, runtime_analyzer, runtime_search, market_review_module, runtime_module = self._patch_dependencies(
             market_review_region="both",
             open_markets={"cn", "us"},
         )
@@ -117,10 +106,8 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
             source_message=message,
         )
         market_review_module.run_market_review.assert_called_once_with(
-            notifier=notifier,
             analyzer=runtime_analyzer,
             search_service=runtime_search,
-            send_notification=True,
             override_region="cn,us",
         )
         kwargs = market_review_module.run_market_review.call_args.kwargs
@@ -129,7 +116,7 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
     def test_both_with_cn_hk_open_passes_override_region_cn_hk(self) -> None:
         """MARKET_REVIEW_REGION=both + open markets {cn, hk} -> override_region='cn,hk'."""
         message = _make_message()
-        config, notifier, runtime_analyzer, runtime_search, market_review_module, runtime_module, _ = self._patch_dependencies(
+        config, runtime_analyzer, runtime_search, market_review_module, runtime_module = self._patch_dependencies(
             market_review_region="both",
             open_markets={"cn", "hk"},
         )
@@ -142,10 +129,8 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
             source_message=message,
         )
         market_review_module.run_market_review.assert_called_once_with(
-            notifier=notifier,
             analyzer=runtime_analyzer,
             search_service=runtime_search,
-            send_notification=True,
             override_region="cn,hk",
         )
         market_review_module.run_market_review.assert_called_once()
@@ -155,7 +140,7 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
     def test_all_relevant_markets_closed_skips_review(self) -> None:
         """If compute_effective_region returns '', skip review and notify."""
         message = _make_message()
-        config, notifier, runtime_analyzer, runtime_search, market_review_module, runtime_module, notify_notifier = self._patch_dependencies(
+        config, runtime_analyzer, runtime_search, market_review_module, runtime_module = self._patch_dependencies(
             market_review_region="cn",
             open_markets=set(),
         )
@@ -165,15 +150,11 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
 
         market_review_module.run_market_review.assert_not_called()
         runtime_module.build_market_review_runtime.assert_not_called()
-        notify_notifier.send.assert_called_once()
-        sent = notify_notifier.send.call_args.args[0]
-        self.assertIn("休市", sent)
-        self.assertEqual(notify_notifier.send.call_args.kwargs["route_type"], "report")
 
     def test_trading_day_check_disabled_does_not_pass_override(self) -> None:
         """When TRADING_DAY_CHECK_ENABLED=false, override_region stays None."""
         message = _make_message()
-        config, notifier, runtime_analyzer, runtime_search, market_review_module, runtime_module, _ = self._patch_dependencies(
+        config, runtime_analyzer, runtime_search, market_review_module, runtime_module = self._patch_dependencies(
             market_review_region="both",
             open_markets={"cn"},
             trading_day_check_enabled=False,
@@ -187,10 +168,8 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
             source_message=message,
         )
         market_review_module.run_market_review.assert_called_once_with(
-            notifier=notifier,
             analyzer=runtime_analyzer,
             search_service=runtime_search,
-            send_notification=True,
             override_region=None,
         )
         market_review_module.run_market_review.assert_called_once()
@@ -200,7 +179,7 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
     def test_build_market_review_runtime_failure_still_releases_lock(self) -> None:
         """Runtime construction failure should still release the command-level lock token."""
         message = _make_message()
-        config, notifier, runtime_analyzer, runtime_search, market_review_module, runtime_module, _ = self._patch_dependencies(
+        config, runtime_analyzer, runtime_search, market_review_module, runtime_module = self._patch_dependencies(
             market_review_region="cn",
             open_markets={"cn"},
         )
@@ -213,12 +192,11 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
 
         release_market_review_lock.assert_called_once_with(lock_token)
         market_review_module.run_market_review.assert_not_called()
-        self.assertIsNotNone(notifier)
 
     def test_execute_releases_lock_when_thread_start_fails(self) -> None:
         """Thread start failure in execute() should release lock and return an error."""
         message = _make_message()
-        config, _, _, _, _, _, _ = self._patch_dependencies(
+        config, _, _, _, _ = self._patch_dependencies(
             market_review_region="cn",
             open_markets={"cn"},
         )

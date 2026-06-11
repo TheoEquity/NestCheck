@@ -51,7 +51,6 @@ class AnalysisService:
         force_refresh: bool = False,
         query_id: Optional[str] = None,
         trace_id: Optional[str] = None,
-        send_notification: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         skills: Optional[List[str]] = None,
         profile_id: Optional[str] = None,
@@ -64,7 +63,6 @@ class AnalysisService:
             report_type: 报告类型 (simple/detailed)
             force_refresh: 是否强制刷新
             query_id: 查询 ID（可选）
-            send_notification: 是否发送通知（API 触发默认发送）
             
         Returns:
             分析结果字典，包含:
@@ -117,7 +115,6 @@ class AnalysisService:
             result = pipeline.process_single_stock(
                 code=stock_code,
                 skip_analysis=False,
-                single_stock_notify=send_notification,
                 report_type=rt,
             )
             

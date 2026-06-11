@@ -24,24 +24,6 @@ SEED_TASKS: List[Dict] = [
         "interval_seconds": None,
         "enabled": True,
     },
-    {
-        "task_key": "seasonality_cache_refresh",
-        "name": "全年择时缓存刷新",
-        "description": "全年择时缓存维护入口，当前随市场缓存刷新链路维护，无独立手动触发操作。",
-        "schedule_type": "daily",
-        "schedule_time": "20:30",
-        "interval_seconds": None,
-        "enabled": True,
-    },
-    {
-        "task_key": "agent_event_monitor",
-        "name": "Agent 事件监控",
-        "description": "告警 worker 展示项；实际开关和间隔由系统配置 AGENT_EVENT_MONITOR_ENABLED / AGENT_EVENT_MONITOR_INTERVAL_MINUTES 控制。",
-        "schedule_type": "interval",
-        "schedule_time": None,
-        "interval_seconds": 300,
-        "enabled": True,
-    },
 ]
 SUPPORTED_TASK_KEYS = tuple(task["task_key"] for task in SEED_TASKS)
 

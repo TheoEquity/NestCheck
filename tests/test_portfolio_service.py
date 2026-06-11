@@ -34,7 +34,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519",
+                    "CUSTOM_NOTE=sample",
                     "GEMINI_API_KEY=test",
                     "ADMIN_AUTH_ENABLED=false",
                     f"DATABASE_PATH={self.db_path}",

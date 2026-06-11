@@ -360,7 +360,6 @@ class AnalysisTaskQueue:
         selection_source: Optional[str] = None,
         report_type: str = "detailed",
         force_refresh: bool = False,
-        notify: bool = True,
         skills: Optional[List[str]] = None,
         profile_id: Optional[str] = None,
     ) -> Tuple[List[TaskInfo], List[DuplicateTaskError]]:
@@ -414,7 +413,6 @@ class AnalysisTaskQueue:
                         stock_code,
                         report_type,
                         force_refresh,
-                        notify,
                         task_skills,
                         profile_id,
                     )
@@ -600,7 +598,6 @@ class AnalysisTaskQueue:
         stock_code: str,
         report_type: str,
         force_refresh: bool,
-        notify: bool = True,
         skills: Optional[List[str]] = None,
         profile_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -654,7 +651,6 @@ class AnalysisTaskQueue:
                 force_refresh=force_refresh,
                 query_id=task_id,
                 trace_id=trace_id,
-                send_notification=notify,
                 progress_callback=_on_progress,
                 skills=skills,
                 profile_id=profile_id,

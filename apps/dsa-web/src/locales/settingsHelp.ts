@@ -520,17 +520,6 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '该配置只影响问股可见历史压缩，不改变 LLM provider、模型、Base URL、保存清理或运行时优先级语义。',
     ],
   },
-  'settings.agent.event_monitor': {
-    title: '事件监控',
-    summary: '在定时模式下启用后台事件监控，定期轮询告警规则。',
-    usage: 'AGENT_EVENT_MONITOR_ENABLED 开启后台监控；AGENT_EVENT_MONITOR_INTERVAL_MINUTES 设定轮询间隔（分钟）。',
-    valueNotes: [
-      '仅在定时（schedule）模式下生效。',
-      '轮询间隔过短可能增加 API 调用频率。',
-    ],
-    impact: ['影响后台告警检测频率和通知推送时机。'],
-    notes: ['需要配合告警规则使用。'],
-  },
   'settings.agent.EVENT_ALERT_RULES_JSON': {
     title: '事件告警规则（Legacy JSON）',
     summary: '通过 JSON 数组配置基础价格和成交量告警规则。',
@@ -1164,17 +1153,6 @@ const settingsHelpEnUS: SettingsHelpMap = {
       'This feature does not process provider traces, thinking blocks, tool calls, or tool results, and does not change same-turn tool passthrough.',
       'It only affects visible ask-stock history compression; it does not change LLM provider, model, Base URL, save cleanup, or runtime priority semantics.',
     ],
-  },
-  'settings.agent.event_monitor': {
-    title: 'Event Monitor',
-    summary: 'Enables background event monitoring with periodic rule polling.',
-    usage: 'AGENT_EVENT_MONITOR_ENABLED turns on monitoring; AGENT_EVENT_MONITOR_INTERVAL_MINUTES sets the polling interval.',
-    valueNotes: [
-      'Effective only when the runtime starts a dedicated event monitor loop.',
-      'Very short intervals may increase API call frequency.',
-    ],
-    impact: ['Affects background alert detection frequency and notification timing.'],
-    notes: ['Must be used with alert rules.'],
   },
   'settings.agent.EVENT_ALERT_RULES_JSON': {
     title: 'Event Alert Rules (Legacy JSON)',

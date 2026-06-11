@@ -49,7 +49,7 @@ class PortfolioPr2TestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519",
+                    "CUSTOM_NOTE=sample",
                     "GEMINI_API_KEY=test",
                     "ADMIN_AUTH_ENABLED=false",
                     "PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT=70.0",

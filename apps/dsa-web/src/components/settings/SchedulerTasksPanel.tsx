@@ -8,8 +8,6 @@ import { CheckCircle, XCircle, AlertTriangle, RefreshCw, PlayCircle, Database } 
 /* ───── 系统后台托管任务：页面只展示状态，执行时机由服务端代码或系统配置控制 ───── */
 const READONLY_CONFIG_TASK_KEYS = new Set([
   'market_cache_refresh',
-  'seasonality_cache_refresh',
-  'agent_event_monitor',
 ]);
 const MANUAL_TRIGGER_TASK_KEYS = new Set(['market_cache_refresh']);
 

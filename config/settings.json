@@ -4,7 +4,5 @@
   "schedule_enabled": false,
   "schedule_run_immediately": true,
   "market_review_enabled": true,
-  "market_review_region": "cn",
-  "agent_event_monitor_enabled": false,
-  "agent_event_monitor_interval_minutes": 5
+  "market_review_region": "cn"
 }

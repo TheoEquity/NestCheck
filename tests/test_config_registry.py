@@ -183,7 +183,6 @@ class TestSettingsHelpMetadata(unittest.TestCase):
     }
 
     _HELP_KEYS = (
-        "STOCK_LIST",
         "LITELLM_MODEL",
         "LLM_CHANNELS",
         "FEISHU_WEBHOOK_URL",
@@ -303,8 +302,8 @@ class TestSettingsHelpMetadata(unittest.TestCase):
             for field in category["fields"]
         }
 
-        self.assertEqual(fields["STOCK_LIST"]["help_key"], "settings.base.STOCK_LIST")
-        self.assertIn("docs/full-guide.md", fields["STOCK_LIST"]["docs"][0]["href"])
+        self.assertEqual(fields["LITELLM_MODEL"]["help_key"], "settings.ai_model.LITELLM_MODEL")
+        self.assertIn("docs/LLM_CONFIG_GUIDE.md", fields["LITELLM_MODEL"]["docs"][0]["href"])
 
     def test_admin_auth_help_is_read_only_in_generic_settings(self):
         field = get_field_definition("ADMIN_AUTH_ENABLED")

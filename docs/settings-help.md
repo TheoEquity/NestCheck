@@ -23,7 +23,6 @@
 
 PR1 覆盖基础设施与首批代表性配置项：
 
-- `STOCK_LIST`
 - `LITELLM_MODEL`
 - `LLM_CHANNELS`
 - `FEISHU_WEBHOOK_URL`

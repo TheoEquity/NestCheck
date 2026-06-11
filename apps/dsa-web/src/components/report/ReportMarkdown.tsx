@@ -14,7 +14,7 @@ export interface ReportMarkdownProps {
 
 /**
  * Compatibility wrapper for direct ReportMarkdown usage.
- * HomePage uses ReportMarkdownDrawer to lazy-load the panel.
+ * ReportMarkdownDrawer lazy-loads the panel for routed report views.
  */
 export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   recordId,

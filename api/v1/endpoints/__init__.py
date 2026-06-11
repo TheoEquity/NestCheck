@@ -10,7 +10,6 @@ API v1 Endpoints 模块初始化
 
 from api.v1.endpoints import (
     health,
-    analysis,
     history,
     stocks,
     backtest,
@@ -18,15 +17,12 @@ from api.v1.endpoints import (
     auth,
     agent,
     agent_management,
-    usage,
     portfolio,
-    alerts,
     funds,
     watchlist,
 )
 __all__ = [
     "health",
-    "analysis",
     "history",
     "stocks",
     "backtest",
@@ -34,9 +30,7 @@ __all__ = [
     "auth",
     "agent",
     "agent_management",
-    "usage",
     "portfolio",
-    "alerts",
     "funds",
     "watchlist",
 ]

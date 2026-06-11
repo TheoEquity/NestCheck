@@ -5,7 +5,6 @@ import type {
   WatchlistItemInput,
   WatchlistItemListResponse,
   WatchlistRefreshResponse,
-  WatchlistRelatedAlertsResponse,
 } from '../types/watchlist';
 
 function toSnakePayload(input: Partial<WatchlistItemInput>): Record<string, unknown> {
@@ -23,7 +22,6 @@ function toSnakePayload(input: Partial<WatchlistItemInput>): Record<string, unkn
     watch_enabled: input.watchEnabled,
     analysis_enabled: input.analysisEnabled,
     analysis_frequency: input.analysisFrequency,
-    alert_enabled: input.alertEnabled,
     source: input.source,
     notes: input.notes,
   };
@@ -64,8 +62,4 @@ export const watchlistApi = {
     return toCamelCase<WatchlistRefreshResponse>(response.data);
   },
 
-  async getRelatedAlerts(itemId: number): Promise<WatchlistRelatedAlertsResponse> {
-    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/watchlist/items/${itemId}/alerts`);
-    return toCamelCase<WatchlistRelatedAlertsResponse>(response.data);
-  },
 };

@@ -22,7 +22,6 @@ class WatchlistItemCreateRequest(BaseModel):
     watch_enabled: bool = True
     analysis_enabled: bool = True
     analysis_frequency: str = Field("daily", max_length=16)
-    alert_enabled: bool = True
     source: str = Field("manual", max_length=32)
     notes: Optional[str] = None
 
@@ -41,7 +40,6 @@ class WatchlistItemUpdateRequest(BaseModel):
     watch_enabled: Optional[bool] = None
     analysis_enabled: Optional[bool] = None
     analysis_frequency: Optional[str] = Field(None, max_length=16)
-    alert_enabled: Optional[bool] = None
     source: Optional[str] = Field(None, max_length=32)
     notes: Optional[str] = None
 
@@ -66,13 +64,9 @@ class WatchlistItem(BaseModel):
     watch_enabled: bool
     analysis_enabled: bool
     analysis_frequency: str
-    alert_enabled: bool
     source: str
     sort_order: int = 0
     notes: Optional[str] = None
-    alert_rule_count: int = 0
-    alert_trigger_count: int = 0
-    latest_alert_triggered_at: Optional[str] = None
     latest_price: Optional[float] = None
     latest_change_pct: Optional[float] = None
     signal_as_of_date: Optional[str] = None
@@ -115,8 +109,3 @@ class WatchlistRefreshResponse(BaseModel):
     success: int = 0
     failed: int = 0
     items: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class WatchlistRelatedAlertsResponse(BaseModel):
-    rules: List[Dict[str, Any]] = Field(default_factory=list)
-    triggers: List[Dict[str, Any]] = Field(default_factory=list)

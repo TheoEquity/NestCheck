@@ -23,7 +23,6 @@ from api.v1.schemas.system_config import (
     DiscoverLLMChannelModelsRequest,
     ImportSystemConfigRequest,
     TestLLMChannelRequest,
-    TestNotificationChannelRequest,
     UpdateSystemConfigRequest,
 )
 import src.auth as auth
@@ -47,7 +46,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519,000001",
+                    "CUSTOM_NOTE=desktop sample",
                     "GEMINI_API_KEY=secret-key-value",
                     "RUN_IMMEDIATELY=true",
                     "LOG_LEVEL=INFO",
@@ -108,11 +107,11 @@ class SystemConfigApiTestCase(unittest.TestCase):
     def test_get_config_schema_includes_help_metadata(self) -> None:
         payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)
         item_map = {item["key"]: item for item in payload["items"]}
-        stock_schema = item_map["STOCK_LIST"]["schema"]
+        api_key_schema = item_map["GEMINI_API_KEY"]["schema"]
 
-        self.assertEqual(stock_schema["help_key"], "settings.base.STOCK_LIST")
-        self.assertTrue(stock_schema["examples"])
-        self.assertTrue(stock_schema["docs"])
+        self.assertEqual(api_key_schema["help_key"], "settings.base.GEMINI_API_KEY")
+        self.assertTrue(api_key_schema["examples"])
+        self.assertTrue(api_key_schema["docs"])
 
     def test_get_config_schema_includes_notification_noise_fields(self) -> None:
         payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)
@@ -132,7 +131,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                 [
                     "LITELLM_MODEL=gemini/gemini-3-flash-preview",
                     "GEMINI_API_KEY=secret-key-value",
-                    "STOCK_LIST=600519",
+                    "CUSTOM_NOTE=sample",
                     "ADMIN_AUTH_ENABLED=false",
                 ]
             )
@@ -159,7 +158,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                 reload_now=False,
                 items=[
                     {"key": "GEMINI_API_KEY", "value": "new-secret-value"},
-                    {"key": "STOCK_LIST", "value": "600519,300750"},
+                    {"key": "CUSTOM_NOTE", "value": "updated sample"},
                 ],
             ),
             service=self.service,
@@ -169,7 +168,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertEqual(payload["skipped_masked_count"], 0)
 
         env_content = self.env_path.read_text(encoding="utf-8")
-        self.assertIn("STOCK_LIST=600519,300750", env_content)
+        self.assertIn("CUSTOM_NOTE=updated sample", env_content)
         self.assertIn("GEMINI_API_KEY=new-secret-value", env_content)
 
     def test_put_config_returns_conflict_when_version_is_stale(self) -> None:
@@ -177,7 +176,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
             system_config.update_system_config(
                 request=UpdateSystemConfigRequest(
                     config_version="stale-version",
-                    items=[{"key": "STOCK_LIST", "value": "600519"}],
+                    items=[{"key": "CUSTOM_NOTE", "value": "updated sample"}],
                 ),
                 service=self.service,
             )
@@ -190,7 +189,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
             "\n".join(
                 [
                     "# Base settings",
-                    "STOCK_LIST=600519,000001",
+                    "CUSTOM_NOTE=desktop sample",
                     "",
                     "# Secrets",
                     "GEMINI_API_KEY=secret-key-value",
@@ -207,7 +206,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                 config_version=current["config_version"],
                 mask_token="******",
                 reload_now=False,
-                items=[{"key": "STOCK_LIST", "value": "600519,300750"}],
+                items=[{"key": "CUSTOM_NOTE", "value": "updated sample"}],
             ),
             service=self.service,
         ).model_dump()
@@ -216,7 +215,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
         env_content = self.env_path.read_text(encoding="utf-8")
         self.assertIn("# Base settings\n", env_content)
         self.assertIn("\n\n# Secrets\n", env_content)
-        self.assertIn("STOCK_LIST=600519,300750\n", env_content)
+        self.assertIn("CUSTOM_NOTE=updated sample\n", env_content)
 
     def test_put_config_returns_startup_only_run_warning(self) -> None:
         current = system_config.get_system_config(include_schema=False, service=self.service).model_dump()
@@ -242,7 +241,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
 
     def test_export_system_config_returns_raw_env_content(self) -> None:
         self.env_path.write_text(
-            "# Web config\nSTOCK_LIST=600519,000001\nGEMINI_API_KEY=secret-key-value\nADMIN_AUTH_ENABLED=true\n",
+            "# Web config\nCUSTOM_NOTE=desktop sample\nGEMINI_API_KEY=secret-key-value\nADMIN_AUTH_ENABLED=true\n",
             encoding="utf-8",
         )
         self.manager = ConfigManager(env_path=self.env_path)
@@ -256,7 +255,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
 
         self.assertEqual(
             payload["content"],
-            "# Web config\nSTOCK_LIST=600519,000001\nGEMINI_API_KEY=secret-key-value\nADMIN_AUTH_ENABLED=true\n",
+            "# Web config\nCUSTOM_NOTE=desktop sample\nGEMINI_API_KEY=secret-key-value\nADMIN_AUTH_ENABLED=true\n",
         )
         self.assertEqual(payload["config_version"], self.manager.get_config_version())
 
@@ -267,7 +266,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
             request_obj=self._build_request(),
             request=ImportSystemConfigRequest(
                 config_version=current["config_version"],
-                content="STOCK_LIST=300750\nCUSTOM_NOTE=config backup\n",
+                content="CUSTOM_NOTE=config backup\n",
                 reload_now=False,
             ),
             service=self.service,
@@ -275,7 +274,6 @@ class SystemConfigApiTestCase(unittest.TestCase):
 
         self.assertTrue(payload["success"])
         env_content = self.env_path.read_text(encoding="utf-8")
-        self.assertIn("STOCK_LIST=300750\n", env_content)
         self.assertIn("CUSTOM_NOTE=config backup\n", env_content)
         self.assertIn("GEMINI_API_KEY=secret-key-value\n", env_content)
 
@@ -285,7 +283,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                 request_obj=self._build_request(),
                 request=ImportSystemConfigRequest(
                     config_version="stale-version",
-                    content="STOCK_LIST=300750\n",
+                    content="CUSTOM_NOTE=config backup\n",
                     reload_now=False,
                 ),
                 service=self.service,
@@ -340,15 +338,15 @@ class SystemConfigApiTestCase(unittest.TestCase):
                 request_obj=self._build_request(),
                 request=ImportSystemConfigRequest(
                     config_version=current["config_version"],
-                    content="STOCK_LIST=300750\n",
+                    content="CUSTOM_NOTE=config backup\n",
                     reload_now=False,
                 ),
                 service=self.service,
             ).model_dump()
 
-            self.assertIn("STOCK_LIST=600519,000001", export_payload["content"])
+            self.assertIn("CUSTOM_NOTE=desktop sample", export_payload["content"])
             self.assertTrue(import_payload["success"])
-            self.assertEqual(self.manager.read_config_map()["STOCK_LIST"], "300750")
+            self.assertEqual(self.manager.read_config_map()["CUSTOM_NOTE"], "config backup")
 
     def test_config_env_endpoints_reject_without_backup_access(self) -> None:
         with patch.dict(
@@ -359,7 +357,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
             self.env_path.write_text(
                 "\n".join(
                     [
-                        "STOCK_LIST=600519,000001",
+                        "CUSTOM_NOTE=desktop sample",
                         "GEMINI_API_KEY=secret-key-value",
                         "RUN_IMMEDIATELY=true",
                         "LOG_LEVEL=INFO",
@@ -388,7 +386,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                     request_obj=self._build_request(),
                     request=ImportSystemConfigRequest(
                         config_version=current["config_version"],
-                        content="STOCK_LIST=300750\n",
+                        content="CUSTOM_NOTE=config backup\n",
                         reload_now=False,
                     ),
                     service=self.service,
@@ -414,7 +412,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                     request_obj=invalid_request,
                     request=ImportSystemConfigRequest(
                         config_version=current["config_version"],
-                        content="STOCK_LIST=300750\n",
+                        content="CUSTOM_NOTE=config backup\n",
                         reload_now=False,
                     ),
                     service=self.service,
@@ -431,7 +429,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
             self.env_path.write_text(
                 "\n".join(
                     [
-                        "STOCK_LIST=600519,000001",
+                        "CUSTOM_NOTE=desktop sample",
                         "GEMINI_API_KEY=secret-key-value",
                         "RUN_IMMEDIATELY=true",
                         "LOG_LEVEL=INFO",
@@ -473,7 +471,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                     request_obj=self._build_request(),
                     request=ImportSystemConfigRequest(
                         config_version=current["config_version"],
-                        content="STOCK_LIST=300750\n",
+                        content="CUSTOM_NOTE=config backup\n",
                         reload_now=False,
                     ),
                     service=self.service,
@@ -486,7 +484,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519,000001",
+                    "CUSTOM_NOTE=desktop sample",
                     "GEMINI_API_KEY=secret-key-value",
                     "RUN_IMMEDIATELY=true",
                     "LOG_LEVEL=INFO",
@@ -503,7 +501,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.env_path.write_text(
             "\n".join(
                 [
-                    "STOCK_LIST=600519,000001",
+                    "CUSTOM_NOTE=desktop sample",
                     "GEMINI_API_KEY=secret-key-value",
                     "RUN_IMMEDIATELY=true",
                     "LOG_LEVEL=INFO",
@@ -559,72 +557,6 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertEqual(payload["capability_results"], {})
         mock_test.assert_called_once()
         self.assertEqual(mock_test.call_args.kwargs["capability_checks"], ["json", "stream"])
-
-    def test_test_notification_channel_endpoint_returns_service_payload(self) -> None:
-        with patch.object(
-            self.service,
-            "test_notification_channel",
-            return_value={
-                "success": True,
-                "message": "notification ok",
-                "error_code": None,
-                "stage": "notification_send",
-                "retryable": False,
-                "latency_ms": 42,
-                "attempts": [
-                    {
-                        "channel": "wechat",
-                        "success": True,
-                        "message": "sent",
-                        "target": "https://qyapi.example.com/cgi-bin/webhook/send?key=***",
-                        "error_code": None,
-                        "stage": "notification_send",
-                        "retryable": False,
-                        "latency_ms": 42,
-                        "http_status": 200,
-                    }
-                ],
-            },
-        ) as mock_test:
-            payload = system_config.test_notification_channel(
-                request=TestNotificationChannelRequest(
-                    channel="wechat",
-                    items=[{"key": "WECHAT_WEBHOOK_URL", "value": "https://example.com/hook"}],
-                    title="DSA 通知测试",
-                    content="hello",
-                    timeout_seconds=5,
-                ),
-                service=self.service,
-            ).model_dump()
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["attempts"][0]["channel"], "wechat")
-        self.assertEqual(payload["attempts"][0]["latency_ms"], 42)
-        mock_test.assert_called_once()
-        self.assertEqual(mock_test.call_args.kwargs["channel"], "wechat")
-        self.assertEqual(mock_test.call_args.kwargs["timeout_seconds"], 5)
-
-    def test_test_notification_channel_schema_accepts_p6_channels(self) -> None:
-        ntfy_request = TestNotificationChannelRequest(
-            channel="ntfy",
-            items=[{"key": "NTFY_URL", "value": "https://ntfy.sh/dsa-topic"}],
-            title="DSA 通知测试",
-            content="hello",
-            timeout_seconds=5,
-        )
-        gotify_request = TestNotificationChannelRequest(
-            channel="gotify",
-            items=[
-                {"key": "GOTIFY_URL", "value": "https://gotify.example"},
-                {"key": "GOTIFY_TOKEN", "value": "app-token"},
-            ],
-            title="DSA 通知测试",
-            content="hello",
-            timeout_seconds=5,
-        )
-
-        self.assertEqual(ntfy_request.channel, "ntfy")
-        self.assertEqual(gotify_request.channel, "gotify")
 
     def test_validate_returns_user_facing_model_message_without_internal_env_key_name(self) -> None:
         validation = self.service.validate(

@@ -16,7 +16,6 @@ from api.v1.schemas.watchlist import (
     WatchlistItemListResponse,
     WatchlistItemMoveRequest,
     WatchlistItemUpdateRequest,
-    WatchlistRelatedAlertsResponse,
     WatchlistRefreshResponse,
 )
 from src.repositories.watchlist_repo import WatchlistConflictError
@@ -135,14 +134,3 @@ def delete_item(item_id: int) -> WatchlistDeleteResponse:
         raise _not_found(exc)
     except Exception as exc:
         raise _internal_error("Delete watchlist item failed", exc)
-
-
-@router.get("/items/{item_id}/alerts", response_model=WatchlistRelatedAlertsResponse, responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
-def get_item_alerts(item_id: int) -> WatchlistRelatedAlertsResponse:
-    service = WatchlistService()
-    try:
-        return WatchlistRelatedAlertsResponse(**service.related_alerts(item_id))
-    except WatchlistNotFoundError as exc:
-        raise _not_found(exc)
-    except Exception as exc:
-        raise _internal_error("Get watchlist related alerts failed", exc)

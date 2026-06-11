@@ -160,31 +160,6 @@ class LLMRun:
 
 
 @dataclass
-class NotificationRun:
-    """Notification dispatch result in a trace."""
-
-    trace_id: str
-    channel: str
-    status: str
-    success: bool
-    attempts: int = 1
-    error_message_sanitized: Optional[str] = None
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-
-    def to_dict(self) -> Dict[str, Any]:
-        payload = {
-            "trace_id": self.trace_id,
-            "channel": self.channel,
-            "status": self.status,
-            "success": self.success,
-            "attempts": self.attempts,
-            "error_message_sanitized": self.error_message_sanitized,
-            "created_at": self.created_at,
-        }
-        return {key: value for key, value in payload.items() if value is not None}
-
-
-@dataclass
 class HistoryRun:
     """History persistence result in a trace."""
 
@@ -272,7 +247,6 @@ class RunDiagnosticContext:
     trigger_source: Optional[str] = None
     provider_runs: List[ProviderRun] = field(default_factory=list)
     llm_runs: List[LLMRun] = field(default_factory=list)
-    notification_runs: List[NotificationRun] = field(default_factory=list)
     history_runs: List[HistoryRun] = field(default_factory=list)
 
     def record_provider_run(self, provider_run: ProviderRun) -> None:
@@ -280,9 +254,6 @@ class RunDiagnosticContext:
 
     def record_llm_run(self, llm_run: LLMRun) -> None:
         self.llm_runs.append(llm_run)
-
-    def record_notification_run(self, notification_run: NotificationRun) -> None:
-        self.notification_runs.append(notification_run)
 
     def record_history_run(self, history_run: HistoryRun) -> None:
         self.history_runs.append(history_run)
@@ -296,7 +267,6 @@ class RunDiagnosticContext:
             "trigger_source": self.trigger_source,
             "provider_runs": [run.to_dict() for run in self.provider_runs],
             "llm_runs": [run.to_dict() for run in self.llm_runs],
-            "notification_runs": [run.to_dict() for run in self.notification_runs],
             "history_runs": [run.to_dict() for run in self.history_runs],
         }
 
@@ -420,34 +390,6 @@ def record_llm_run(
         )
     except Exception as exc:  # pragma: no cover - defensive fail-open guard
         logger.warning("llm diagnostic record failed: %s", exc)
-
-
-def record_notification_run(
-    *,
-    channel: str,
-    status: str,
-    success: bool,
-    attempts: int = 1,
-    error_message: Optional[Any] = None,
-) -> None:
-    """Append a notification result to the active context without affecting callers."""
-    context = get_current_diagnostic_context()
-    if context is None:
-        return
-
-    try:
-        context.record_notification_run(
-            NotificationRun(
-                trace_id=context.trace_id,
-                channel=channel,
-                status=status,
-                success=success,
-                attempts=attempts,
-                error_message_sanitized=sanitize_diagnostic_text(error_message),
-            )
-        )
-    except Exception as exc:  # pragma: no cover - defensive fail-open guard
-        logger.warning("notification diagnostic record failed: %s", exc)
 
 
 def record_history_run(
@@ -651,54 +593,6 @@ def _llm_component(diagnostics: Dict[str, Any], raw_result: Dict[str, Any]) -> R
     return _component("llm", label, "unknown", "LLM 未记录诊断信息")
 
 
-def _notification_component(diagnostics: Dict[str, Any]) -> RunDiagnosticComponent:
-    label = "通知"
-    runs = [
-        run for run in _as_list(diagnostics.get("notification_runs"))
-        if isinstance(run, dict)
-    ]
-    if not runs:
-        return _component("notification", label, "unknown", "通知结果未记录")
-
-    skipped = [run for run in runs if run.get("status") in {"skipped", "not_configured"}]
-    successes = [run for run in runs if run.get("success") is True]
-    failures = [run for run in runs if run.get("success") is False and run not in skipped]
-    channels = [run.get("channel") for run in runs if run.get("channel")]
-    if successes and failures:
-        return _component(
-            "notification",
-            label,
-            "degraded",
-            "部分通知渠道失败，其余渠道已发送",
-            {"channels": channels, "failed": [run.get("channel") for run in failures]},
-        )
-    if successes:
-        return _component(
-            "notification",
-            label,
-            "ok",
-            "通知发送成功",
-            {"channels": channels},
-        )
-    if skipped and not failures:
-        status = "not_configured" if any(run.get("status") == "not_configured" for run in skipped) else "skipped"
-        return _component(
-            "notification",
-            label,
-            status,
-            "通知未配置或本次跳过",
-            {"channels": channels},
-        )
-    last_failure = failures[-1] if failures else runs[-1]
-    return _component(
-        "notification",
-        label,
-        "failed",
-        f"通知失败：{last_failure.get('error_message_sanitized') or last_failure.get('status') or '未知错误'}",
-        {"channels": channels},
-    )
-
-
 def _history_component(
     diagnostics: Dict[str, Any],
     report_saved: Optional[bool],
@@ -767,7 +661,6 @@ def build_run_diagnostic_summary(
         ),
         "news": _news_component(snapshot, raw),
         "llm": _llm_component(diagnostics, raw),
-        "notification": _notification_component(diagnostics),
         "history": _history_component(diagnostics, report_saved),
     }
 
@@ -847,7 +740,6 @@ def format_copyable_diagnostics(summary: Dict[str, Any]) -> str:
         _component_line("daily_data"),
         _component_line("news"),
         _component_line("llm"),
-        _component_line("notification"),
         _component_line("history"),
         f"reason: {sanitize_diagnostic_text(summary.get('reason'), max_length=160) or 'unknown'}",
     ]

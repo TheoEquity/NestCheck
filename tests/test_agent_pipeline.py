@@ -563,7 +563,6 @@ class TestAgentResultConversion(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'):
 
             mock_cfg = MagicMock()
@@ -1353,7 +1352,6 @@ class TestPipelineRouting(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'):
 
             mock_cfg = MagicMock()
@@ -1398,7 +1396,6 @@ class TestPipelineRouting(unittest.TestCase):
              patch('src.core.pipeline.get_db') as mock_db, \
              patch('src.core.pipeline.DataFetcherManager') as mock_fm, \
              patch('src.core.pipeline.GeminiAnalyzer') as mock_analyzer, \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService') as mock_search:
 
             mock_cfg = MagicMock()
@@ -1446,7 +1443,6 @@ class TestPipelineRouting(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'):
 
             mock_cfg = MagicMock()
@@ -1490,7 +1486,6 @@ class TestAnalyzeWithAgentStockName(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'), \
              patch('src.agent.factory.build_agent_executor') as mock_build_executor, \
              patch('src.agent.executor.AgentExecutor.run') as mock_agent_run:
@@ -1568,7 +1563,6 @@ class TestAnalyzeWithAgentStockName(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'), \
              patch('src.agent.factory.build_agent_executor') as mock_build_executor:
 
@@ -1660,7 +1654,6 @@ class TestAnalyzeWithAgentStockName(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'), \
              patch('src.agent.factory.build_agent_executor') as mock_build_executor:
 
@@ -1736,7 +1729,6 @@ class TestAnalyzeWithAgentStockName(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'), \
              patch('src.core.pipeline.fill_price_position_if_needed'), \
              patch('src.core.pipeline.stabilize_decision_with_structure'), \
@@ -2511,7 +2503,6 @@ class TestSafeInt(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'):
 
             mock_cfg = MagicMock()
@@ -2654,7 +2645,6 @@ class TestSkillActivation(unittest.TestCase):
              patch('src.core.pipeline.get_db'), \
              patch('src.core.pipeline.DataFetcherManager'), \
              patch('src.core.pipeline.GeminiAnalyzer'), \
-             patch('src.core.pipeline.NotificationService'), \
              patch('src.core.pipeline.SearchService'):
 
             mock_cfg = MagicMock()

@@ -201,6 +201,20 @@ python --version
 
 3. 在项目目录中创建虚拟环境并安装依赖：
 
+也可以直接运行一键脚本：
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-python.ps1 -OutFile $env:TEMP\install-nestcheck-python.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-python.ps1
+```
+
+如果本机还没有 Python 3.11，可以运行：
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-python.ps1 -OutFile $env:TEMP\install-nestcheck-python.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-python.ps1 -InstallPython
+```
+
+脚本会自动下载源码、创建虚拟环境、处理 UTF-8、安装依赖、生成 `.env`，并在完成后直接启动服务。
+
 ```powershell
 cd C:\Users\你的用户名\NestCheck
 
@@ -235,6 +249,12 @@ http://127.0.0.1:8000
 停止服务时，在该窗口按 `Ctrl + C`。
 
 5. 如果 `pip install -r requirements.txt` 长时间卡住，可以先安装核心运行依赖，再启动服务：
+
+一键脚本也支持只安装核心依赖：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-python.ps1 -CoreOnly
+```
 
 ```powershell
 $env:PYTHONUTF8=1

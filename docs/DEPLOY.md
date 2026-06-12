@@ -37,6 +37,18 @@ iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main
 
 适合没有 Docker Desktop，或希望先快速本机启动服务的场景。
 
+一键脚本：
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-python.ps1 -OutFile $env:TEMP\install-nestcheck-python.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-python.ps1
+```
+
+如果本机还没有 Python 3.11：
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-python.ps1 -OutFile $env:TEMP\install-nestcheck-python.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-python.ps1 -InstallPython
+```
+
 ```powershell
 cd C:\Users\你的用户名\NestCheck
 python -m venv .venv
@@ -60,6 +72,12 @@ $env:PYTHONUTF8=1
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install --no-cache-dir python-dotenv pandas fastapi uvicorn[standard]
+```
+
+对应的一键脚本参数：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-python.ps1 -CoreOnly
 ```
 
 启动成功后访问 `http://127.0.0.1:8000`。服务运行时 PowerShell 会被前台进程占用；停止服务时按 `Ctrl + C`。

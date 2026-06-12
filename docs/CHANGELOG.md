@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] README 新增 Windows 个人电脑两步部署说明，并提供可从 GitHub 单独下载运行的 Docker 一键部署 PowerShell 脚本。
 - [改进] Windows Docker 一键部署脚本改为通过 GitHub codeload 直连下载源码压缩包，并加入下载重试和压缩包大小提示。
 - [文档] 重写 Windows 个人电脑安装说明，明确 Docker 一键部署与 Python 直接运行两条可执行路径，并补充 UTF-8 依赖安装排障步骤。
+- [新功能] 新增 `scripts/install-nestcheck-python.ps1`，支持 Windows 一键完成 Python 安装、源码下载、虚拟环境创建、UTF-8 依赖安装与本地服务启动。
 - [测试] 补齐 V1.0 稳巢基金相关测试计划与 `market/index-history` API 契约覆盖，并移除已下线 Backtest Web 页面与路由测试。
 - [修复] 修正内部基金状态的成立日期语义，移除无引用 ShellHeader 组件，并同步 Web 回测/告警入口文档。
 - [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认和兜底走 `stock_chat_quick`，技术/走势类走 `stock_quick`，新闻/消息类走 `stock_intel`，风险/利空类走 `stock_risk`。

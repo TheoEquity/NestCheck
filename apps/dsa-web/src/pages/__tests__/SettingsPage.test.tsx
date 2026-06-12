@@ -1,5 +1,5 @@
 import type React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveWebBuildInfo } from '../../utils/constants';
 import SettingsPage from '../SettingsPage';
@@ -21,6 +21,7 @@ const {
   applyPartialUpdate,
   refreshAfterExternalSave,
   refreshStatus,
+  navigate,
   settingsPanelErrorBoundary,
   useAuthMock,
   useSystemConfigMock,
@@ -42,6 +43,7 @@ const {
   applyPartialUpdate: vi.fn(),
   refreshAfterExternalSave: vi.fn(),
   refreshStatus: vi.fn(),
+  navigate: vi.fn(),
   settingsPanelErrorBoundary: vi.fn(),
   useAuthMock: vi.fn(),
   useSystemConfigMock: vi.fn(),
@@ -73,6 +75,14 @@ vi.mock('../../utils/constants', async () => {
   return {
     ...actual,
     WEB_BUILD_INFO: webBuildInfoMock,
+  };
+});
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => navigate,
   };
 });
 
@@ -217,7 +227,7 @@ const baseCategories = [
 ];
 
 type ConfigState = {
-  categories: Array<{ category: string; title: string; description: string; displayOrder: number; fields: [] }>;
+  categories: Array<{ category: string; title: string; description: string; displayOrder: number; fields: unknown[] }>;
   itemsByCategory: Record<string, Array<Record<string, unknown>>>;
   issueByKey: Record<string, unknown[]>;
   activeCategory: string;
@@ -414,6 +424,79 @@ describe('SettingsPage', () => {
     expect(screen.getByText('认证与登录保护')).toBeInTheDocument();
     expect(screen.getByText('修改密码')).toBeInTheDocument();
     expect(load).toHaveBeenCalled();
+  });
+
+  it('places the system settings category first in navigation', async () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        system: [
+          ...buildSystemConfigState().itemsByCategory.system,
+          {
+            key: 'DEBUG',
+            value: 'false',
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key: 'DEBUG',
+              category: 'system',
+              dataType: 'boolean',
+              uiControl: 'switch',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: {},
+              displayOrder: 2,
+            },
+          },
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByRole('heading', { name: '系统设置' })).toBeInTheDocument();
+    const categoryButtons = within(screen.getByRole('navigation')).getAllByRole('button');
+    expect(categoryButtons[0]).toHaveTextContent('System');
+  });
+
+  it('hides the backtest config category from system settings navigation', async () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      categories: [
+        ...baseCategories,
+        { category: 'backtest', title: 'Backtest', description: '回测配置', displayOrder: 6, fields: [] },
+      ],
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        backtest: [
+          {
+            key: 'BACKTEST_ENABLED',
+            value: 'true',
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key: 'BACKTEST_ENABLED',
+              category: 'backtest',
+              dataType: 'boolean',
+              uiControl: 'switch',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: {},
+              displayOrder: 1,
+            },
+          },
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByRole('heading', { name: '系统设置' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Backtest' })).not.toBeInTheDocument();
+    expect(screen.queryByText('BACKTEST_ENABLED')).not.toBeInTheDocument();
   });
 
   it('renders web build info in system settings', async () => {
@@ -718,21 +801,21 @@ describe('SettingsPage', () => {
   });
 
   it('uses browser and backend logs in settings panel diagnostic hints outside desktop runtime', () => {
-    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'ai_model' }));
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'agent' }));
 
     render(<SettingsPage />);
 
-    expect(screen.getAllByText(/浏览器开发者工具控制台与后端日志/)).toHaveLength(2);
+    expect(screen.getAllByText(/浏览器开发者工具控制台与后端日志/)).toHaveLength(1);
     expect(screen.queryByText('desktop.log')).not.toBeInTheDocument();
   });
 
   it('uses desktop log in settings panel diagnostic hints during desktop runtime', () => {
-    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'ai_model' }));
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'agent' }));
     (window as { dsaDesktop?: unknown }).dsaDesktop = createDesktopRuntime();
 
     render(<SettingsPage />);
 
-    expect(screen.getAllByText('desktop.log')).toHaveLength(2);
+    expect(screen.getAllByText('desktop.log')).toHaveLength(1);
     expect(screen.queryByText(/浏览器开发者工具控制台与后端日志/)).not.toBeInTheDocument();
   });
 

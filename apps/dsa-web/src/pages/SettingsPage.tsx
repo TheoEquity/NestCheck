@@ -72,6 +72,40 @@ type DesktopUpdateNotice = {
   actionKind?: 'release' | 'install';
 };
 
+const HIDDEN_CONFIG_CATEGORIES = new Set(['backtest']);
+const CONFIG_CATEGORY_ORDER_OVERRIDES: Record<string, number> = {
+  system: 0,
+};
+const LLM_CHANNEL_KEY_RE = /^(LLM_|LLM_CHANNELS)/;
+const AI_MODEL_HIDDEN_KEYS = new Set([
+  'LITELLM_MODEL',
+  'LITELLM_FALLBACK_MODELS',
+  'AIHUBMIX_KEY',
+  'DEEPSEEK_API_KEY',
+  'DEEPSEEK_API_KEYS',
+  'GEMINI_API_KEY',
+  'GEMINI_API_KEYS',
+  'GEMINI_MODEL',
+  'GEMINI_MODEL_FALLBACK',
+  'GEMINI_TEMPERATURE',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_API_KEYS',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_TEMPERATURE',
+  'ANTHROPIC_MAX_TOKENS',
+  'OPENAI_API_KEY',
+  'OPENAI_API_KEYS',
+  'OPENAI_BASE_URL',
+  'OPENAI_MODEL',
+  'OPENAI_VISION_MODEL',
+  'OPENAI_TEMPERATURE',
+  'VISION_MODEL',
+]);
+const SYSTEM_HIDDEN_KEYS = new Set([
+  'ADMIN_AUTH_ENABLED',
+]);
+const AGENT_HIDDEN_KEYS = new Set<string>();
+
 function trimDesktopRuntimeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -116,6 +150,10 @@ function normalizeDesktopUpdateState(state: RawDesktopUpdateState | null | undef
     downloadedBytes: normalizeDesktopRuntimeNumber(state.downloadedBytes),
     totalBytes: normalizeDesktopRuntimeNumber(state.totalBytes),
   };
+}
+
+function getConfigCategoryDisplayOrder(category: { category: string; displayOrder: number }) {
+  return CONFIG_CATEGORY_ORDER_OVERRIDES[category.category] ?? category.displayOrder;
 }
 
 function getDesktopUpdateNotice(state: DesktopUpdateState | null): DesktopUpdateNotice | null {
@@ -310,44 +348,17 @@ const SettingsPage: React.FC = () => {
     };
   }, [canCheckDesktopUpdate, desktopRuntimeApi]);
 
-  const LLM_CHANNEL_KEY_RE = /^(LLM_|LLM_CHANNELS)/;
-  const AI_MODEL_HIDDEN_KEYS = new Set([
-    'LITELLM_MODEL',
-    'LITELLM_FALLBACK_MODELS',
-    'AIHUBMIX_KEY',
-    'DEEPSEEK_API_KEY',
-    'DEEPSEEK_API_KEYS',
-    'GEMINI_API_KEY',
-    'GEMINI_API_KEYS',
-    'GEMINI_MODEL',
-    'GEMINI_MODEL_FALLBACK',
-    'GEMINI_TEMPERATURE',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_API_KEYS',
-    'ANTHROPIC_MODEL',
-    'ANTHROPIC_TEMPERATURE',
-    'ANTHROPIC_MAX_TOKENS',
-    'OPENAI_API_KEY',
-    'OPENAI_API_KEYS',
-    'OPENAI_BASE_URL',
-    'OPENAI_MODEL',
-    'OPENAI_VISION_MODEL',
-    'OPENAI_TEMPERATURE',
-    'VISION_MODEL',
-  ]);
-  const SYSTEM_HIDDEN_KEYS = new Set([
-    'ADMIN_AUTH_ENABLED',
-  ]);
-  const AGENT_HIDDEN_KEYS = new Set<string>();
-
   const hasConfiguredChannels = useMemo(() => {
     const aiItems = itemsByCategory['ai_model'] || [];
     return aiItems.some((i) => i.key === 'LLM_CHANNELS' && i.value?.trim());
   }, [itemsByCategory]);
 
-  const rawActiveItems = itemsByCategory[activeCategory] || [];
+  const rawActiveItems = useMemo(
+    () => itemsByCategory[activeCategory] || [],
+    [itemsByCategory, activeCategory],
+  );
 
-  const isItemVisible = (category: string, item: SystemConfigItem) => {
+  const isItemVisible = useCallback((category: string, item: SystemConfigItem) => {
     if (category === 'ai_model') {
       if (hasConfiguredChannels && LLM_CHANNEL_KEY_RE.test(item.key)) return false;
       if (hasConfiguredChannels && AI_MODEL_HIDDEN_KEYS.has(item.key)) return false;
@@ -355,20 +366,25 @@ const SettingsPage: React.FC = () => {
     if (category === 'system' && SYSTEM_HIDDEN_KEYS.has(item.key)) return false;
     if (category === 'agent' && AGENT_HIDDEN_KEYS.has(item.key)) return false;
     return true;
-  };
+  }, [hasConfiguredChannels]);
 
   const activeItems = useMemo(
     () => rawActiveItems.filter((item) => isItemVisible(activeCategory, item)),
-    [rawActiveItems, activeCategory, hasConfiguredChannels],
+    [rawActiveItems, activeCategory, isItemVisible],
   );
 
   const displayedCategories = useMemo(
     () =>
-      categories.filter((cat) => {
-        const items = itemsByCategory[cat.category] || [];
-        return items.some((item) => isItemVisible(cat.category, item));
-      }),
-    [categories, itemsByCategory, hasConfiguredChannels],
+      categories
+        .filter((cat) => {
+          if (HIDDEN_CONFIG_CATEGORIES.has(cat.category)) {
+            return false;
+          }
+          const items = itemsByCategory[cat.category] || [];
+          return items.some((item) => isItemVisible(cat.category, item));
+        })
+        .sort((a, b) => getConfigCategoryDisplayOrder(a) - getConfigCategoryDisplayOrder(b)),
+    [categories, itemsByCategory, isItemVisible],
   );
 
 useEffect(() => {
@@ -563,7 +579,7 @@ useEffect(() => {
     fields: [],
   };
   const allCategories = [...displayedCategories, agentMgmtCategory, schedulerCategory].sort(
-    (a, b) => a.displayOrder - b.displayOrder,
+    (a, b) => getConfigCategoryDisplayOrder(a) - getConfigCategoryDisplayOrder(b),
   );
 
   const handleCategorySelect = useCallback(

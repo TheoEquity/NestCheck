@@ -204,56 +204,33 @@ def _persist_news_response(
     dimension: str,
     response,
 ) -> None:
-    """Best-effort news persistence for Agent search tools."""
+    """Best-effort short-lived cache for Agent search tools."""
     if not response or not getattr(response, "success", False) or not getattr(response, "results", None):
         return
 
-    if is_agent_chat_mode():
-        _persist_agent_search_cache(
-            stock_code=stock_code,
-            data_type=f"news_{dimension}",
-            provider=getattr(response, "provider", None),
-            params={"stock_code": stock_code, "stock_name": stock_name, "dimension": dimension},
-            payload={
-                "query": getattr(response, "query", ""),
-                "provider": getattr(response, "provider", None),
-                "results": [
-                    {
-                        "title": item.title,
-                        "snippet": item.snippet,
-                        "url": item.url,
-                        "source": item.source,
-                        "published_date": item.published_date,
-                    }
-                    for item in getattr(response, "results", [])
-                ],
-            },
-        )
+    if not is_agent_chat_mode():
         return
 
-    code = _canonical_search_code(stock_code)
-    try:
-        saved_count = _get_db().save_news_intel(
-            code=code,
-            name=stock_name,
-            dimension=dimension,
-            query=response.query,
-            response=response,
-            query_context=None,
-        )
-        logger.info(
-            "Agent news intel persisted for %s (dimension=%s, new_records=%s)",
-            code,
-            dimension,
-            saved_count,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Agent news intel persistence failed for %s (dimension=%s): %s",
-            code,
-            dimension,
-            exc,
-        )
+    _persist_agent_search_cache(
+        stock_code=stock_code,
+        data_type=f"news_{dimension}",
+        provider=getattr(response, "provider", None),
+        params={"stock_code": stock_code, "stock_name": stock_name, "dimension": dimension},
+        payload={
+            "query": getattr(response, "query", ""),
+            "provider": getattr(response, "provider", None),
+            "results": [
+                {
+                    "title": item.title,
+                    "snippet": item.snippet,
+                    "url": item.url,
+                    "source": item.source,
+                    "published_date": item.published_date,
+                }
+                for item in getattr(response, "results", [])
+            ],
+        },
+    )
 
 
 def _handle_search_stock_news(stock_code: str, stock_name: str) -> dict:

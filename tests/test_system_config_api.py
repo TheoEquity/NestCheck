@@ -113,6 +113,34 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertTrue(api_key_schema["examples"])
         self.assertTrue(api_key_schema["docs"])
 
+    def test_get_config_includes_dynamic_llm_channel_fields(self) -> None:
+        self.env_path.write_text(
+            "\n".join(
+                [
+                    "LLM_CHANNELS=dashscope",
+                    "LLM_DASHSCOPE_PROTOCOL=openai",
+                    "LLM_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "LLM_DASHSCOPE_ENABLED=true",
+                    "LLM_DASHSCOPE_API_KEY=sk-dashscope-test",
+                    "LLM_DASHSCOPE_MODELS=glm-5",
+                    "AGENT_LITELLM_MODEL=openai/glm-5",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)
+        item_map = {item["key"]: item for item in payload["items"]}
+
+        self.assertEqual(item_map["LLM_DASHSCOPE_PROTOCOL"]["value"], "openai")
+        self.assertEqual(item_map["LLM_DASHSCOPE_BASE_URL"]["value"], "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.assertEqual(item_map["LLM_DASHSCOPE_ENABLED"]["value"], "true")
+        self.assertEqual(item_map["LLM_DASHSCOPE_API_KEY"]["value"], "sk-dashscope-test")
+        self.assertEqual(item_map["LLM_DASHSCOPE_MODELS"]["value"], "glm-5")
+        self.assertEqual(item_map["LLM_DASHSCOPE_API_KEY"]["schema"]["category"], "ai_model")
+        self.assertTrue(item_map["LLM_DASHSCOPE_API_KEY"]["schema"]["is_sensitive"])
+
     def test_get_config_schema_excludes_removed_notification_fields(self) -> None:
         payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)
         item_map = {item["key"]: item for item in payload["items"]}
@@ -214,27 +242,27 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertIn("\n\n# Secrets\n", env_content)
         self.assertIn("CUSTOM_NOTE=updated sample\n", env_content)
 
-    def test_put_config_returns_startup_only_run_warning(self) -> None:
+    def test_put_config_returns_startup_only_bind_warning(self) -> None:
         current = system_config.get_system_config(include_schema=False, service=self.service).model_dump()
         payload = system_config.update_system_config(
             request=UpdateSystemConfigRequest(
                 config_version=current["config_version"],
                 reload_now=True,
                 items=[
-                    {"key": "RUN_IMMEDIATELY", "value": "false"},
+                    {"key": "WEBUI_PORT", "value": "8502"},
                 ],
             ),
             service=self.service,
         ).model_dump()
 
         self.assertTrue(payload["success"])
-        run_warning = next(
+        bind_warning = next(
             warning
             for warning in payload["warnings"]
-            if "RUN_IMMEDIATELY 已写入 .env" in warning
+            if "WEBUI_PORT 已写入 .env" in warning
         )
-        self.assertNotIn("调度模式", run_warning)
-        self.assertIn("启动期单次运行配置", run_warning)
+        self.assertIn("启动期监听配置", bind_warning)
+        self.assertIn("不会因为本次保存重新绑定监听地址或端口", bind_warning)
 
     def test_export_system_config_returns_raw_env_content(self) -> None:
         self.env_path.write_text(

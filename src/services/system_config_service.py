@@ -85,6 +85,15 @@ class SystemConfigService:
 
     _LLM_CAPABILITY_ORDER: Tuple[str, ...] = ("json", "tools", "stream", "vision")
     _LLM_STREAM_CHUNK_LIMIT = 8
+    _LLM_DYNAMIC_CHANNEL_SUFFIXES: Tuple[str, ...] = (
+        "PROTOCOL",
+        "BASE_URL",
+        "ENABLED",
+        "API_KEY",
+        "API_KEYS",
+        "MODELS",
+        "EXTRA_HEADERS",
+    )
     _LLM_CAPABILITY_PROBE_IMAGE = (
         "data:image/png;base64,"
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
@@ -174,6 +183,20 @@ class SystemConfigService:
 
         return display_map
 
+    @classmethod
+    def _collect_dynamic_llm_channel_keys(cls, config_map: Dict[str, str]) -> Set[str]:
+        channel_names = cls._split_csv(config_map.get("LLM_CHANNELS") or "")
+        dynamic_keys: Set[str] = set()
+        for name in channel_names:
+            normalized_name = name.strip().upper()
+            if not normalized_name or not re.fullmatch(r"[A-Z0-9_]+", normalized_name):
+                continue
+            prefix = f"LLM_{normalized_name}"
+            for suffix in cls._LLM_DYNAMIC_CHANNEL_SUFFIXES:
+                dynamic_keys.add(f"{prefix}_{suffix}")
+
+        return dynamic_keys & set(config_map.keys())
+
     @staticmethod
     def _resolve_display_value(raw_value: str, field_schema: Dict[str, Any], raw_value_exists: bool) -> str:
         if raw_value_exists:
@@ -191,7 +214,8 @@ class SystemConfigService:
         """Return current config values without server-side secret masking."""
         config_map = self._build_display_config_map(self._manager.read_config_map())
         registered_keys = set(get_registered_field_keys())
-        all_keys = registered_keys
+        dynamic_llm_keys = self._collect_dynamic_llm_channel_keys(config_map)
+        all_keys = registered_keys | dynamic_llm_keys
 
         category_orders = {
             item["category"]: item["display_order"]

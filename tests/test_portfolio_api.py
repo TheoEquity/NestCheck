@@ -589,6 +589,23 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual([item["record_date"] for item in items], [yesterday.isoformat(), today.isoformat()])
         self.assertEqual(items[-1]["fund_nav"], 1.2)
 
+    def test_fund_status_uses_first_record_as_inception_date(self) -> None:
+        from src.storage import PortfolioFundValue
+
+        first_day = date.today() - timedelta(days=2)
+        latest_day = date.today()
+        with self.db.get_session() as session:
+            session.add(PortfolioFundValue(record_date=first_day, fund_nav=1.0, fund_shares=100.0, total_equity=100.0))
+            session.add(PortfolioFundValue(record_date=latest_day, fund_nav=1.2, fund_shares=100.0, total_equity=120.0))
+            session.commit()
+
+        resp = self.client.get("/api/v1/portfolio/fund-status")
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        payload = resp.json()
+        self.assertEqual(payload["fund_inception_date"], first_day.isoformat())
+        self.assertEqual(payload["latest_nav_date"], latest_day.isoformat())
+
 
 if __name__ == "__main__":
     unittest.main()

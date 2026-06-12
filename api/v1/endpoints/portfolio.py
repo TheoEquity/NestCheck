@@ -1124,12 +1124,17 @@ def get_fund_status() -> PortfolioFundStatusResponse:
             .order_by(PortfolioFundValue.record_date.desc(), PortfolioFundValue.id.desc())
             .first()
         )
+        first_fv = (
+            session.query(PortfolioFundValue)
+            .order_by(PortfolioFundValue.record_date.asc(), PortfolioFundValue.id.asc())
+            .first()
+        )
 
         service = PortfolioService()
         total_equity = round_money(service.get_management_total_equity())
 
         return PortfolioFundStatusResponse(
-            fund_inception_date=latest_fv.record_date.isoformat() if latest_fv else None,
+            fund_inception_date=first_fv.record_date.isoformat() if first_fv else None,
             latest_nav=round_internal_fund_nav(latest_fv.fund_nav) if latest_fv else None,
             latest_nav_date=latest_fv.record_date.isoformat() if latest_fv else None,
             latest_shares=round_share(latest_fv.fund_shares) if latest_fv else None,

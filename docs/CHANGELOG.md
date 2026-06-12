@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] Agent 管理页 Skills 卡片新增编辑入口，支持读取、校验并保存 skill 定义文件后刷新 runtime skill 缓存。
 - [改进] 将重型 AI 问答 single-agent 显式纳入 Agent catalog，保留 `stock_chat` profile 与 `stock_chat_single` agent 供手动选择和编辑。
 - [测试] 补齐 V1.0 稳巢基金相关测试计划与 `market/index-history` API 契约覆盖，并移除已下线 Backtest Web 页面与路由测试。
+- [修复] 修正内部基金状态的成立日期语义，移除无引用 ShellHeader 组件，并同步 Web 回测/告警入口文档。
 - [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认和兜底走 `stock_chat_quick`，技术/走势类走 `stock_quick`，新闻/消息类走 `stock_intel`，风险/利空类走 `stock_risk`。
 - [改进] AI 问答页新增“个股专家分析”快捷按钮，直接在当前聊天中调用 `stock_specialist` 完成带策略技能的完整个股分析。
 - [改进] 个股专家分析在多 Agent 超时降级时改为中文用户态摘要，并减少聊天模式下 RiskAgent 对已获取情报的重复搜索。
@@ -86,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] `/api/v1/agent/models` 移除不存在的 request 引用，恢复 Agent 模型列表接口可用性。
 - [改进] 设置页数据源配置新增 `FIRECRAWL_API_KEY`，用于后续对已发现新闻/公告 URL 执行正文抓取。
 - [改进] AI 问答新闻情报在搜索引擎失败时新增 AkShare A 股新闻/公告 fallback，并在配置 Firecrawl 后读取新闻正文作为证据摘要。
+- [文档] 重写 README 为 NestCheck V1.0 首页级说明，聚焦稳巢基金、资产工作台、关注标的、系统架构和快速启动入口。
 - [新功能] AI 问答新增基金分析上下文工具与基金问答 profile，聚合基金档案、净值绩效、风险指标、持仓结构和持有体验数据。
 - [改进] AI 问答在选择基金大类后自动使用基金问答 profile，股票大类继续使用默认问股路由。
 - [改进] AI 问答基金模式新增“基金深度分析”按钮，并将输入区从股票策略选择切换为基金快捷问答。

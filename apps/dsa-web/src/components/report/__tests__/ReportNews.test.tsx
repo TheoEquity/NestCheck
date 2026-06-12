@@ -40,6 +40,24 @@ describe('ReportNews', () => {
     });
   });
 
+  it('does not render unsupported link protocols', async () => {
+    vi.mocked(historyApi.getNews).mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          title: '异常链接资讯',
+          snippet: '链接协议不应被渲染。',
+          url: 'javascript:alert(1)',
+        },
+      ],
+    });
+
+    render(<ReportNews recordId={1} />);
+
+    expect(await screen.findByText('异常链接资讯')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '跳转' })).not.toBeInTheDocument();
+  });
+
   it('renders the empty state when no news exists', async () => {
     vi.mocked(historyApi.getNews).mockResolvedValue({
       total: 0,

@@ -129,6 +129,26 @@ function includesAny(haystack: string, needles: string[]): boolean {
   return needles.some((needle) => haystack.includes(needle.toLowerCase()));
 }
 
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[REDACTED]')
+    .replace(/((?:api[_-]?key|token|secret|password|passwd|webhook)["'\s:=]+)[^\s"',}]+/gi, '$1[REDACTED]')
+    .replace(/(https?:\/\/[^\s?#]+\?[^\s]*)/gi, (match) => {
+      try {
+        const url = new URL(match);
+        for (const key of Array.from(url.searchParams.keys())) {
+          if (/api[_-]?key|token|secret|password|passwd|webhook/i.test(key)) {
+            url.searchParams.set(key, '[REDACTED]');
+          }
+        }
+        return url.toString();
+      } catch {
+        return match;
+      }
+    })
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-[REDACTED]');
+}
+
 function extractValidationDetail(detail: unknown): string | null {
   if (!Array.isArray(detail)) {
     return null;
@@ -205,10 +225,11 @@ export function extractErrorPayloadText(data: unknown): string | null {
 }
 
 export function createParsedApiError(options: CreateParsedApiErrorOptions): ParsedApiError {
+  const rawMessage = options.rawMessage?.trim() || options.message;
   return {
     title: options.title,
     message: options.message,
-    rawMessage: options.rawMessage?.trim() || options.message,
+    rawMessage: redactSensitiveText(rawMessage),
     status: options.status,
     category: options.category ?? 'unknown',
   };

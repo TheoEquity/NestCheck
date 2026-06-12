@@ -321,7 +321,6 @@ def extract_stock_codes_from_image(
         try:
             key = random.choice(keys) if keys else None
             raw = _call_litellm_vision(image_b64, mime_type, api_key=key)
-            logger.debug("[ImageExtractor] raw LLM response:\n%s", raw)
             items = _parse_items_from_text(raw)
             logger.info(
                 f"[ImageExtractor] {model} 提取 {len(items)} 个: "

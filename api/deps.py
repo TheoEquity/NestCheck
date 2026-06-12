@@ -12,12 +12,13 @@ API 依赖注入模块
 
 from typing import Generator
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from src.storage import DatabaseManager
 from src.config import get_config, Config
 from src.services.system_config_service import SystemConfigService
+from src.auth import COOKIE_NAME, is_auth_enabled, refresh_auth_state, verify_session
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -69,3 +70,26 @@ def get_system_config_service(request: Request) -> SystemConfigService:
         service = SystemConfigService()
         request.app.state.system_config_service = service
     return service
+
+
+def require_admin_session(request: Request) -> None:
+    """Require an active administrator session for sensitive endpoints."""
+    refresh_auth_state()
+    if not is_auth_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "admin_auth_required",
+                "message": "Enable admin authentication before using this endpoint",
+            },
+        )
+
+    cookie_val = request.cookies.get(COOKIE_NAME)
+    if not cookie_val or not verify_session(cookie_val):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": "unauthorized",
+                "message": "Login required",
+            },
+        )

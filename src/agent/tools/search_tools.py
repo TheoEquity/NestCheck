@@ -10,8 +10,10 @@ Tools:
 import logging
 import hashlib
 import html
+import ipaddress
 import json
 import re
+import socket
 from html.parser import HTMLParser
 from datetime import datetime
 from urllib.parse import urlparse
@@ -90,8 +92,37 @@ def _safe_fetch_url(url: str) -> Optional[str]:
     if parsed.scheme.lower() not in _ALLOWED_FETCH_SCHEMES or not parsed.netloc:
         return None
     hostname = (parsed.hostname or "").lower()
-    if hostname in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+    if not hostname or hostname == "localhost":
         return None
+
+    def _is_blocked_addr(addr: ipaddress._BaseAddress) -> bool:
+        return any((
+            addr.is_loopback,
+            addr.is_private,
+            addr.is_link_local,
+            addr.is_reserved,
+            addr.is_multicast,
+            addr.is_unspecified,
+        ))
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if _is_blocked_addr(addr):
+            return None
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        except OSError:
+            return None
+        for info in infos:
+            sockaddr = info[4]
+            if not sockaddr:
+                return None
+            try:
+                if _is_blocked_addr(ipaddress.ip_address(sockaddr[0])):
+                    return None
+            except ValueError:
+                return None
     return parsed.geturl()
 
 
@@ -111,7 +142,10 @@ def _fetch_page_text(url: str, *, max_chars: int = _MAX_EXTRACTED_CHARS) -> dict
             },
             timeout=_FETCH_TIMEOUT_SECONDS,
             stream=True,
+            allow_redirects=False,
         )
+        if 300 <= response.status_code < 400:
+            return {"success": False, "error": "Redirect responses are not fetchable", "url": safe_url}
         response.raise_for_status()
         chunks = []
         total = 0

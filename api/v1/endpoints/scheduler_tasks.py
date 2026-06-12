@@ -14,7 +14,7 @@ import time
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from api.v1.schemas.common import ErrorResponse
 
@@ -143,7 +143,7 @@ def get_task_history(task_name: str, limit: int = 50) -> List[Dict[str, Any]]:
     summary="获取任务统计信息",
     description="返回指定任务的执行统计信息（成功率、耗时等）",
 )
-def get_task_stats(task_name: str, days: int = 7) -> Dict[str, Any]:
+def get_task_stats(task_name: str, days: int = Query(7, ge=1, le=365)) -> Dict[str, Any]:
     """获取任务执行统计信息"""
     try:
         from src.task_history import task_history

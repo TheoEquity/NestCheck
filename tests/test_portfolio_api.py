@@ -538,6 +538,18 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertIn("citic", brokers)
         self.assertIn("cmb", brokers)
 
+    def test_csv_parse_rejects_oversized_upload(self) -> None:
+        oversized = b"a" * (5 * 1024 * 1024 + 1)
+
+        resp = self.client.post(
+            "/api/v1/portfolio/imports/csv/parse",
+            data={"broker": "huatai"},
+            files={"file": ("trades.csv", oversized, "text/csv")},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("error"), "validation_error")
+
     def test_event_list_invalid_page_size_returns_422(self) -> None:
         resp = self.client.get("/api/v1/portfolio/trades", params={"page_size": 101})
         self.assertEqual(resp.status_code, 422)

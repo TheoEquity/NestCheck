@@ -8,6 +8,15 @@ import { historyApi } from '../../api/history';
 import type { NewsIntelItem, ReportLanguage } from '../../types/analysis';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
+function safeExternalUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 interface ReportNewsProps {
   recordId?: number;  // 分析历史记录主键 ID
   limit?: number;
@@ -106,44 +115,48 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
 
       {!isLoading && !error && items.length > 0 && (
         <div className="space-y-3 text-left">
-          {items.map((item, index) => (
-            <div
-              key={`${item.title}-${index}`}
-              className="home-subpanel home-news-item group p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0 text-left">
-                  <p className="home-news-title text-sm font-medium leading-6 text-foreground text-left">
-                    {item.title}
-                  </p>
-                  {item.snippet && (
-                    <p className="home-news-snippet mt-2 text-sm leading-6 text-secondary-text text-left overflow-hidden [display:-webkit-box] [-webkit-line-clamp:3] [-webkit-box-orient:vertical]">
-                      {item.snippet}
+          {items.map((item, index) => {
+            const safeUrl = item.url ? safeExternalUrl(item.url) : null;
+
+            return (
+              <div
+                key={`${item.title}-${index}`}
+                className="home-subpanel home-news-item group p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="home-news-title text-sm font-medium leading-6 text-foreground text-left">
+                      {item.title}
                     </p>
+                    {item.snippet && (
+                      <p className="home-news-snippet mt-2 text-sm leading-6 text-secondary-text text-left overflow-hidden [display:-webkit-box] [-webkit-line-clamp:3] [-webkit-box-orient:vertical]">
+                        {item.snippet}
+                      </p>
+                    )}
+                  </div>
+                  {safeUrl && (
+                    <a
+                      href={safeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="home-accent-pill-link shrink-0 whitespace-nowrap px-2.5 py-1 text-xs"
+                      aria-label={text.openLink}
+                    >
+                      {text.openLink}
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M14 3h7m0 0v7m0-7L10 14"
+                        />
+                      </svg>
+                    </a>
                   )}
                 </div>
-                {item.url && (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="home-accent-pill-link shrink-0 whitespace-nowrap px-2.5 py-1 text-xs"
-                    aria-label={text.openLink}
-                  >
-                    {text.openLink}
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M14 3h7m0 0v7m0-7L10 14"
-                      />
-                    </svg>
-                  </a>
-                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
         </div>
       )}

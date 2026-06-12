@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import logging
 import json
 import os
 import re
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
@@ -198,8 +200,15 @@ class SystemConfigService:
         return dynamic_keys & set(config_map.keys())
 
     @staticmethod
-    def _resolve_display_value(raw_value: str, field_schema: Dict[str, Any], raw_value_exists: bool) -> str:
+    def _resolve_display_value(
+        raw_value: str,
+        field_schema: Dict[str, Any],
+        raw_value_exists: bool,
+        mask_token: str,
+    ) -> str:
         if raw_value_exists:
+            if bool(field_schema.get("is_sensitive", False)) and raw_value:
+                return mask_token
             return raw_value
 
         default_value = field_schema.get("default_value")
@@ -211,7 +220,7 @@ class SystemConfigService:
         return ''
 
     def get_config(self, include_schema: bool = True, mask_token: str = "******") -> Dict[str, Any]:
-        """Return current config values without server-side secret masking."""
+        """Return current config values with server-side secret masking."""
         config_map = self._build_display_config_map(self._manager.read_config_map())
         registered_keys = set(get_registered_field_keys())
         dynamic_llm_keys = self._collect_dynamic_llm_channel_keys(config_map)
@@ -232,12 +241,13 @@ class SystemConfigService:
             raw_value_exists = key in config_map
             raw_value = config_map.get(key, "")
             field_schema = schema_by_key[key]
-            display_value = self._resolve_display_value(raw_value, field_schema, raw_value_exists)
+            display_value = self._resolve_display_value(raw_value, field_schema, raw_value_exists, mask_token)
+            is_masked = bool(field_schema.get("is_sensitive", False)) and raw_value_exists and bool(raw_value)
             item: Dict[str, Any] = {
                 "key": key,
                 "value": display_value,
                 "raw_value_exists": raw_value_exists,
-                "is_masked": False,
+                "is_masked": is_masked,
             }
             if include_schema:
                 item["schema"] = field_schema
@@ -1927,33 +1937,52 @@ class SystemConfigService:
 
     @staticmethod
     def _is_safe_base_url(value: str) -> bool:
-        """Block link-local and cloud metadata addresses to prevent SSRF.
-
-        Allows localhost / private-LAN addresses (e.g. Ollama on 192.168.x.x)
-        but blocks 169.254.x.x (AWS/Azure/GCP/Alibaba instance-metadata service)
-        and other known metadata hostnames.
-        """
-        import ipaddress
+        """Block internal network targets unless explicitly allowed."""
+        if os.getenv("DSA_ALLOW_PRIVATE_LLM_BASE_URLS", "").lower() in {"true", "1", "yes"}:
+            return True
 
         parsed = urlparse(value)
         host = (parsed.hostname or "").lower()
         if not host:
             return True
-        # Known cloud metadata hostnames
-        _BLOCKED_HOSTS = frozenset({
+        blocked_hosts = frozenset({
+            "localhost",
             "169.254.169.254",
             "metadata.google.internal",
             "100.100.100.200",
         })
-        if host in _BLOCKED_HOSTS:
+        if host in blocked_hosts:
             return False
-        # Numeric IPs: block link-local range (169.254.0.0/16)
+
+        def _is_blocked_addr(addr: ipaddress._BaseAddress) -> bool:
+            return any((
+                addr.is_loopback,
+                addr.is_private,
+                addr.is_link_local,
+                addr.is_reserved,
+                addr.is_multicast,
+                addr.is_unspecified,
+            ))
+
         try:
             addr = ipaddress.ip_address(host)
-            if addr.is_link_local:
-                return False
+            return not _is_blocked_addr(addr)
         except ValueError:
-            pass  # hostname, not an IP — already checked against blocklist above
+            pass
+
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+        except OSError:
+            return False
+        for info in infos:
+            sockaddr = info[4]
+            if not sockaddr:
+                return False
+            try:
+                if _is_blocked_addr(ipaddress.ip_address(sockaddr[0])):
+                    return False
+            except ValueError:
+                return False
         return True
 
     @staticmethod

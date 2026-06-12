@@ -66,6 +66,14 @@ from src.services.portfolio_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+MAX_CSV_IMPORT_BYTES = 5 * 1024 * 1024
+
+
+def _read_limited_upload(file: UploadFile, *, max_bytes: int = MAX_CSV_IMPORT_BYTES) -> bytes:
+    content = file.file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise ValueError(f"CSV 文件过大，最大支持 {max_bytes // (1024 * 1024)}MB")
+    return content
 
 
 def _daily_latest_fund_values(session, limit: Optional[int] = None) -> list:
@@ -547,7 +555,7 @@ def parse_csv_import(
 ) -> PortfolioImportParseResponse:
     importer = PortfolioImportService()
     try:
-        content = file.file.read()
+        content = _read_limited_upload(file)
         parsed = importer.parse_trade_csv(broker=broker, content=content)
         return PortfolioImportParseResponse(
             broker=parsed["broker"],
@@ -591,7 +599,7 @@ def commit_csv_import(
 ) -> PortfolioImportCommitResponse:
     importer = PortfolioImportService()
     try:
-        content = file.file.read()
+        content = _read_limited_upload(file)
         parsed = importer.parse_trade_csv(broker=broker, content=content)
         result = importer.commit_trade_records(
             account_id=account_id,

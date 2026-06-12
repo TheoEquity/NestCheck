@@ -14,8 +14,9 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from api.deps import require_admin_session
 from src.agent.configs import load_agent_catalog, read_agent_catalog_text, validate_agent_catalog_yaml, write_agent_catalog_text
 from src.agent.factory import get_skill_manager, get_tool_registry, invalidate_skill_manager_cache
 from src.agent.skills.base import load_skill_from_markdown, load_skill_from_yaml
@@ -213,7 +214,7 @@ def get_agent_catalog_text() -> AgentCatalogTextResponse:
 
 
 @router.post("/catalog/validate")
-def validate_agent_catalog(payload: AgentCatalogUpdateRequest) -> Dict[str, Any]:
+def validate_agent_catalog(payload: AgentCatalogUpdateRequest, _: None = Depends(require_admin_session)) -> Dict[str, Any]:
     """Validate raw Agent catalog YAML without persisting changes."""
     try:
         catalog = validate_agent_catalog_yaml(payload.content)
@@ -228,7 +229,10 @@ def validate_agent_catalog(payload: AgentCatalogUpdateRequest) -> Dict[str, Any]
 
 
 @router.put("/catalog", response_model=AgentCatalogUpdateResponse)
-def update_agent_catalog(payload: AgentCatalogUpdateRequest) -> AgentCatalogUpdateResponse:
+def update_agent_catalog(
+    payload: AgentCatalogUpdateRequest,
+    _: None = Depends(require_admin_session),
+) -> AgentCatalogUpdateResponse:
     """Validate and persist raw Agent catalog YAML."""
     try:
         write_agent_catalog_text(payload.content)
@@ -248,7 +252,11 @@ def get_agent_skill_text(skill_id: str) -> AgentSkillTextResponse:
 
 
 @router.put("/skills/{skill_id}", response_model=AgentSkillUpdateResponse)
-def update_agent_skill_text(skill_id: str, payload: AgentSkillUpdateRequest) -> AgentSkillUpdateResponse:
+def update_agent_skill_text(
+    skill_id: str,
+    payload: AgentSkillUpdateRequest,
+    _: None = Depends(require_admin_session),
+) -> AgentSkillUpdateResponse:
     """Validate and persist raw skill definition text."""
     path = _resolve_editable_skill_path(skill_id)
     try:

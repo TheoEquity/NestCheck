@@ -146,6 +146,7 @@ class TaskHistory:
         Returns:
             统计信息字典
         """
+        days = max(1, min(int(days), 365))
         conn = self._get_connection()
         try:
             cursor = conn.execute(
@@ -159,9 +160,9 @@ class TaskHistory:
                     MIN(duration_ms) as min_duration_ms
                 FROM task_executions
                 WHERE task_name = ?
-                AND executed_at >= datetime('now', '-{} days')
-                """.format(days),
-                (task_name,)
+                AND executed_at >= datetime('now', ?)
+                """,
+                (task_name, f"-{days} days")
             )
             row = cursor.fetchone()
             if row:
@@ -199,10 +200,12 @@ class TaskHistory:
         Args:
             days: 保留天数
         """
+        days = max(1, min(int(days), 3650))
         conn = self._get_connection()
         try:
             cursor = conn.execute(
-                "DELETE FROM task_executions WHERE executed_at < datetime('now', '-{} days')".format(days)
+                "DELETE FROM task_executions WHERE executed_at < datetime('now', ?)",
+                (f"-{days} days",)
             )
             deleted = cursor.rowcount
             conn.commit()

@@ -7,7 +7,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from api.deps import get_system_config_service
+from api.deps import get_system_config_service, require_admin_session
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.system_config import (
     DiscoverLLMChannelModelsRequest,
@@ -157,6 +157,7 @@ def get_setup_status(
 )
 def update_system_config(
     request: UpdateSystemConfigRequest,
+    _: None = Depends(require_admin_session),
     service: SystemConfigService = Depends(get_system_config_service),
 ) -> UpdateSystemConfigResponse:
     """Validate and persist system configuration updates."""
@@ -263,6 +264,7 @@ def export_system_config(
 def import_system_config(
     request: ImportSystemConfigRequest,
     request_obj: Request,
+    _: None = Depends(require_admin_session),
     service: SystemConfigService = Depends(get_system_config_service),
 ) -> UpdateSystemConfigResponse:
     """Import a `.env` backup into the active config."""
@@ -357,6 +359,7 @@ def validate_system_config(
 )
 def test_llm_channel(
     request: TestLLMChannelRequest,
+    _: None = Depends(require_admin_session),
     service: SystemConfigService = Depends(get_system_config_service),
 ) -> TestLLMChannelResponse:
     """Validate and test one channel definition without writing `.env`."""
@@ -403,6 +406,7 @@ def test_llm_channel(
 )
 def discover_llm_channel_models(
     request: DiscoverLLMChannelModelsRequest,
+    _: None = Depends(require_admin_session),
     service: SystemConfigService = Depends(get_system_config_service),
 ) -> DiscoverLLMChannelModelsResponse:
     """Discover models for one channel definition without writing `.env`."""

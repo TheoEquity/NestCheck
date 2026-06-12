@@ -21,6 +21,7 @@ except ModuleNotFoundError:
     sys.modules["litellm"] = MagicMock()
 
 import src.auth as auth
+from api.deps import require_admin_session
 from api.middlewares.auth import AuthMiddleware
 from api.v1.endpoints import auth as auth_endpoint
 from src.config import Config
@@ -272,6 +273,36 @@ class AuthApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         call_next.assert_awaited_once()
+
+    def test_require_admin_session_rejects_when_auth_disabled(self) -> None:
+        request = self._build_request({auth.COOKIE_NAME: "session-token"})
+
+        with patch("api.deps.refresh_auth_state", return_value=None):
+            with patch("api.deps.is_auth_enabled", return_value=False):
+                with self.assertRaises(Exception) as ctx:
+                    require_admin_session(request)
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail["error"], "admin_auth_required")
+
+    def test_require_admin_session_rejects_missing_session(self) -> None:
+        request = self._build_request()
+
+        with patch("api.deps.refresh_auth_state", return_value=None):
+            with patch("api.deps.is_auth_enabled", return_value=True):
+                with self.assertRaises(Exception) as ctx:
+                    require_admin_session(request)
+
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertEqual(ctx.exception.detail["error"], "unauthorized")
+
+    def test_require_admin_session_accepts_valid_session(self) -> None:
+        request = self._build_request({auth.COOKIE_NAME: "session-token"})
+
+        with patch("api.deps.refresh_auth_state", return_value=None):
+            with patch("api.deps.is_auth_enabled", return_value=True):
+                with patch("api.deps.verify_session", return_value=True):
+                    self.assertIsNone(require_admin_session(request))
 
     def test_auth_settings_requires_session_when_auth_enabled(self) -> None:
         scope = {

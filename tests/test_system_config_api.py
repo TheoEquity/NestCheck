@@ -3,6 +3,7 @@
 
 import asyncio
 import os
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,7 @@ import src.auth as auth
 from src.config import Config
 from src.core.config_manager import ConfigManager
 from src.services.system_config_service import SystemConfigService
+from src.agent.tools import search_tools
 
 
 class SystemConfigApiTestCase(unittest.TestCase):
@@ -98,11 +100,12 @@ class SystemConfigApiTestCase(unittest.TestCase):
         add_auth_middleware(app)
         return app
 
-    def test_get_config_returns_raw_secret_value(self) -> None:
+    def test_get_config_masks_secret_value(self) -> None:
         payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)
         item_map = {item["key"]: item for item in payload["items"]}
-        self.assertEqual(item_map["GEMINI_API_KEY"]["value"], "secret-key-value")
-        self.assertFalse(item_map["GEMINI_API_KEY"]["is_masked"])
+        self.assertEqual(item_map["GEMINI_API_KEY"]["value"], "******")
+        self.assertTrue(item_map["GEMINI_API_KEY"]["raw_value_exists"])
+        self.assertTrue(item_map["GEMINI_API_KEY"]["is_masked"])
 
     def test_get_config_schema_includes_help_metadata(self) -> None:
         payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)
@@ -136,10 +139,46 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertEqual(item_map["LLM_DASHSCOPE_PROTOCOL"]["value"], "openai")
         self.assertEqual(item_map["LLM_DASHSCOPE_BASE_URL"]["value"], "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.assertEqual(item_map["LLM_DASHSCOPE_ENABLED"]["value"], "true")
-        self.assertEqual(item_map["LLM_DASHSCOPE_API_KEY"]["value"], "sk-dashscope-test")
+        self.assertEqual(item_map["LLM_DASHSCOPE_API_KEY"]["value"], "******")
+        self.assertTrue(item_map["LLM_DASHSCOPE_API_KEY"]["is_masked"])
         self.assertEqual(item_map["LLM_DASHSCOPE_MODELS"]["value"], "glm-5")
         self.assertEqual(item_map["LLM_DASHSCOPE_API_KEY"]["schema"]["category"], "ai_model")
         self.assertTrue(item_map["LLM_DASHSCOPE_API_KEY"]["schema"]["is_sensitive"])
+
+    def test_llm_base_url_guard_blocks_internal_targets(self) -> None:
+        blocked_urls = [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:11434/v1",
+            "http://10.0.0.1/v1",
+            "http://192.168.0.1/v1",
+            "http://169.254.169.254/latest/meta-data",
+            "http://metadata.google.internal/computeMetadata/v1",
+        ]
+
+        for url in blocked_urls:
+            with self.subTest(url=url):
+                self.assertFalse(SystemConfigService._is_safe_base_url(url))
+
+    def test_llm_base_url_guard_allows_private_targets_with_escape_hatch(self) -> None:
+        with patch.dict(os.environ, {"DSA_ALLOW_PRIVATE_LLM_BASE_URLS": "true"}, clear=False):
+            self.assertTrue(SystemConfigService._is_safe_base_url("http://127.0.0.1:11434/v1"))
+
+    def test_llm_base_url_guard_blocks_dns_to_private_address(self) -> None:
+        private_info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 443))]
+
+        with patch("src.services.system_config_service.socket.getaddrinfo", return_value=private_info):
+            self.assertFalse(SystemConfigService._is_safe_base_url("https://llm.internal.example/v1"))
+
+    def test_agent_fetch_url_guard_blocks_internal_targets(self) -> None:
+        self.assertIsNone(search_tools._safe_fetch_url("http://localhost/page"))
+        self.assertIsNone(search_tools._safe_fetch_url("http://127.0.0.1/page"))
+        self.assertIsNone(search_tools._safe_fetch_url("http://169.254.169.254/latest/meta-data"))
+
+    def test_agent_fetch_url_guard_blocks_dns_to_private_address(self) -> None:
+        private_info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 443))]
+
+        with patch("src.agent.tools.search_tools.socket.getaddrinfo", return_value=private_info):
+            self.assertIsNone(search_tools._safe_fetch_url("https://news.internal.example/article"))
 
     def test_get_config_schema_excludes_removed_notification_fields(self) -> None:
         payload = system_config.get_system_config(include_schema=True, service=self.service).model_dump(by_alias=True)

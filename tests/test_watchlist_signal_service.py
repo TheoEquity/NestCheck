@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pandas as pd
 
 from src.services.watchlist_signal_service import WatchlistSignalService
 
@@ -53,6 +57,54 @@ class WatchlistSignalServiceTestCase(unittest.TestCase):
 
         self.assertEqual(light["status"], "N")
         self.assertEqual(light["reason"], "近1年回撤数据缺失")
+
+    def test_fund_rank_uses_each_period_return_column(self) -> None:
+        fake_ak = SimpleNamespace(
+            fund_open_fund_info_em=lambda symbol, indicator: pd.DataFrame(
+                [["2026-06-10", 1.0, 0.0], ["2026-06-11", 1.01, 1.0]],
+                columns=["净值日期", "单位净值", "日增长率"],
+            ),
+            fund_individual_basic_info_xq=lambda symbol: pd.DataFrame(
+                [["基金类型", "债券型-混合二级"]],
+                columns=["item", "value"],
+            ),
+            fund_name_em=lambda: pd.DataFrame(
+                [
+                    ["000001", "债券型-普通债券"],
+                    ["001258", "债券型-混合二级"],
+                    ["000003", "债券型-混合二级"],
+                    ["000004", "债券型-普通债券"],
+                ],
+                columns=["基金代码", "基金类型"],
+            ),
+            fund_open_fund_rank_em=lambda symbol: pd.DataFrame(
+                [
+                    [1, "000001", 2.0, 0.0, 7.0],
+                    [2, "001258", 1.0, 5.0, 8.0],
+                    [3, "000003", -1.0, 6.0, 9.0],
+                    [4, "000004", 1.0, 7.0, None],
+                ],
+                columns=["序号", "基金代码", "近1月", "近3月", "近1年"],
+            ),
+            fund_individual_analysis_xq=lambda symbol: pd.DataFrame(),
+        )
+        fake_ts = SimpleNamespace(pro_api=lambda: SimpleNamespace(fund_manager=lambda **kwargs: pd.DataFrame()))
+
+        with patch.dict("sys.modules", {"akshare": fake_ak, "tushare": fake_ts}):
+            indicator = self.service._build_fund_indicator(SimpleNamespace(symbol="001258"), [])
+
+        self.assertEqual(indicator["rank_1m"], 1)
+        self.assertEqual(indicator["rank_1m_total"], 2)
+        self.assertEqual(indicator["rank_3m"], 2)
+        self.assertEqual(indicator["rank_3m_total"], 2)
+        self.assertEqual(indicator["rank_1y"], 2)
+        self.assertEqual(indicator["rank_1y_total"], 2)
+        self.assertEqual(indicator["rank_1m_pct"], 1.0)
+        self.assertEqual(indicator["rank_3m_pct"], 0.5)
+        self.assertEqual(indicator["rank_1y_pct"], 0.5)
+        self.assertEqual(indicator["raw_payload"]["fund_rank"]["fund_type"], "债券型")
+        self.assertEqual(indicator["raw_payload"]["fund_rank"]["fund_sub_type"], "债券型-混合二级")
+        self.assertEqual(indicator["raw_payload"]["fund_rank"]["rank_scope"], "sub_type")
 
 
 if __name__ == "__main__":

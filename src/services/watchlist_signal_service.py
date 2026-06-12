@@ -412,14 +412,30 @@ class WatchlistSignalService:
             flags.append("akshare_unavailable")
             return result
             
-        # 1. 获取 Akshare 官方分类，确保按“户口本”参与同类排名
+        # 1. 获取 Akshare 官方分类，优先按基金子类参与同类排名
         ak_type = "全部"  # 兜底
+        full_type = None
+        fund_name_df = None
         try:
-            info = ak.fund_individual_basic_info_xq(symbol=fund_code)
-            type_row = info[info["item"].astype(str).str.contains("基金类型")]
-            if not type_row.empty:
-                full_type = str(type_row.iloc[0]["value"]).strip()
-                # 取大类：如 "债券型-普通债券" -> "债券型"
+            fund_name_df = ak.fund_name_em()
+            name_row = fund_name_df[fund_name_df["基金代码"].astype(str).str.zfill(6) == fund_code.zfill(6)]
+            if not name_row.empty:
+                full_type = str(name_row.iloc[0].get("基金类型") or "").strip()
+        except Exception as exc:
+            flags.append(f"fund_name_type_fetch_failed: {exc}")
+
+        if not full_type:
+            try:
+                info = ak.fund_individual_basic_info_xq(symbol=fund_code)
+                type_row = info[info["item"].astype(str).str.contains("基金类型")]
+                if not type_row.empty:
+                    full_type = str(type_row.iloc[0]["value"]).strip()
+            except Exception as exc:
+                flags.append(f"fund_type_fetch_failed: {exc}")
+
+        if full_type:
+            try:
+                # 取大类：如 "债券型-混合二级" -> "债券型"
                 main_type = full_type.split("-")[0]
                 # 映射到接口支持的 symbol
                 if any(k in main_type for k in ("股票", "混合", "偏股")):
@@ -428,13 +444,31 @@ class WatchlistSignalService:
                     ak_type = "债券型"
                 elif "指数" in main_type:
                     ak_type = "指数型"
-        except Exception as exc:
-            flags.append(f"fund_type_fetch_failed: {exc}")
+            except Exception as exc:
+                flags.append(f"fund_type_parse_failed: {exc}")
             
         # 2. 拉取同类全榜单（已排序）
         # 2. 拉取同类全榜单（已按近期维度默认排序）
         try:
             rank_df = ak.fund_open_fund_rank_em(symbol=ak_type)
+            rank_scope_df = rank_df
+            rank_scope = "main_type"
+
+            if full_type and fund_name_df is not None and not fund_name_df.empty:
+                subtype_codes = set(
+                    fund_name_df[fund_name_df["基金类型"].astype(str) == full_type]["基金代码"]
+                    .astype(str)
+                    .str.zfill(6)
+                )
+                subtype_df = rank_df[rank_df["基金代码"].astype(str).str.zfill(6).isin(subtype_codes)]
+                subtype_matched = subtype_df[subtype_df["基金代码"].astype(str).str.zfill(6) == fund_code.zfill(6)]
+                if not subtype_df.empty and not subtype_matched.empty:
+                    rank_scope_df = subtype_df
+                    rank_scope = "sub_type"
+                else:
+                    flags.append("fund_subtype_rank_scope_unavailable")
+
+            rank_df = rank_scope_df
             matched = rank_df[rank_df["基金代码"].astype(str).str.zfill(6) == fund_code.zfill(6)]
             
             if not matched.empty:
@@ -446,47 +480,46 @@ class WatchlistSignalService:
                 ret_3m = _safe_float(row.get("近3月"))
                 ret_1y = _safe_float(row.get("近1年"))
                 
-                # 获取排名（序号列从 1 开始）
-                rank_1m = int(matched.iloc[0]["序号"]) if "序号" in matched.columns else None
-                rank_3m = None  # 榜单只按一个维度排序，其他维度需要自己计算
-                rank_1y = None
-                
-                result["raw_rank_1m"] = ret_1m
-                result["raw_rank_3m"] = ret_3m
-                result["raw_rank_1y"] = ret_1y
-                
-                # 保存排名和总数
-                result["rank_1m"] = rank_1m
-                result["rank_1m_total"] = total
-                result["rank_3m_total"] = total  # 总数相同
-                result["rank_1y_total"] = total
-                
-                # 计算排名分位 (同类中超过多少比例的基金)
-                def calc_pct(col: str, val: Optional[float]) -> Optional[float]:
+                rank_payload = {
+                    "rank_scope": rank_scope,
+                    "fund_type": ak_type,
+                    "fund_sub_type": full_type,
+                    "list_total": total,
+                    "returns": {
+                        "1m": ret_1m,
+                        "3m": ret_3m,
+                        "1y": ret_1y,
+                    },
+                }
+                result["raw_payload"] = {**result.get("raw_payload", {}), "fund_rank": rank_payload}
+
+                def rank_stats(col: str, val: Optional[float]) -> Dict[str, Optional[float]]:
                     if val is None:
-                        return None
+                        return {"rank": None, "total": None, "pct": None}
                     s = pd.to_numeric(rank_df[col], errors="coerce").dropna()
                     cnt_better = (s > val).sum()
                     cnt_total = len(s)
                     if cnt_total == 0:
-                        return None
-                    return round(1.0 - (cnt_better / cnt_total), 4)
-                    
-                result["rank_1m_pct"] = calc_pct("近1月", ret_1m)
-                result["rank_3m_pct"] = calc_pct("近3月", ret_3m)
-                result["rank_1y_pct"] = calc_pct("近1年", ret_1y)
-                
-                # 计算近 3 月和近 1 年的实际排名
-                def calc_rank(col: str, val: Optional[float]) -> Optional[int]:
-                    if val is None:
-                        return None
-                    s = pd.to_numeric(rank_df[col], errors="coerce").dropna()
-                    # 比该值大的数量 + 1 = 排名
-                    cnt_better = (s > val).sum()
-                    return int(cnt_better) + 1
-                
-                result["rank_3m"] = calc_rank("近3月", ret_3m)
-                result["rank_1y"] = calc_rank("近1年", ret_1y)
+                        return {"rank": None, "total": None, "pct": None}
+                    return {
+                        "rank": int(cnt_better) + 1,
+                        "total": int(cnt_total),
+                        "pct": round(1.0 - (cnt_better / cnt_total), 4),
+                    }
+
+                stats_1m = rank_stats("近1月", ret_1m)
+                stats_3m = rank_stats("近3月", ret_3m)
+                stats_1y = rank_stats("近1年", ret_1y)
+
+                result["rank_1m"] = stats_1m["rank"]
+                result["rank_1m_total"] = stats_1m["total"]
+                result["rank_1m_pct"] = stats_1m["pct"]
+                result["rank_3m"] = stats_3m["rank"]
+                result["rank_3m_total"] = stats_3m["total"]
+                result["rank_3m_pct"] = stats_3m["pct"]
+                result["rank_1y"] = stats_1y["rank"]
+                result["rank_1y_total"] = stats_1y["total"]
+                result["rank_1y_pct"] = stats_1y["pct"]
             else:
                 flags.append("fund_not_in_rank_list")
         except Exception as exc:

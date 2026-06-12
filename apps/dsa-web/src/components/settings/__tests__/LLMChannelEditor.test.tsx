@@ -936,6 +936,78 @@ describe('LLMChannelEditor', () => {
     );
   });
 
+  it('sends mask token when testing or discovering a masked channel key', async () => {
+    discoverLLMChannelModels.mockResolvedValue({
+      success: true,
+      message: 'LLM channel model discovery succeeded',
+      error: null,
+      resolvedProtocol: 'openai',
+      models: ['qwen-plus'],
+      latencyMs: 88,
+    });
+    testLLMChannel.mockResolvedValue({
+      success: true,
+      message: 'LLM channel test succeeded',
+      error: null,
+      errorCode: null,
+      stage: 'chat_completion',
+      retryable: false,
+      details: {},
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/qwen-plus',
+      latencyMs: 80,
+      capabilityResults: {
+        json: {
+          status: 'passed',
+          message: 'JSON output capability check passed',
+          errorCode: null,
+          stage: 'capability_json',
+          retryable: false,
+          details: {},
+        },
+      },
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'dashscope' },
+          { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
+          { key: 'LLM_DASHSCOPE_BASE_URL', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+          { key: 'LLM_DASHSCOPE_ENABLED', value: 'true' },
+          { key: 'LLM_DASHSCOPE_API_KEY', value: '******' },
+          { key: 'LLM_DASHSCOPE_MODELS', value: 'qwen-plus' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Dashscope/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    await screen.findByText(/连接成功 · openai\/qwen-plus/i);
+    fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
+    await screen.findByText(/已获取 1 个模型/i);
+    fireEvent.click(screen.getByLabelText('JSON'));
+    fireEvent.click(screen.getByRole('button', { name: '检测能力' }));
+    await screen.findByText(/能力检测完成：1 通过/i);
+
+    expect(testLLMChannel).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: '******',
+      maskToken: '******',
+    }));
+    expect(discoverLLMChannelModels).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: '******',
+      maskToken: '******',
+    }));
+    expect(testLLMChannel).toHaveBeenLastCalledWith(expect.objectContaining({
+      apiKey: '******',
+      maskToken: '******',
+      capabilityChecks: ['json'],
+    }));
+  });
+
   it('shows structured troubleshooting hint when channel auth fails', async () => {
     testLLMChannel.mockResolvedValue({ success: false, message: 'LLM authentication failed', error: '401 Unauthorized · Bearer [REDACTED]', errorCode: 'auth', stage: 'chat_completion', retryable: false, details: {}, resolvedProtocol: 'openai', resolvedModel: 'openai/gpt-4o-mini', latencyMs: null });
 

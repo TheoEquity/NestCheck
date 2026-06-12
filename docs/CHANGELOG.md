@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] AI 问答工具数据改为写入短期缓存，避免临时问答污染 `stock_daily` 与新闻长期业务表，并新增网页新闻证据抓取工具供 Agent 使用。
 - [新功能] Agent 管理页 Skills 卡片新增编辑入口，支持读取、校验并保存 skill 定义文件后刷新 runtime skill 缓存。
 - [改进] 将重型 AI 问答 single-agent 显式纳入 Agent catalog，保留 `stock_chat` profile 与 `stock_chat_single` agent 供手动选择和编辑。
+- [修复] Web 设置页 LLM 渠道测试、模型发现与能力检测在 API Key 已脱敏显示时复用后端保存密钥，避免发送占位符导致连接失败。
 - [测试] 补齐 V1.0 稳巢基金相关测试计划与 `market/index-history` API 契约覆盖，并移除已下线 Backtest Web 页面与路由测试。
 - [修复] 修正内部基金状态的成立日期语义，移除无引用 ShellHeader 组件，并同步 Web 回测/告警入口文档。
 - [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认和兜底走 `stock_chat_quick`，技术/走势类走 `stock_quick`，新闻/消息类走 `stock_intel`，风险/利空类走 `stock_risk`。

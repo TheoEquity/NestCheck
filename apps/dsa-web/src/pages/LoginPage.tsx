@@ -8,7 +8,7 @@ import type { ParsedApiError } from '../api/error';
 import { isParsedApiError } from '../api/error';
 import { useAuth } from '../hooks';
 import { SettingsAlert } from '../components/settings';
-import { apiRequest } from '../api';
+import apiClient from '../api';
 
 type LoginMode = 'login' | 'setup' | 'setup-question' | 'forgot-question' | 'forgot-reset';
 
@@ -98,12 +98,9 @@ const LoginPage: React.FC = () => {
     }
     setIsSubmitting(true);
     try {
-      await apiRequest('/auth/check-security-answer', {
-        method: 'POST',
-        body: JSON.stringify({
-          questionIndex: forgotQuestionIndex,
-          answer: forgotAnswer,
-        }),
+      await apiClient.post('/api/v1/auth/check-security-answer', {
+        questionIndex: forgotQuestionIndex,
+        answer: forgotAnswer,
       });
       setMode('forgot-reset');
     } catch (err: any) {
@@ -126,14 +123,11 @@ const LoginPage: React.FC = () => {
     }
     setIsSubmitting(true);
     try {
-      await apiRequest('/auth/reset-password-by-answer', {
-        method: 'POST',
-        body: JSON.stringify({
-          questionIndex: forgotQuestionIndex,
-          answer: forgotAnswer,
-          newPassword,
-          newPasswordConfirm,
-        }),
+      await apiClient.post('/api/v1/auth/reset-password-by-answer', {
+        questionIndex: forgotQuestionIndex,
+        answer: forgotAnswer,
+        newPassword,
+        newPasswordConfirm,
       });
       setSuccessMsg('密码已重置，请使用新密码登录');
       setMode('login');

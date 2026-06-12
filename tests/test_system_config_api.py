@@ -303,6 +303,24 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertIn("启动期监听配置", bind_warning)
         self.assertIn("不会因为本次保存重新绑定监听地址或端口", bind_warning)
 
+    def test_put_config_keeps_max_workers_and_startup_bind_warnings(self) -> None:
+        current = system_config.get_system_config(include_schema=False, service=self.service).model_dump()
+        payload = system_config.update_system_config(
+            request=UpdateSystemConfigRequest(
+                config_version=current["config_version"],
+                reload_now=False,
+                items=[
+                    {"key": "MAX_WORKERS", "value": "4"},
+                    {"key": "WEBUI_PORT", "value": "8502"},
+                ],
+            ),
+            service=self.service,
+        ).model_dump()
+
+        self.assertTrue(payload["success"])
+        self.assertTrue(any("MAX_WORKERS=4 已写入 .env" in warning for warning in payload["warnings"]))
+        self.assertTrue(any("WEBUI_PORT 已写入 .env" in warning for warning in payload["warnings"]))
+
     def test_export_system_config_returns_raw_env_content(self) -> None:
         self.env_path.write_text(
             "# Web config\nCUSTOM_NOTE=desktop sample\nGEMINI_API_KEY=secret-key-value\nADMIN_AUTH_ENABLED=true\n",
@@ -609,6 +627,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                     protocol="openai",
                     base_url="https://api.example.com/v1",
                     api_key="sk-test",
+                    mask_token="******",
                     models=["gpt-4o-mini"],
                     capability_checks=["json", "stream"],
                 ),
@@ -620,7 +639,41 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertEqual(payload["stage"], "chat_completion")
         self.assertEqual(payload["capability_results"], {})
         mock_test.assert_called_once()
+        self.assertEqual(mock_test.call_args.kwargs["mask_token"], "******")
         self.assertEqual(mock_test.call_args.kwargs["capability_checks"], ["json", "stream"])
+
+    def test_test_llm_channel_resolves_masked_api_key_from_saved_config(self) -> None:
+        self.env_path.write_text(
+            "\n".join(
+                [
+                    "LLM_OPENAI_API_KEYS=sk-saved-one,sk-saved-two",
+                    "ADMIN_AUTH_ENABLED=true",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        captured_call: dict[str, object] = {}
+
+        def fake_litellm_call(_func, *, model, call_kwargs, **_kwargs):
+            captured_call.update(call_kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))])
+
+        with (
+            patch.object(SystemConfigService, "_is_safe_base_url", return_value=True),
+            patch("src.services.system_config_service.call_litellm_with_param_recovery", side_effect=fake_litellm_call),
+        ):
+            result = self.service.test_llm_channel(
+                name="openai",
+                protocol="openai",
+                base_url="https://api.openai.example/v1",
+                api_key="******",
+                mask_token="******",
+                models=["gpt-4o-mini"],
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(captured_call["api_key"], "sk-saved-one")
 
     def test_validate_returns_user_facing_model_message_without_internal_env_key_name(self) -> None:
         validation = self.service.validate(
@@ -662,6 +715,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                     protocol="openai",
                     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
                     api_key="sk-test",
+                    mask_token="******",
                 ),
                 service=self.service,
             ).model_dump()
@@ -670,6 +724,41 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertEqual(payload["models"], ["qwen-plus", "qwen-turbo"])
         self.assertEqual(payload["stage"], "model_discovery")
         mock_discover.assert_called_once()
+        self.assertEqual(mock_discover.call_args.kwargs["mask_token"], "******")
+
+    def test_discover_llm_channel_models_resolves_masked_api_key_from_saved_config(self) -> None:
+        self.env_path.write_text(
+            "\n".join(
+                [
+                    "LLM_DASHSCOPE_API_KEY=sk-dashscope-saved",
+                    "ADMIN_AUTH_ENABLED=true",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        fake_response = SimpleNamespace(
+            status_code=200,
+            ok=True,
+            json=lambda: {"data": [{"id": "qwen-plus"}]},
+            text="",
+        )
+
+        with (
+            patch.object(SystemConfigService, "_is_safe_base_url", return_value=True),
+            patch("src.services.system_config_service.requests.get", return_value=fake_response) as mock_get,
+        ):
+            result = self.service.discover_llm_channel_models(
+                name="dashscope",
+                protocol="openai",
+                base_url="https://dashscope.example/v1",
+                api_key="******",
+                mask_token="******",
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["models"], ["qwen-plus"])
+        self.assertEqual(mock_get.call_args.kwargs["headers"]["Authorization"], "Bearer sk-dashscope-saved")
 
 
 if __name__ == "__main__":

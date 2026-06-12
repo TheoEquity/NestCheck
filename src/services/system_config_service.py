@@ -82,6 +82,16 @@ class _LLMDiagnostic:
     details: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _LLMChannelEnv:
+    name: str
+    protocol: str
+    base_url: str
+    api_key: str
+    models: List[str]
+    enabled: bool
+
+
 class SystemConfigService:
     """Service layer for reading, validating, and updating runtime configuration."""
 
@@ -359,17 +369,23 @@ class SystemConfigService:
         protocol: str,
         base_url: str,
         api_key: str,
+        mask_token: str = "******",
         models: Sequence[str] = (),
         timeout_seconds: float = 20.0,
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Discover available models from an OpenAI-compatible `/models` endpoint."""
         channel_name = name.strip() or "channel"
+        resolved_api_key = self._resolve_llm_masked_api_key(
+            channel_name=channel_name,
+            submitted_api_key=api_key,
+            mask_token=mask_token,
+        )
         existing_models = [str(m).strip() for m in models if str(m).strip()]
         validation_issues, resolved_protocol = self._validate_llm_channel_connection(
             channel_name=channel_name,
             protocol_value=protocol,
             base_url_value=base_url,
-            api_key_value=api_key,
+            api_key_value=resolved_api_key,
             model_values=existing_models,
             field_prefix="discover_channel",
             require_base_url=True,
@@ -417,7 +433,7 @@ class SystemConfigService:
                 latency_ms=None,
             )
 
-        api_keys = [segment.strip() for segment in api_key.split(",") if segment.strip()]
+        api_keys = [segment.strip() for segment in resolved_api_key.split(",") if segment.strip()]
         selected_api_key = api_keys[0] if api_keys else ""
         request_headers = {"Accept": "application/json"}
         if selected_api_key:
@@ -537,6 +553,7 @@ class SystemConfigService:
         protocol: str,
         base_url: str,
         api_key: str,
+        mask_token: str = "******",
         models: Sequence[str],
         enabled: bool = True,
         timeout_seconds: float = 20.0,
@@ -546,11 +563,16 @@ class SystemConfigService:
         requested_capabilities = self._normalize_llm_capability_checks(capability_checks)
         raw_models = [str(model).strip() for model in models if str(model).strip()]
         channel_name = name.strip() or "channel"
+        resolved_api_key = self._resolve_llm_masked_api_key(
+            channel_name=channel_name,
+            submitted_api_key=api_key,
+            mask_token=mask_token,
+        )
         validation_issues = self._validate_llm_channel_definition(
             channel_name=channel_name,
             protocol_value=protocol,
             base_url_value=base_url,
-            api_key_value=api_key,
+            api_key_value=resolved_api_key,
             model_values=raw_models,
             enabled=enabled,
             field_prefix="test_channel",
@@ -583,7 +605,7 @@ class SystemConfigService:
         resolved_protocol = resolve_llm_channel_protocol(protocol, base_url=base_url, models=raw_models, channel_name=name)
         resolved_models = [normalize_llm_channel_model(model, resolved_protocol, base_url) for model in raw_models]
         resolved_model = resolved_models[0]
-        api_keys = [segment.strip() for segment in api_key.split(",") if segment.strip()]
+        api_keys = [segment.strip() for segment in resolved_api_key.split(",") if segment.strip()]
         selected_api_key = api_keys[0] if api_keys else ""
 
         call_kwargs: Dict[str, Any] = {
@@ -704,6 +726,58 @@ class SystemConfigService:
     def _normalize_llm_capability_checks(cls, capability_checks: Sequence[str]) -> List[str]:
         requested = {str(check).strip().lower() for check in capability_checks if str(check).strip()}
         return [check for check in cls._LLM_CAPABILITY_ORDER if check in requested]
+
+    def _resolve_llm_masked_api_key(
+        self,
+        *,
+        channel_name: str,
+        submitted_api_key: str,
+        mask_token: str,
+    ) -> str:
+        if not mask_token or submitted_api_key != mask_token:
+            return submitted_api_key
+
+        normalized_name = channel_name.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9_]+", normalized_name):
+            return submitted_api_key
+
+        config_map = self._manager.read_config_map()
+        saved_value = self._get_llm_channel_api_key_from_map(config_map, normalized_name)
+        return saved_value or submitted_api_key
+
+    @staticmethod
+    def _get_llm_channel_api_key_from_map(effective_map: Dict[str, str], channel_name: str) -> str:
+        normalized_name = channel_name.strip().upper()
+        if not normalized_name or not re.fullmatch(r"[A-Z0-9_]+", normalized_name):
+            return ""
+
+        prefix = f"LLM_{normalized_name}"
+        api_key_value = (
+            (effective_map.get(f"{prefix}_API_KEYS") or "").strip()
+            or (effective_map.get(f"{prefix}_API_KEY") or "").strip()
+        )
+        if normalized_name == "ANSPIRE" and not api_key_value:
+            api_key_value = (effective_map.get("ANSPIRE_API_KEYS") or "").strip()
+        return api_key_value
+
+    @classmethod
+    def _get_llm_channel_env_from_map(cls, effective_map: Dict[str, str], channel_name: str) -> _LLMChannelEnv:
+        name = channel_name.strip()
+        normalized_name = name.upper()
+        prefix = f"LLM_{normalized_name}"
+
+        protocol = (effective_map.get(f"{prefix}_PROTOCOL") or "").strip()
+        if normalized_name == "ANSPIRE" and not protocol:
+            protocol = "openai"
+
+        return _LLMChannelEnv(
+            name=name,
+            protocol=protocol,
+            base_url=(effective_map.get(f"{prefix}_BASE_URL") or "").strip(),
+            api_key=cls._get_llm_channel_api_key_from_map(effective_map, name),
+            models=cls._split_csv(effective_map.get(f"{prefix}_MODELS") or ""),
+            enabled=parse_env_bool(effective_map.get(f"{prefix}_ENABLED"), default=True),
+        )
 
     @classmethod
     def _build_skipped_capability_results(
@@ -1264,8 +1338,6 @@ class SystemConfigService:
                     )
                 )
 
-        warnings = []
-
         startup_only_bind_keys = submitted_keys & {
             "WEBUI_HOST",
             "WEBUI_PORT",
@@ -1730,36 +1802,23 @@ class SystemConfigService:
             name = raw_name.strip()
             if not name:
                 continue
-            prefix = f"LLM_{name.upper()}"
-            enabled_raw = effective_map.get(f"{prefix}_ENABLED")
-            enabled = parse_env_bool(enabled_raw, default=True)
-            if not enabled:
+            channel = cls._get_llm_channel_env_from_map(effective_map, name)
+            if not channel.enabled:
                 continue
 
-            base_url = (effective_map.get(f"{prefix}_BASE_URL") or "").strip()
-            protocol = (effective_map.get(f"{prefix}_PROTOCOL") or "").strip()
-            if name.lower() == "anspire" and not protocol:
-                protocol = "openai"
-            api_key = (
-                (effective_map.get(f"{prefix}_API_KEYS") or "").strip()
-                or (effective_map.get(f"{prefix}_API_KEY") or "").strip()
-            )
-            if name.lower() == "anspire" and not api_key:
-                api_key = (effective_map.get("ANSPIRE_API_KEYS") or "").strip()
-            raw_models = cls._split_csv(effective_map.get(f"{prefix}_MODELS") or "")
             resolved_protocol = resolve_llm_channel_protocol(
-                protocol,
-                base_url=base_url,
-                models=raw_models,
-                channel_name=name,
+                channel.protocol,
+                base_url=channel.base_url,
+                models=channel.models,
+                channel_name=channel.name,
             )
-            if not raw_models or not resolved_protocol:
+            if not channel.models or not resolved_protocol:
                 continue
-            if not api_key and not channel_allows_empty_api_key(resolved_protocol, base_url):
+            if not channel.api_key and not channel_allows_empty_api_key(resolved_protocol, channel.base_url):
                 continue
 
-            for raw_model in raw_models:
-                normalized_model = normalize_llm_channel_model(raw_model, resolved_protocol, base_url)
+            for raw_model in channel.models:
+                normalized_model = normalize_llm_channel_model(raw_model, resolved_protocol, channel.base_url)
                 if normalized_model and normalized_model not in seen:
                     seen.add(normalized_model)
                     models.append(normalized_model)
@@ -2501,34 +2560,17 @@ class SystemConfigService:
             normalized_names.append(name)
 
         for name in normalized_names:
-            prefix = f"LLM_{name.upper()}"
-            protocol_value = (effective_map.get(f"{prefix}_PROTOCOL") or "").strip()
-            if name.lower() == "anspire" and not protocol_value:
-                protocol_value = "openai"
-            base_url_value = (effective_map.get(f"{prefix}_BASE_URL") or "").strip()
-            api_key_value = (
-                (effective_map.get(f"{prefix}_API_KEYS") or "").strip()
-                or (effective_map.get(f"{prefix}_API_KEY") or "").strip()
-            )
-            if name.lower() == "anspire" and not api_key_value:
-                api_key_value = (effective_map.get("ANSPIRE_API_KEYS") or "").strip()
-            models_value = [
-                model.strip()
-                for model in (effective_map.get(f"{prefix}_MODELS") or "").split(",")
-                if model.strip()
-            ]
-            enabled_raw = effective_map.get(f"{prefix}_ENABLED")
-            enabled = parse_env_bool(enabled_raw, default=True)
+            channel = SystemConfigService._get_llm_channel_env_from_map(effective_map, name)
             issues.extend(
                 SystemConfigService._validate_llm_channel_definition(
-                    channel_name=name,
-                    protocol_value=protocol_value,
-                    base_url_value=base_url_value,
-                    api_key_value=api_key_value,
-                    model_values=models_value,
-                    enabled=enabled,
-                    field_prefix=prefix,
-                    require_complete=enabled,
+                    channel_name=channel.name,
+                    protocol_value=channel.protocol,
+                    base_url_value=channel.base_url,
+                    api_key_value=channel.api_key,
+                    model_values=channel.models,
+                    enabled=channel.enabled,
+                    field_prefix=f"LLM_{channel.name.upper()}",
+                    require_complete=channel.enabled,
                 )
             )
 
@@ -2548,24 +2590,18 @@ class SystemConfigService:
             if not name:
                 continue
 
-            prefix = f"LLM_{name.upper()}"
-            enabled_raw = effective_map.get(f"{prefix}_ENABLED")
-            enabled = parse_env_bool(enabled_raw, default=True)
-            if not enabled:
+            channel = SystemConfigService._get_llm_channel_env_from_map(effective_map, name)
+            if not channel.enabled:
                 continue
 
-            base_url_value = (effective_map.get(f"{prefix}_BASE_URL") or "").strip()
-            protocol_value = (effective_map.get(f"{prefix}_PROTOCOL") or "").strip()
-            if name.lower() == "anspire" and not protocol_value:
-                protocol_value = "openai"
-            raw_models = [
-                model.strip()
-                for model in (effective_map.get(f"{prefix}_MODELS") or "").split(",")
-                if model.strip()
-            ]
-            resolved_protocol = resolve_llm_channel_protocol(protocol_value, base_url=base_url_value, models=raw_models, channel_name=name)
-            for model in raw_models:
-                normalized_model = normalize_llm_channel_model(model, resolved_protocol, base_url_value)
+            resolved_protocol = resolve_llm_channel_protocol(
+                channel.protocol,
+                base_url=channel.base_url,
+                models=channel.models,
+                channel_name=channel.name,
+            )
+            for model in channel.models:
+                normalized_model = normalize_llm_channel_model(model, resolved_protocol, channel.base_url)
                 if not normalized_model or normalized_model in seen:
                     continue
                 seen.add(normalized_model)

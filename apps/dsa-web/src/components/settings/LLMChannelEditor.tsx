@@ -1453,6 +1453,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         protocol: channel.protocol,
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
+        maskToken,
         models: splitModels(channel.models),
         enabled: channel.enabled,
       });
@@ -1501,6 +1502,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         protocol: channel.protocol,
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
+        maskToken,
         models: splitModels(channel.models),
       });
 
@@ -1579,6 +1581,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         protocol: channel.protocol,
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
+        maskToken,
         models: splitModels(channel.models),
         enabled: channel.enabled,
         capabilityChecks: selected,

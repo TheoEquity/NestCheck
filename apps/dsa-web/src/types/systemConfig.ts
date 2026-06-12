@@ -158,6 +158,7 @@ export interface TestLLMChannelRequest {
   protocol: string;
   baseUrl?: string;
   apiKey?: string;
+  maskToken?: string;
   models: string[];
   enabled?: boolean;
   timeoutSeconds?: number;
@@ -241,6 +242,7 @@ export interface DiscoverLLMChannelModelsRequest {
   protocol: string;
   baseUrl?: string;
   apiKey?: string;
+  maskToken?: string;
   models?: string[];
   timeoutSeconds?: number;
 }

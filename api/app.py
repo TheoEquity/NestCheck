@@ -19,9 +19,7 @@ import logging
 import mimetypes
 import os
 import re
-import asyncio
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote
 from typing import List, Optional
@@ -32,9 +30,6 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
-
-PORTFOLIO_PRICE_REFRESH_TASK_KEY = "market_cache_refresh"
-PORTFOLIO_PRICE_REFRESH_TIMES = ((8, 30), (20, 30))
 
 # Match src="/assets/foo.js" / href="/assets/foo.css" produced by the
 # vite build. Used by the startup self-check to surface packaging
@@ -98,54 +93,6 @@ def _check_frontend_assets_consistency(static_dir: Path) -> List[str]:
     return missing
 
 
-async def _startup_catch_up_check():
-    """Check at startup whether today's full sync has run. If not, trigger it asynchronously."""
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    from src.storage import MarketCache, get_db
-    from src.task_history import task_history
-    from src.services.scheduler_jobs import run_daily_market_cache_refresh
-
-    beijing_tz = timezone(timedelta(hours=8))
-    await asyncio.sleep(45)
-
-    try:
-        now = datetime.now(beijing_tz)
-        today = now.date()
-
-        is_fresh = False
-        with get_db().get_session() as s:
-            trend_row = s.query(MarketCache).filter_by(cache_key="trend").one_or_none()
-            if trend_row and trend_row.created_at.date() == today:
-                is_fresh = True
-
-        if not is_fresh:
-            for item in task_history.get_history("market_cache_refresh", limit=5):
-                try:
-                    executed_at = datetime.fromisoformat(item["executed_at"])
-                    if executed_at.tzinfo is None:
-                        executed_at = executed_at.replace(tzinfo=beijing_tz)
-                    else:
-                        executed_at = executed_at.astimezone(beijing_tz)
-                    if executed_at.date() == today and item.get("status") == "success":
-                        is_fresh = True
-                        break
-                except Exception:
-                    continue
-
-        if not is_fresh:
-            logger.info("Startup catch-up: No fresh data for %s. Triggering full daily sync.", today)
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(executor, run_daily_market_cache_refresh)
-            task_history.record("market_cache_refresh", "success", duration_ms=0)
-            logger.info("Startup catch-up: Full sync finished.")
-        else:
-            logger.info("Startup catch-up: Data for %s is up-to-date. Skipping.", today)
-    except Exception as exc:
-        logger.warning("Startup catch-up check failed: %s", exc)
-
-
 def _resolve_asset_path(assets_dir: Path, asset_path: str) -> Optional[Path]:
     """Resolve a requested asset path while keeping it confined to assets_dir."""
     decoded_path = unquote(asset_path)
@@ -176,6 +123,7 @@ from api.v1 import api_v1_router
 from api.middlewares.auth import add_auth_middleware
 from api.middlewares.error_handler import add_error_handlers
 from api.v1.schemas.common import HealthResponse
+from src.services.runtime_scheduler import start_runtime_scheduler_tasks, stop_runtime_scheduler_tasks
 from src.services.system_config_service import SystemConfigService
 
 
@@ -199,287 +147,14 @@ async def app_lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to clean up expired agent data cache")
 
-    # Start background price refresh task (daily at 08:30 and 20:30 Beijing time)
-    refresh_task = asyncio.create_task(_daily_portfolio_price_refresh())
-    app.state._price_refresh_task = refresh_task
-
-    market_refresh_task = asyncio.create_task(_daily_market_cache_refresh_loop())
-    app.state._market_refresh_task = market_refresh_task
-
-    startup_catch_up_task = asyncio.create_task(_startup_catch_up_check())
-    app.state._startup_catch_up_task = startup_catch_up_task
+    await start_runtime_scheduler_tasks(app)
 
     try:
         yield
     finally:
-        refresh_task.cancel()
-        market_refresh_task.cancel()
-        if hasattr(app.state, "_startup_catch_up_task"):
-            app.state._startup_catch_up_task.cancel()
-        try:
-            await refresh_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await market_refresh_task
-        except asyncio.CancelledError:
-            pass
+        await stop_runtime_scheduler_tasks(app)
         if hasattr(app.state, "system_config_service"):
             delattr(app.state, "system_config_service")
-        if hasattr(app.state, "_price_refresh_task"):
-            delattr(app.state, "_price_refresh_task")
-        if hasattr(app.state, "_market_refresh_task"):
-            delattr(app.state, "_market_refresh_task")
-
-
-async def _daily_portfolio_price_refresh():
-    """Refresh portfolio positions prices at 08:30 and 20:30 Beijing time.
-
-    Past due slots are skipped on startup; only upcoming scheduled slots will
-    be triggered. Missed slots should be re-run manually via the scheduler UI.
-    """
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    # Use Beijing time (UTC+8) for all time-based checks
-    beijing_tz = timezone(timedelta(hours=8))
-    now = datetime.now(beijing_tz)
-    today = now.date()
-    
-    last_refresh_slots = set()
-
-    # Startup check: Mark past slots as handled to avoid immediate execution.
-    # Intentionally skip catch-up; rely on scheduled runs or manual triggers.
-    try:
-        for slot in PORTFOLIO_PRICE_REFRESH_TIMES:
-            if _is_refresh_slot_due(now, slot):
-                last_refresh_slots.add((today, slot))
-                logger.info("Startup: Slot %02d:%02d is past; marked as handled", slot[0], slot[1])
-    except Exception as exc:
-        logger.error("Startup check failed: %s", exc, exc_info=True)
-    
-    # Wait before entering the regular check loop so server can start normally
-    await asyncio.sleep(30)
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        while True:
-            try:
-                # Use Beijing time (UTC+8) for time-based checks
-                now = datetime.now(beijing_tz)
-                today = now.date()
-                for slot in PORTFOLIO_PRICE_REFRESH_TIMES:
-                    slot_key = (today, slot)
-                    if _is_refresh_slot_due(now, slot) and slot_key not in last_refresh_slots:
-                        logger.info("Daily portfolio price refresh started for %02d:%02d", slot[0], slot[1])
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(executor, _run_price_refresh_with_history)
-                        last_refresh_slots.add(slot_key)
-                        logger.info("Daily portfolio price refresh completed for %02d:%02d", slot[0], slot[1])
-                        break
-
-                if len(last_refresh_slots) > len(PORTFOLIO_PRICE_REFRESH_TIMES) * 2:
-                    last_refresh_slots = {
-                        item for item in last_refresh_slots
-                        if item[0] >= today - timedelta(days=1)
-                    }
-            except Exception as exc:
-                logger.error("Portfolio price refresh error: %s", exc)
-
-            await asyncio.sleep(30)  # Check every 30 seconds
-
-
-def _is_refresh_slot_due(now: datetime, slot: tuple[int, int]) -> bool:
-    hour, minute = slot
-    return now.hour > hour or (now.hour == hour and now.minute >= minute)
-
-
-def _has_price_refresh_history_for_slot(day, slot: tuple[int, int], beijing_tz) -> bool:
-    from src.task_history import task_history
-
-    slot_start = datetime.combine(day, datetime.min.time()).replace(
-        hour=slot[0], minute=slot[1], tzinfo=beijing_tz,
-    )
-    slot_end = slot_start + timedelta(hours=1)
-    for item in task_history.get_history(PORTFOLIO_PRICE_REFRESH_TASK_KEY, limit=20):
-        try:
-            executed_at = datetime.fromisoformat(item["executed_at"])
-        except (TypeError, ValueError):
-            continue
-        if executed_at.tzinfo is None:
-            executed_at = executed_at.replace(tzinfo=beijing_tz)
-        else:
-            executed_at = executed_at.astimezone(beijing_tz)
-        if slot_start <= executed_at < slot_end:
-            return True
-    return False
-
-
-def _run_price_refresh_with_history():
-    """Run price refresh and record automatic scheduler history."""
-    import time
-    from src.task_history import task_history
-
-    start = time.time()
-    try:
-        _run_price_refresh()
-        task_history.record(
-            PORTFOLIO_PRICE_REFRESH_TASK_KEY,
-            "success",
-            duration_ms=int((time.time() - start) * 1000),
-        )
-    except Exception as exc:
-        task_history.record(
-            PORTFOLIO_PRICE_REFRESH_TASK_KEY,
-            "failed",
-            duration_ms=int((time.time() - start) * 1000),
-            error=str(exc),
-        )
-        raise
-
-
-def _run_price_refresh():
-    """Synchronous wrapper for price refresh (runs in thread pool)."""
-    from src.services.portfolio_service import PortfolioService
-
-    svc = PortfolioService()
-    result = svc.refresh_all_prices(refresh_fx=True)
-    pos = result.get("positions", {})
-    idx = result.get("indices", {})
-    fx = result.get("fx", {"refreshed": 0, "failed": 0})
-    fund_nav = result.get("fund_nav") or {}
-    logger.info(
-        "Price refresh: pos=%d/%d, indices=%d/%d, fx=%d/%d, fund_nav=%s",
-        pos.get("refreshed", 0), pos.get("failed", 0),
-        idx.get("refreshed", 0), idx.get("failed", 0),
-        fx.get("refreshed", 0), fx.get("failed", 0),
-        fund_nav.get("fund_nav", "skipped"),
-    )
-
-    try:
-        # cn_vix / us_vix / bond_cn_10y / bond_us_10y (for risk & radar caches)
-        from src.storage import StockDaily, get_db
-
-        import akshare as ak
-        import yfinance as yf
-
-        today = date.today()
-
-        try:
-            df = ak.index_option_300etf_qvix()
-            if not df.empty:
-                with get_db().get_session() as s:
-                    s.query(StockDaily).filter_by(code="cn_vix", date=today).delete()
-                    s.add(StockDaily(code="cn_vix", date=today, close=float(df.iloc[-1]["qvix"]), data_source="akshare", updated_at=datetime.now()))
-                    s.commit()
-        except Exception as exc:
-            logger.warning("Failed to refresh cn_vix: %s", exc)
-
-        try:
-            vix = yf.Ticker("^VIX")
-            hist = vix.history(period="2d")
-            if not hist.empty:
-                with get_db().get_session() as s:
-                    s.query(StockDaily).filter_by(code="us_vix", date=today).delete()
-                    s.add(StockDaily(code="us_vix", date=today, close=float(hist["Close"].iloc[-1]), data_source="yfinance", updated_at=datetime.now()))
-                    s.commit()
-        except Exception as exc:
-            logger.warning("Failed to refresh us_vix: %s", exc)
-
-        try:
-            df = ak.bond_zh_us_rate()
-            if not df.empty:
-                for i in range(len(df) - 1, max(0, len(df) - 10), -1):
-                    row = df.iloc[i]
-                    us_val = row.get("美国国债收益率10年")
-                    cn_val = row.get("中国国债收益率10年")
-                    if str(us_val) != "nan" and us_val is not None and str(cn_val) != "nan" and cn_val is not None:
-                        with get_db().get_session() as s:
-                            s.query(StockDaily).filter_by(code="bond_us_10y", date=today).delete()
-                            s.query(StockDaily).filter_by(code="bond_cn_10y", date=today).delete()
-                            s.add(StockDaily(code="bond_cn_10y", date=today, close=float(cn_val), data_source="akshare", updated_at=datetime.now()))
-                            s.add(StockDaily(code="bond_us_10y", date=today, close=float(us_val), data_source="akshare", updated_at=datetime.now()))
-                            s.commit()
-                        break
-        except Exception as exc:
-            logger.warning("Failed to refresh bond indices: %s", exc)
-    except Exception as exc:
-        logger.warning("Risk indices refresh failed: %s", exc)
-
-    # Rebuild all 6 market_cache keys
-    try:
-        from src.services.sector_etf_service import refresh_sector_etf_daily_data
-        from src.services.market_cache_service import (
-            MARKET_CACHE_BUILDERS,
-            refresh_market_cache,
-            refresh_trend_realtime_quotes,
-        )
-
-        sector_result = refresh_sector_etf_daily_data()
-        logger.info(
-            "Sector ETF refresh: refreshed=%d, failed=%d",
-            sector_result.get("refreshed", 0),
-            sector_result.get("failed", 0),
-        )
-
-        from src.services.watchlist_signal_service import WatchlistSignalService
-
-        signal_result = WatchlistSignalService().refresh_enabled_stocks()
-        logger.info(
-            "Watchlist signal refresh: success=%d, failed=%d",
-            signal_result.get("success", 0),
-            signal_result.get("failed", 0),
-        )
-
-        fund_result = WatchlistSignalService().refresh_enabled_funds()
-        logger.info(
-            "Watchlist fund signal refresh: success=%d, failed=%d",
-            fund_result.get("success", 0),
-            fund_result.get("failed", 0),
-        )
-
-        for cache_key in MARKET_CACHE_BUILDERS:
-            if cache_key == "trend":
-                refresh_trend_realtime_quotes()
-            else:
-                refresh_market_cache(cache_key)
-            logger.info("Market cache key rebuilt: %s", cache_key)
-    except Exception as exc:
-        logger.warning("Market cache rebuild failed: %s", exc)
-
-
-async def _daily_market_cache_refresh_loop():
-    """Refresh market dashboard cache periodically (every 5 minutes) to keep
-    real-time fields up-to-date. Old cached data is always served until replaced."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    refresh_interval_seconds = 300  # 5 minutes
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        await asyncio.sleep(30)  # wait for server to start normally
-        while True:
-            # Use Beijing time (UTC+8) for trading hour checks
-            now = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8)))
-            # Only refresh during A-share trading hours (Monday-Friday, 9:00-15:00 Beijing time)
-            if now.weekday() < 5 and 9 <= now.hour < 15:
-                try:
-                    logger.info("Market cache refresh started")
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(executor, _run_market_cache_refresh)
-                    logger.info("Market cache refresh completed")
-                except Exception as exc:
-                    logger.error("Market cache refresh error: %s", exc, exc_info=True)
-
-            await asyncio.sleep(refresh_interval_seconds)
-
-
-def _run_market_cache_refresh():
-    """Synchronous wrapper for market cache refresh."""
-    from src.services.market_cache_service import refresh_all_market_caches
-
-    result = refresh_all_market_caches()
-    items = result.get("items", {})
-    ok_count = sum(1 for item in items.values() if item.get("status") == "success")
-    logger.info("Market cache refresh: success=%d/%d", ok_count, len(items))
 
 
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:

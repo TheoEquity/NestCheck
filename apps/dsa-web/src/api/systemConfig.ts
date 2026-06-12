@@ -92,6 +92,7 @@ function toSnakeTestChannelPayload(payload: TestLLMChannelRequest): Record<strin
     protocol: payload.protocol,
     base_url: payload.baseUrl ?? '',
     api_key: payload.apiKey ?? '',
+    mask_token: payload.maskToken ?? '******',
     models: payload.models,
     enabled: payload.enabled ?? true,
     timeout_seconds: payload.timeoutSeconds ?? 20,
@@ -122,6 +123,7 @@ function toSnakeDiscoverModelsPayload(payload: DiscoverLLMChannelModelsRequest):
     protocol: payload.protocol,
     base_url: payload.baseUrl ?? '',
     api_key: payload.apiKey ?? '',
+    mask_token: payload.maskToken ?? '******',
     models: payload.models,
     timeout_seconds: payload.timeoutSeconds ?? 20,
   };

@@ -369,6 +369,7 @@ def test_llm_channel(
             protocol=request.protocol,
             base_url=request.base_url,
             api_key=request.api_key,
+            mask_token=request.mask_token,
             models=request.models,
             enabled=request.enabled,
             timeout_seconds=request.timeout_seconds,
@@ -416,6 +417,7 @@ def discover_llm_channel_models(
             protocol=request.protocol,
             base_url=request.base_url,
             api_key=request.api_key,
+            mask_token=request.mask_token,
             models=request.models,
             timeout_seconds=request.timeout_seconds,
         )

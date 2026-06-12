@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] AI 问答工具数据改为写入短期缓存，避免临时问答污染 `stock_daily` 与新闻长期业务表，并新增网页新闻证据抓取工具供 Agent 使用。
 - [新功能] Agent 管理页 Skills 卡片新增编辑入口，支持读取、校验并保存 skill 定义文件后刷新 runtime skill 缓存。
 - [改进] 将重型 AI 问答 single-agent 显式纳入 Agent catalog，保留 `stock_chat` profile 与 `stock_chat_single` agent 供手动选择和编辑。
+- [测试] 补齐 V1.0 稳巢基金相关测试计划与 `market/index-history` API 契约覆盖，并移除已下线 Backtest Web 页面与路由测试。
 - [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认和兜底走 `stock_chat_quick`，技术/走势类走 `stock_quick`，新闻/消息类走 `stock_intel`，风险/利空类走 `stock_risk`。
 - [改进] AI 问答页新增“个股专家分析”快捷按钮，直接在当前聊天中调用 `stock_specialist` 完成带策略技能的完整个股分析。
 - [改进] 个股专家分析在多 Agent 超时降级时改为中文用户态摘要，并减少聊天模式下 RiskAgent 对已获取情报的重复搜索。

@@ -37,7 +37,7 @@ describe('SidebarNav', () => {
     );
 
     expect(screen.getByTestId('chat-completion-badge')).toBeInTheDocument();
-    expect(screen.getByLabelText('问股有新消息')).toBeInTheDocument();
+    expect(screen.getByLabelText('AI问答有新消息')).toBeInTheDocument();
 
     completionBadgeState.value = false;
     rerender(
@@ -62,28 +62,28 @@ describe('SidebarNav', () => {
     expect(screen.getByRole('button', { name: '切换主题(折叠)' })).toBeInTheDocument();
   });
 
-  it('renders the alerts navigation item and marks it active', () => {
+  it('renders the stable nest fund navigation item and marks it active', () => {
     render(
-      <MemoryRouter initialEntries={['/alerts']}>
+      <MemoryRouter initialEntries={['/assets/diagnosis']}>
         <SidebarNav />
       </MemoryRouter>,
     );
 
-    const alertsLink = screen.getByRole('link', { name: '告警' });
-    expect(alertsLink).toHaveAttribute('href', '/alerts');
-    expect(alertsLink).toHaveClass('font-medium');
+    const diagnosisLink = screen.getByRole('link', { name: '稳巢基金' });
+    expect(diagnosisLink).toHaveAttribute('href', '/assets/diagnosis');
+    expect(diagnosisLink).toHaveClass('font-medium');
   });
 
-  it('renders the asset initialization navigation item', () => {
+  it('renders the asset events navigation item', () => {
     render(
-      <MemoryRouter initialEntries={['/assets/init']}>
+      <MemoryRouter initialEntries={['/assets/events']}>
         <SidebarNav />
       </MemoryRouter>,
     );
 
-    const initLink = screen.getByRole('link', { name: '资产初始化' });
-    expect(initLink).toHaveAttribute('href', '/assets/init');
-    expect(initLink).toHaveClass('font-medium');
+    const eventsLink = screen.getByRole('link', { name: '资产事件' });
+    expect(eventsLink).toHaveAttribute('href', '/assets/events');
+    expect(eventsLink).toHaveClass('font-medium');
   });
 
   it('opens the logout confirmation and confirms logout', async () => {

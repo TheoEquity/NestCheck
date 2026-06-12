@@ -36,6 +36,7 @@ import type {
   AssetAllocationPlanCreateRequest,
   AssetAllocationPlanItem,
   AssetAllocationPlanActivateResponse,
+  PortfolioFundHistoryResponse,
   PortfolioFundStatusResponse,
 } from '../types/portfolio';
 
@@ -446,6 +447,13 @@ export const portfolioApi = {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/fund-status');
     const data = toCamelCase<PortfolioFundStatusResponse>(response.data);
     return data;
+  },
+
+  async getFundHistory(limit = 365): Promise<PortfolioFundHistoryResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/fund-history', {
+      params: { limit },
+    });
+    return toCamelCase<PortfolioFundHistoryResponse>(response.data);
   },
 
   async resetFund(): Promise<Record<string, unknown>> {

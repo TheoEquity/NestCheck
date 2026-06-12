@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.storage import get_db, MarketQuote
+from src.storage import get_db, MarketQuote, StockDaily
 from src.services.market_cache_service import get_market_cache_payload, refresh_all_market_caches, MARKET_CACHE_BUILDERS
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,40 @@ def get_market_indices() -> list:
             ]
     except Exception as exc:
         raise _internal_error("Get market indices failed", exc)
+
+
+@router.get(
+    "/index-history",
+    response_model=dict,
+    summary="Get daily index close history",
+)
+def get_index_history(
+    code: str = Query("sh000300", min_length=1, max_length=16, description="Index code, e.g. sh000300"),
+    limit: int = Query(1200, ge=1, le=3000, description="Maximum number of daily bars"),
+) -> dict:
+    try:
+        code_norm = code.strip()
+        db = get_db()
+        with db.get_session() as s:
+            rows = (
+                s.query(StockDaily)
+                .filter(StockDaily.code == code_norm)
+                .order_by(StockDaily.date.desc())
+                .limit(limit)
+                .all()
+            )
+        items = [
+            {
+                "date": row.date.isoformat() if row.date else None,
+                "close": row.close,
+                "pct_chg": row.pct_chg,
+            }
+            for row in reversed(rows)
+            if row.date is not None and row.close is not None
+        ]
+        return {"code": code_norm, "items": items}
+    except Exception as exc:
+        raise _internal_error("Get index history failed", exc)
 
 
 @router.get(

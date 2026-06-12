@@ -522,6 +522,19 @@ class PortfolioFundStatusResponse(BaseModel):
     total_equity: float
 
 
+class PortfolioFundHistoryItem(BaseModel):
+    """Daily global fund NAV point."""
+    record_date: str
+    fund_nav: float
+    fund_shares: float
+    total_equity: float
+
+
+class PortfolioFundHistoryResponse(BaseModel):
+    """Daily global fund NAV history."""
+    items: List[PortfolioFundHistoryItem] = Field(default_factory=list)
+
+
 class PortfolioFundResetResponse(BaseModel):
     """Response for resetting fund NAV."""
     fund_inception_date: Optional[str] = None

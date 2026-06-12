@@ -48,6 +48,8 @@ from api.v1.schemas.portfolio import (
     AssetAllocationPlanListResponse,
     AssetAllocationPlanCreateRequest,
     AssetAllocationPlanActivateResponse,
+    PortfolioFundHistoryItem,
+    PortfolioFundHistoryResponse,
     PortfolioFundStatusResponse,
     PortfolioFundResetRequest,
     PortfolioFundResetResponse,
@@ -64,6 +66,23 @@ from src.services.portfolio_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _daily_latest_fund_values(session, limit: Optional[int] = None) -> list:
+    from src.storage import PortfolioFundValue
+
+    rows = (
+        session.query(PortfolioFundValue)
+        .order_by(PortfolioFundValue.record_date.asc(), PortfolioFundValue.id.asc())
+        .all()
+    )
+    latest_by_date = {}
+    for row in rows:
+        latest_by_date[row.record_date] = row
+    daily_rows = [latest_by_date[key] for key in sorted(latest_by_date)]
+    if limit is not None and limit > 0:
+        daily_rows = daily_rows[-limit:]
+    return daily_rows
 
 
 def _bad_request(exc: Exception) -> HTTPException:
@@ -1102,7 +1121,7 @@ def get_fund_status() -> PortfolioFundStatusResponse:
     with db.get_session() as session:
         latest_fv = (
             session.query(PortfolioFundValue)
-            .order_by(PortfolioFundValue.record_date.desc())
+            .order_by(PortfolioFundValue.record_date.desc(), PortfolioFundValue.id.desc())
             .first()
         )
 
@@ -1118,6 +1137,38 @@ def get_fund_status() -> PortfolioFundStatusResponse:
         )
 
 
+@router.get(
+    "/fund-history",
+    response_model=PortfolioFundHistoryResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="Get daily global fund NAV history",
+)
+def get_fund_history(
+    limit: int = Query(365, ge=1, le=2000, description="Maximum number of daily points"),
+) -> PortfolioFundHistoryResponse:
+    """Return one internal fund NAV point per day."""
+    from src.storage import get_db
+    from src.services.portfolio_service import round_internal_fund_nav, round_money, round_share
+
+    db = get_db()
+    try:
+        with db.get_session() as session:
+            rows = _daily_latest_fund_values(session, limit=limit)
+            return PortfolioFundHistoryResponse(
+                items=[
+                    PortfolioFundHistoryItem(
+                        record_date=row.record_date.isoformat(),
+                        fund_nav=round_internal_fund_nav(row.fund_nav),
+                        fund_shares=round_share(row.fund_shares),
+                        total_equity=round_money(row.total_equity),
+                    )
+                    for row in rows
+                ]
+            )
+    except Exception as exc:
+        raise _internal_error("Get fund history failed", exc)
+
+
 @router.post(
     "/fund-reset",
     response_model=PortfolioFundResetResponse,
@@ -1128,7 +1179,7 @@ def reset_fund(_payload: PortfolioFundResetRequest) -> PortfolioFundResetRespons
     """Reset fund NAV to 1.0 and set shares = current total_equity."""
     from datetime import date as date_type
 
-    from src.storage import get_db, PortfolioFundValue
+    from src.storage import get_db
     from src.services.portfolio_service import PortfolioService, round_internal_fund_nav, round_money, round_share
 
     db = get_db()
@@ -1142,13 +1193,13 @@ def reset_fund(_payload: PortfolioFundResetRequest) -> PortfolioFundResetRespons
 
             today = date_type.today()
 
-            fv_record = PortfolioFundValue(
+            PortfolioService._upsert_internal_fund_value(
+                session=session,
                 record_date=today,
-                fund_shares=round_share(total_equity),
-                fund_nav=round_internal_fund_nav(1.0),
-                total_equity=round_money(total_equity),
+                fund_shares=total_equity,
+                fund_nav=1.0,
+                total_equity=total_equity,
             )
-            session.add(fv_record)
             session.commit()
 
             return PortfolioFundResetResponse(

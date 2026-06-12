@@ -30,7 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'asset-manage', label: '资产管理', to: '/assets/manage', icon: Landmark },
   { key: 'asset-allocation', label: '资产配置', to: '/assets/allocation', icon: BarChart3 },
   { key: 'asset-events', label: '资产事件', to: '/assets/events', icon: Database },
-  { key: 'asset-diagnosis', label: '资产诊断', to: '/assets/diagnosis', icon: HeartPulse },
+  { key: 'asset-diagnosis', label: '稳巢基金', to: '/assets/diagnosis', icon: HeartPulse },
   { key: 'chat', label: 'AI问答', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
   { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
 ];

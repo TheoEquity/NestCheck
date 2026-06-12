@@ -539,3 +539,14 @@ export interface PortfolioFundStatusResponse {
   latestShares?: number | null;
   totalEquity: number;
 }
+
+export interface PortfolioFundHistoryItem {
+  recordDate: string;
+  fundNav: number;
+  fundShares: number;
+  totalEquity: number;
+}
+
+export interface PortfolioFundHistoryResponse {
+  items: PortfolioFundHistoryItem[];
+}

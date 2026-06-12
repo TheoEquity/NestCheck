@@ -161,6 +161,33 @@ class PortfolioService:
     def __init__(self, repo: Optional[PortfolioRepository] = None):
         self.repo = repo or PortfolioRepository()
 
+    @staticmethod
+    def _upsert_internal_fund_value(
+        *,
+        session: Any,
+        record_date: date,
+        fund_shares: float,
+        fund_nav: float,
+        total_equity: float,
+    ) -> Any:
+        from src.storage import PortfolioFundValue
+
+        existing = (
+            session.query(PortfolioFundValue)
+            .filter(PortfolioFundValue.record_date == record_date)
+            .order_by(PortfolioFundValue.id.desc())
+            .first()
+        )
+        if existing is None:
+            existing = PortfolioFundValue(record_date=record_date)
+            session.add(existing)
+
+        existing.fund_shares = round_share(fund_shares)
+        existing.fund_nav = round_internal_fund_nav(fund_nav)
+        existing.total_equity = round_money(total_equity)
+        existing.created_at = datetime.now()
+        return existing
+
     def _recalculate_fund_shares_from_management_total(self) -> None:
         """Recalculate global fund shares from the asset management total equity."""
         from datetime import date as date_type
@@ -189,13 +216,13 @@ class PortfolioService:
             if new_shares < 0:
                 new_shares = 0.0
 
-            record = PortfolioFundValue(
+            self._upsert_internal_fund_value(
+                session=session,
                 record_date=date_type.today(),
-                fund_shares=round_share(new_shares),
-                fund_nav=round_internal_fund_nav(current_nav),
-                total_equity=round_money(current_total_cny),
+                fund_shares=new_shares,
+                fund_nav=current_nav,
+                total_equity=current_total_cny,
             )
-            session.add(record)
             session.commit()
 
     def _recalculate_fund_nav_from_management_total(self) -> Optional[Dict[str, Any]]:
@@ -222,13 +249,14 @@ class PortfolioService:
                 return None
 
             new_nav = round_internal_fund_nav(current_total_cny / current_shares)
-            record = PortfolioFundValue(
-                record_date=date_type.today(),
+            today = date_type.today()
+            record = self._upsert_internal_fund_value(
+                session=session,
+                record_date=today,
                 fund_shares=current_shares,
                 fund_nav=new_nav,
                 total_equity=current_total_cny,
             )
-            session.add(record)
             session.commit()
 
             return {
@@ -584,6 +612,7 @@ class PortfolioService:
             raise ValueError("direction must be in or out")
         if amount <= 0:
             raise ValueError("amount must be > 0")
+        row_id: int
         with self.repo.portfolio_write_session() as session:
             account = self._require_active_account_in_session(session=session, account_id=account_id)
             currency_norm = self._normalize_currency(currency or account.base_currency)
@@ -608,9 +637,10 @@ class PortfolioService:
                 currency=currency_norm,
                 note=(note or "").strip() or None,
             )
-            self._recalculate_fund_shares_from_management_total()
+            row_id = int(row.id)
 
-            return {"id": int(row.id)}
+        self._recalculate_fund_shares_from_management_total()
+        return {"id": row_id}
 
     def record_corporate_action(
         self,

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { ApiErrorAlert, AppPage, Badge, Button, Card, EmptyState, PageHeader, StatCard } from '../components/common';
 import { portfolioApi } from '../api/portfolio';
-import type { PortfolioLatestFxRateItem, PortfolioFundStatusResponse, PortfolioPositionRecordItem } from '../types/portfolio';
+import type { PortfolioLatestFxRateItem, PortfolioFundHistoryItem, PortfolioFundStatusResponse, PortfolioPositionRecordItem } from '../types/portfolio';
 import {
   formatMoney,
   formatNav,
@@ -70,6 +70,14 @@ const PIE_TOOLTIP_STYLE = {
 const getLocalMarketValue = (position: PortfolioPositionRecordItem) => Number(position.quantity || 0) * Number(position.lastPrice || 0);
 
 const getLocalUnrealizedPnl = (position: PortfolioPositionRecordItem) => getLocalMarketValue(position) - Number(position.totalCost || 0);
+
+const computeDailyNavChange = (items: PortfolioFundHistoryItem[]): number | null => {
+  if (items.length < 2) return null;
+  const latest = items[items.length - 1];
+  const previous = items[items.length - 2];
+  if (!latest || !previous || previous.fundNav <= 0 || latest.recordDate === previous.recordDate) return null;
+  return ((latest.fundNav / previous.fundNav) - 1) * 100;
+};
 
 type AdjustModalProps = {
   position: PortfolioPositionRecordItem | null;
@@ -291,6 +299,7 @@ const AssetManagementPage: React.FC = () => {
 
   const { accounts, risk, positions, error, reload } = usePortfolioOverview();
   const [fundStatus, setFundStatus] = useState<PortfolioFundStatusResponse | null>(null);
+  const [fundHistory, setFundHistory] = useState<PortfolioFundHistoryItem[]>([]);
   const [fxRates, setFxRates] = useState<PortfolioLatestFxRateItem[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [accountFilter, setAccountFilter] = useState('全部');
@@ -434,18 +443,23 @@ const AssetManagementPage: React.FC = () => {
     return `CNY/USD ${usdRate ? usdRate.toFixed(2) : '--'} · CNY/HKD ${hkdRate ? hkdRate.toFixed(2) : '--'}`;
   }, [fxRates]);
 
+  const dailyNavChange = useMemo(() => computeDailyNavChange(fundHistory), [fundHistory]);
+
   useEffect(() => {
     let active = true;
     Promise.all([
       portfolioApi.getFundStatus().catch(() => null),
+      portfolioApi.getFundHistory(2).catch(() => ({ items: [] })),
       portfolioApi.getLatestFxRates({ toCurrency: 'CNY' }).catch(() => ({ items: [] })),
-    ]).then(([fundResp, fxResp]) => {
+    ]).then(([fundResp, fundHistoryResp, fxResp]) => {
       if (!active) return;
       if (fundResp) setFundStatus(fundResp);
+      setFundHistory(fundHistoryResp.items || []);
       if (fxResp) setFxRates(fxResp.items || []);
     }).catch(() => {
       if (!active) return;
       setFundStatus(null);
+      setFundHistory([]);
       setFxRates([]);
     });
     return () => {
@@ -509,13 +523,18 @@ const AssetManagementPage: React.FC = () => {
         <StatCard
           label="总资产"
           value={formatMoney(totalMarketValue, 'CNY')}
-          hint={<span>账户数 {accounts.length}</span>}
+          hint={(
+            <span className="flex items-center justify-between gap-3">
+              <span>账户数 {accounts.length}</span>
+              <span>资产份额：{fundStatus?.latestShares ? fundStatus.latestShares.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</span>
+            </span>
+          )}
           className="!rounded-xl !p-3"
         />
         <StatCard
           label="单位净值"
           value={fundStatus?.latestNav ? formatNav(fundStatus.latestNav) : '—'}
-          hint={fundStatus?.latestShares ? `资产份额：${fundStatus.latestShares.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '资产份额：—'}
+          hint={`日涨幅：${dailyNavChange == null ? '—' : formatSignedPct(dailyNavChange)}`}
           className="!rounded-xl !p-3"
         />
         <StatCard

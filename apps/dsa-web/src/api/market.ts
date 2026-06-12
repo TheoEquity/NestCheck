@@ -10,6 +10,17 @@ export interface MarketIndexItem {
   updatedAt: string | null;
 }
 
+export interface MarketIndexHistoryItem {
+  date: string;
+  close: number;
+  pctChg?: number | null;
+}
+
+export interface MarketIndexHistoryResponse {
+  code: string;
+  items: MarketIndexHistoryItem[];
+}
+
 export interface MarketRiskItem {
   status: string;
   badge: string;
@@ -145,6 +156,13 @@ export const marketApi = {
   async getIndices(): Promise<MarketIndexItem[]> {
     const response = await apiClient.get<Record<string, unknown>[]>('/api/v1/market/indices');
     return response.data.map((item) => toCamelCase<MarketIndexItem>(item));
+  },
+
+  async getIndexHistory(code = 'sh000300', limit = 1200): Promise<MarketIndexHistoryResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/market/index-history', {
+      params: { code, limit },
+    });
+    return toCamelCase<MarketIndexHistoryResponse>(response.data);
   },
 
   async getRisk(): Promise<MarketRiskResponse> {

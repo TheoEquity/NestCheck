@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -541,6 +541,53 @@ class PortfolioApiTestCase(unittest.TestCase):
     def test_event_list_invalid_page_size_returns_422(self) -> None:
         resp = self.client.get("/api/v1/portfolio/trades", params={"page_size": 101})
         self.assertEqual(resp.status_code, 422)
+
+    def test_fund_reset_updates_today_record(self) -> None:
+        from src.storage import PortfolioFundValue
+
+        account_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "Main", "broker": "Demo", "market": "cn", "base_currency": "CNY"},
+        )
+        self.assertEqual(account_resp.status_code, 200)
+        cash_resp = self.client.post(
+            "/api/v1/portfolio/cash-ledger",
+            json={
+                "account_id": account_resp.json()["id"],
+                "event_date": date.today().isoformat(),
+                "direction": "in",
+                "amount": 10000,
+                "currency": "CNY",
+            },
+        )
+        self.assertEqual(cash_resp.status_code, 200, cash_resp.text)
+
+        first = self.client.post("/api/v1/portfolio/fund-reset", json={})
+        second = self.client.post("/api/v1/portfolio/fund-reset", json={})
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        with self.db.get_session() as session:
+            count = session.query(PortfolioFundValue).filter(PortfolioFundValue.record_date == date.today()).count()
+        self.assertEqual(count, 1)
+
+    def test_fund_history_returns_one_latest_record_per_day(self) -> None:
+        from src.storage import PortfolioFundValue
+
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        with self.db.get_session() as session:
+            session.add(PortfolioFundValue(record_date=yesterday, fund_nav=1.0, fund_shares=100.0, total_equity=100.0))
+            session.add(PortfolioFundValue(record_date=today, fund_nav=1.1, fund_shares=100.0, total_equity=110.0))
+            session.add(PortfolioFundValue(record_date=today, fund_nav=1.2, fund_shares=100.0, total_equity=120.0))
+            session.commit()
+
+        resp = self.client.get("/api/v1/portfolio/fund-history")
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        items = resp.json()["items"]
+        self.assertEqual([item["record_date"] for item in items], [yesterday.isoformat(), today.isoformat()])
+        self.assertEqual(items[-1]["fund_nav"], 1.2)
 
 
 if __name__ == "__main__":

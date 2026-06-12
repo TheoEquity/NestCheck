@@ -89,26 +89,32 @@ http://100.88.12.34:8000
 
 适合希望运行环境更干净、升级更稳定的 Windows 个人电脑部署。
 
-1. 克隆仓库：
+1. 打开 Windows PowerShell，直接运行一键安装命令：
 
 ```powershell
-git clone https://github.com/TheoEquity/NestCheck.git
-cd NestCheck
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-docker.ps1 -OutFile $env:TEMP\install-nestcheck-docker.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-docker.ps1
 ```
 
-2. 已安装 Docker Desktop 时，直接运行：
+默认会把项目下载到：
+
+```text
+%USERPROFILE%\NestCheck
+```
+
+2. 需要脚本协助安装 Docker Desktop 时，运行：
 
 ```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-docker.ps1 -OutFile $env:TEMP\install-nestcheck-docker.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-docker.ps1 -InstallDocker
+```
+
+Docker Desktop 首次安装后需要启动一次并等待 Docker 运行，再重新执行第 1 条安装命令。
+
+已有源码目录时，也可以在项目目录内运行：
+
+```powershell
+cd $env:USERPROFILE\NestCheck
 powershell -ExecutionPolicy Bypass -File scripts\install-nestcheck-docker.ps1
 ```
-
-3. 需要脚本协助安装 Docker Desktop 时，运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-nestcheck-docker.ps1 -InstallDocker
-```
-
-Docker Desktop 首次安装后需要启动一次并等待 Docker 运行，再重新执行上面的部署脚本。
 
 脚本会自动完成：
 

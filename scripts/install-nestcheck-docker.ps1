@@ -1,5 +1,6 @@
 param(
     [int]$Port = 8000,
+    [string]$InstallDir = "$env:USERPROFILE\NestCheck",
     [switch]$InstallDocker,
     [switch]$SkipFirewallRule
 )
@@ -33,7 +34,48 @@ function Set-EnvValue {
     Set-Content -Path $Path -Value $content -NoNewline
 }
 
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+function Resolve-RepoRoot {
+    param([string]$PreferredInstallDir)
+
+    $scriptRepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..") -ErrorAction SilentlyContinue
+    if ($scriptRepoRoot -and (Test-Path (Join-Path $scriptRepoRoot "docker\docker-compose.yml"))) {
+        return $scriptRepoRoot.Path
+    }
+
+    if (Test-Path (Join-Path $PreferredInstallDir "docker\docker-compose.yml")) {
+        return (Resolve-Path $PreferredInstallDir).Path
+    }
+
+    if (Test-Path $PreferredInstallDir) {
+        throw "InstallDir already exists but is not a NestCheck checkout: $PreferredInstallDir"
+    }
+
+    Write-Step "Downloading NestCheck from GitHub"
+    $archiveUrl = "https://github.com/TheoEquity/NestCheck/archive/refs/heads/main.zip"
+    $stamp = Get-Date -Format "yyyyMMddHHmmss"
+    $downloadRoot = Join-Path $env:TEMP "nestcheck-install-$stamp"
+    $zipPath = Join-Path $downloadRoot "nestcheck-main.zip"
+    $extractRoot = Join-Path $downloadRoot "extract"
+    New-Item -ItemType Directory -Path $downloadRoot | Out-Null
+    New-Item -ItemType Directory -Path $extractRoot | Out-Null
+
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $zipPath
+    Expand-Archive -Path $zipPath -DestinationPath $extractRoot
+
+    $extracted = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
+    if (-not $extracted) {
+        throw "Downloaded archive did not contain a project directory."
+    }
+
+    $installParent = Split-Path -Parent $PreferredInstallDir
+    if (-not (Test-Path $installParent)) {
+        New-Item -ItemType Directory -Path $installParent | Out-Null
+    }
+    Move-Item -Path $extracted.FullName -Destination $PreferredInstallDir
+    return (Resolve-Path $PreferredInstallDir).Path
+}
+
+$RepoRoot = Resolve-RepoRoot -PreferredInstallDir $InstallDir
 Set-Location $RepoRoot
 
 Write-Step "Checking Docker"

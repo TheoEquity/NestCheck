@@ -15,6 +15,57 @@
 
 ---
 
+## 🪟 Windows 个人电脑快速安装
+
+### 路径 A：Docker Desktop
+
+适合长期使用、希望升级和迁移更稳定的场景。
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-docker.ps1 -OutFile $env:TEMP\install-nestcheck-docker.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-docker.ps1 -SkipFirewallRule
+```
+
+如果本机还没有 Docker Desktop，先执行：
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/TheoEquity/NestCheck/main/scripts/install-nestcheck-docker.ps1 -OutFile $env:TEMP\install-nestcheck-docker.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\install-nestcheck-docker.ps1 -InstallDocker -SkipFirewallRule
+```
+
+安装完成后手动打开 Docker Desktop，等待 Docker Engine 运行，再重新执行第一条命令。启动成功后访问 `http://127.0.0.1:8000`。
+
+### 路径 B：Python 直接运行
+
+适合没有 Docker Desktop，或希望先快速本机启动服务的场景。
+
+```powershell
+cd C:\Users\你的用户名\NestCheck
+python -m venv .venv
+$env:PYTHONUTF8=1
+.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe main.py --serve-only --host 127.0.0.1 --port 8000
+```
+
+如果依赖安装出现 `UnicodeDecodeError` 或 `gbk` 报错，先执行：
+
+```powershell
+chcp 65001
+$env:PYTHONUTF8=1
+```
+
+然后重新运行 `pip install -r requirements.txt`。
+
+如果完整依赖安装很慢，也可以先安装核心运行依赖：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --no-cache-dir python-dotenv pandas fastapi uvicorn[standard]
+```
+
+启动成功后访问 `http://127.0.0.1:8000`。服务运行时 PowerShell 会被前台进程占用；停止服务时按 `Ctrl + C`。
+
+---
+
 ## 🐳 方案一：Docker Compose 部署（推荐）
 
 ### 1. 安装 Docker

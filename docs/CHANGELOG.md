@@ -80,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 将重型 AI 问答 single-agent 显式纳入 Agent catalog，保留 `stock_chat` profile 与 `stock_chat_single` agent 供手动选择和编辑。
 - [修复] Web 设置页 LLM 渠道测试、模型发现与能力检测在 API Key 已脱敏显示时复用后端保存密钥，避免发送占位符导致连接失败。
 - [文档] README 新增 Windows 个人电脑两步部署说明，并提供可从 GitHub 单独下载运行的 Docker 一键部署 PowerShell 脚本。
+- [改进] Windows Docker 一键部署脚本改为通过 GitHub codeload 直连下载源码压缩包，并加入下载重试和压缩包大小提示。
+- [文档] 重写 Windows 个人电脑安装说明，明确 Docker 一键部署与 Python 直接运行两条可执行路径，并补充 UTF-8 依赖安装排障步骤。
 - [测试] 补齐 V1.0 稳巢基金相关测试计划与 `market/index-history` API 契约覆盖，并移除已下线 Backtest Web 页面与路由测试。
 - [修复] 修正内部基金状态的成立日期语义，移除无引用 ShellHeader 组件，并同步 Web 回测/告警入口文档。
 - [改进] AI 问答新增规则型 `stock_chat_auto` 路由入口，默认和兜底走 `stock_chat_quick`，技术/走势类走 `stock_quick`，新闻/消息类走 `stock_intel`，风险/利空类走 `stock_risk`。

@@ -34,6 +34,42 @@ function Set-EnvValue {
     Set-Content -Path $Path -Value $content -NoNewline
 }
 
+function Invoke-ArchiveDownload {
+    param(
+        [string]$Uri,
+        [string]$OutFile,
+        [string]$ManualTargetDir
+    )
+
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Write-Host "Downloading archive, attempt $attempt of $maxAttempts..."
+            if (Require-Command "Start-BitsTransfer") {
+                Start-BitsTransfer -Source $Uri -Destination $OutFile -ErrorAction Stop
+            } else {
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec 600
+            }
+
+            $sizeBytes = (Get-Item $OutFile).Length
+            if ($sizeBytes -lt 1MB) {
+                throw "Downloaded archive is unexpectedly small: $sizeBytes bytes."
+            }
+
+            Write-Host ("Downloaded archive size: {0:N1} MB" -f ($sizeBytes / 1MB))
+            return
+        } catch {
+            if ($attempt -ge $maxAttempts) {
+                throw "Failed to download NestCheck archive after $maxAttempts attempts. Download $Uri manually, extract it to $ManualTargetDir, then rerun this script from that folder. Last error: $($_.Exception.Message)"
+            }
+
+            $delaySeconds = 5 * $attempt
+            Write-Warning "Download attempt $attempt failed: $($_.Exception.Message). Retrying in $delaySeconds seconds."
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+
 function Resolve-RepoRoot {
     param([string]$PreferredInstallDir)
 
@@ -51,7 +87,7 @@ function Resolve-RepoRoot {
     }
 
     Write-Step "Downloading NestCheck from GitHub"
-    $archiveUrl = "https://github.com/TheoEquity/NestCheck/archive/refs/heads/main.zip"
+    $archiveUrl = "https://codeload.github.com/TheoEquity/NestCheck/zip/refs/heads/main"
     $stamp = Get-Date -Format "yyyyMMddHHmmss"
     $downloadRoot = Join-Path $env:TEMP "nestcheck-install-$stamp"
     $zipPath = Join-Path $downloadRoot "nestcheck-main.zip"
@@ -59,7 +95,7 @@ function Resolve-RepoRoot {
     New-Item -ItemType Directory -Path $downloadRoot | Out-Null
     New-Item -ItemType Directory -Path $extractRoot | Out-Null
 
-    Invoke-WebRequest -Uri $archiveUrl -OutFile $zipPath
+    Invoke-ArchiveDownload -Uri $archiveUrl -OutFile $zipPath -ManualTargetDir $PreferredInstallDir
     Expand-Archive -Path $zipPath -DestinationPath $extractRoot
 
     $extracted = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1

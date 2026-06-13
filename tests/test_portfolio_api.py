@@ -175,6 +175,20 @@ class PortfolioApiTestCase(unittest.TestCase):
         detail = resp.json()
         self.assertEqual(detail.get("error"), "validation_error")
 
+    def test_risk_definitions_reseed_defaults_when_active_rows_missing(self) -> None:
+        from src.storage import AssetRiskDefinition
+
+        with self.db.get_session() as session:
+            session.query(AssetRiskDefinition).delete()
+            session.commit()
+
+        resp = self.client.get("/api/v1/portfolio/risk-definitions")
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        definitions = resp.json()["definitions"]
+        self.assertEqual([item["asset_risk_class"] for item in definitions], ["R1", "R2", "R3", "R4", "R5"])
+        self.assertTrue(all(item["name"] for item in definitions))
+
     def test_duplicate_trade_uid_returns_409(self) -> None:
         create_resp = self.client.post(
             "/api/v1/portfolio/accounts",

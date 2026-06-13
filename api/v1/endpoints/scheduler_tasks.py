@@ -424,6 +424,13 @@ def init_market_data() -> Dict[str, Any]:
         def do_init():
             logger.info("[Init] 开始全量初始化大盘与情绪数据 (5年)...")
             sync_market_data(days=1825)
+            try:
+                from src.services.market_cache_service import refresh_market_cache
+
+                refresh_market_cache("trend")
+                logger.info("[Init] 已重建 market trend 缓存。")
+            except Exception as cache_exc:
+                logger.warning("[Init] 重建 market trend 缓存失败: %s", cache_exc)
             logger.info("[Init] 全量初始化完成。")
             
         # 在后台线程执行以避免长时间阻塞 API 响应

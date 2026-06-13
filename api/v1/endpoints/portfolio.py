@@ -702,25 +702,31 @@ def get_risk_definitions() -> AssetRiskDefinitionListResponse:
 
     db = get_db()
     try:
-        with db.get_session() as session:
-            definitions = session.query(AssetRiskDefinition).filter(
-                AssetRiskDefinition.is_active == True
-            ).order_by(AssetRiskDefinition.asset_risk_class).all()
+        def _load_items() -> list[AssetRiskDefinitionItem]:
+            with db.get_session() as session:
+                definitions = session.query(AssetRiskDefinition).filter(
+                    AssetRiskDefinition.is_active == True
+                ).order_by(AssetRiskDefinition.asset_risk_class).all()
 
-            items = [
-                AssetRiskDefinitionItem(
-                    asset_risk_class=d.asset_risk_class,
-                    name=d.name,
-                    expected_return=d.expected_return,
-                    volatility=d.volatility,
-                    max_drawdown=d.max_drawdown,
-                    equity_weight=d.equity_weight,
-                    description=d.description,
-                )
-                for d in definitions
-            ]
+                return [
+                    AssetRiskDefinitionItem(
+                        asset_risk_class=d.asset_risk_class,
+                        name=d.name,
+                        expected_return=d.expected_return,
+                        volatility=d.volatility,
+                        max_drawdown=d.max_drawdown,
+                        equity_weight=d.equity_weight,
+                        description=d.description,
+                    )
+                    for d in definitions
+                ]
 
-            return AssetRiskDefinitionListResponse(definitions=items)
+        items = _load_items()
+        if not items:
+            db._init_asset_risk_definitions()
+            items = _load_items()
+
+        return AssetRiskDefinitionListResponse(definitions=items)
     except Exception as exc:
         raise _internal_error("Get risk definitions failed", exc)
 

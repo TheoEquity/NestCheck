@@ -6,7 +6,6 @@ interface WeeklyTrendChartProps {
   data: WeeklyDataPoint[];
   color?: string;
   height?: number;
-  maValues?: { ma10: number | null; ma20: number | null; ma50: number | null };
 }
 
 type AxisTooltipParam = {
@@ -17,7 +16,6 @@ export const WeeklyTrendChart: React.FC<WeeklyTrendChartProps> = ({
   data,
   color = '#26a69a',
   height = 120,
-  maValues,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ECharts | null>(null);
@@ -137,7 +135,7 @@ export const WeeklyTrendChart: React.FC<WeeklyTrendChartProps> = ({
       chart.dispose();
       chartRef.current = null;
     };
-  }, [data, color, height, maValues]);
+  }, [data, color, height]);
 
   if (!data || data.length === 0) {
     return <div style={{ width: '100%', height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 10 }}>无数据</div>;

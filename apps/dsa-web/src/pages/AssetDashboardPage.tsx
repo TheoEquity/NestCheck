@@ -263,12 +263,12 @@ const AssetDashboardPage: React.FC = () => {
                       </div>
 
                       {/* 趋势图 */}
-                      <div className="h-28 w-full bg-background/40 rounded border border-border/30 p-1">
-                        {item.weeklyData && item.weeklyData.length > 0 ? (
-                          <WeeklyTrendChart data={item.weeklyData} height={100} maValues={{ ma10: item.ma10 ?? null, ma20: item.ma20 ?? null, ma50: item.ma50 ?? null }} />
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-[10px] text-gray-400">加载中...</div>
-                        )}
+                        <div className="h-28 w-full bg-background/40 rounded border border-border/30 p-1">
+                          {item.weeklyData && item.weeklyData.length > 0 ? (
+                          <WeeklyTrendChart data={item.weeklyData} height={100} />
+                          ) : (
+                            <div className="h-full flex items-center justify-center text-[10px] text-gray-400">加载中...</div>
+                          )}
                       </div>
 
                       <TrafficLightLabel env={item.environment} className="min-h-[76px]" />

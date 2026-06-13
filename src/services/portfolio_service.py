@@ -204,7 +204,21 @@ class PortfolioService:
                 .first()
             )
 
-            if not latest or latest.fund_shares == 0.0:
+            if not latest:
+                return
+
+            if current_total_cny <= 0:
+                self._upsert_internal_fund_value(
+                    session=session,
+                    record_date=date_type.today(),
+                    fund_shares=0.0,
+                    fund_nav=1.0,
+                    total_equity=0.0,
+                )
+                session.commit()
+                return
+
+            if latest.fund_shares == 0.0:
                 return
 
             current_nav = round_internal_fund_nav(latest.fund_nav)
@@ -407,8 +421,9 @@ class PortfolioService:
                 asset_category=asset_category,
                 asset_subcategory=asset_subcategory,
             )
+            raw_last_price = asset.get("last_price")
             last_price = round_asset_price(
-                float(asset.get("last_price", avg_cost)),
+                float(avg_cost if raw_last_price is None else raw_last_price),
                 symbol=symbol,
                 asset_category=asset_category,
                 asset_subcategory=asset_subcategory,

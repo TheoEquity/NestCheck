@@ -365,6 +365,7 @@ export const portfolioApi = {
         market: row.market,
         quantity: row.quantity,
         avg_cost: row.avgCost,
+        last_price: row.lastPrice,
         currency: row.currency,
         note: row.note,
       })),

@@ -424,6 +424,7 @@ export interface PortfolioInitializeAssetRow {
   market: 'cn' | 'hk' | 'us';
   quantity: number;
   avgCost: number;
+  lastPrice: number;
   currency: string;
   note?: string;
 }

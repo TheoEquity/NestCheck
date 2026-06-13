@@ -21,7 +21,7 @@ from sqlalchemy import select
 from src.config import Config
 from src.repositories.portfolio_repo import PortfolioBusyError, PortfolioRepository
 from src.services.portfolio_service import _AvgState, _RealtimePositionQuote, PortfolioConflictError, PortfolioOversellError, PortfolioService
-from src.storage import DatabaseManager, PortfolioDailySnapshot, PortfolioPosition, PortfolioPositionLot, PortfolioTrade
+from src.storage import DatabaseManager, PortfolioDailySnapshot, PortfolioFundValue, PortfolioPosition, PortfolioPositionLot, PortfolioTrade
 
 
 class PortfolioServiceTestCase(unittest.TestCase):
@@ -1019,6 +1019,85 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertEqual(fund.last_price, 1.2345)
         self.assertEqual(fund.name, "Fund New")
         self.assertEqual(cash.last_price, 1.0)
+
+    def test_initialize_portfolio_defaults_last_price_to_avg_cost_when_missing(self) -> None:
+        account = self.service.create_account(name="Init", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+
+        result = self.service.initialize_portfolio(
+            account_id=aid,
+            init_date=date(2026, 1, 2),
+            assets=[
+                {
+                    "asset_category": "stock",
+                    "asset_risk_class": "R3",
+                    "symbol": "600519",
+                    "name": "贵州茅台",
+                    "market": "cn",
+                    "quantity": 10,
+                    "avg_cost": 123.45,
+                    "last_price": None,
+                    "currency": "CNY",
+                }
+            ],
+            cash_items=[
+                {
+                    "asset_category": "cash",
+                    "asset_risk_class": "R1",
+                    "name": "活期",
+                    "amount": 1000,
+                    "currency": "CNY",
+                }
+            ],
+        )
+
+        self.assertEqual(result["asset_count"], 1)
+        self.assertEqual(result["cash_count"], 1)
+
+        with self.db.get_session() as session:
+            stock = session.execute(
+                select(PortfolioPosition).where(
+                    PortfolioPosition.account_id == aid,
+                    PortfolioPosition.asset_category == "stock",
+                )
+            ).scalar_one()
+            cash = session.execute(select(PortfolioPosition).where(PortfolioPosition.symbol == "CASH_CNY")).scalar_one()
+
+        self.assertAlmostEqual(stock.avg_cost, 123.45, places=6)
+        self.assertAlmostEqual(stock.last_price, 123.45, places=6)
+        self.assertAlmostEqual(cash.quantity, 1000.0, places=6)
+        self.assertEqual(cash.last_price, 1.0)
+
+    def test_recalculate_fund_shares_resets_nav_when_total_equity_cleared(self) -> None:
+        account = self.service.create_account(name="Fund", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+
+        with self.db.get_session() as session:
+            PortfolioService._upsert_internal_fund_value(
+                session=session,
+                record_date=date(2026, 1, 2),
+                fund_shares=1000.0,
+                fund_nav=1.019,
+                total_equity=1019.0,
+            )
+            session.commit()
+
+        self.service.initialize_portfolio(
+            account_id=aid,
+            init_date=date(2026, 1, 3),
+            assets=[],
+            cash_items=[],
+        )
+
+        with self.db.get_session() as session:
+            latest = session.execute(
+                select(PortfolioFundValue).order_by(PortfolioFundValue.record_date.desc(), PortfolioFundValue.id.desc())
+            ).scalars().first()
+
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.total_equity, 0.0)
+        self.assertEqual(latest.fund_shares, 0.0)
+        self.assertEqual(latest.fund_nav, 1.0)
 
     def test_realtime_revalue_positions_only_refreshes_stocks(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")

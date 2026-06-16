@@ -201,18 +201,8 @@ def sync_market_data(days=30):
                         stats["success"] += 1
 
             elif source == 'akshare':
-                # A 股指数优先走统一数据源管理器，保留 AkShare 直连作为兜底。
+                # A 股指数保留完整 sh/sz 语义，避免 000001/000510 这类代码被误判为普通证券。
                 raw_code = code.replace('sz', '').replace('sh', '')
-                try:
-                    df_std, source_name = fetcher_manager.get_daily_data(raw_code, days=days)
-                    if df_std is not None and not df_std.empty:
-                        manager.save_daily_data(df_std, code, source_name or 'network_fallback')
-                        stats["success"] += 1
-                        time.sleep(0.5)
-                        continue
-                except Exception as e:
-                    logger.warning(f"Unified fetcher failed for {name}({code}), fallback to direct AkShare: {e}")
-
                 df_raw = None
                 last_err = None
                 for attempt in range(AKSHARE_MAX_RETRIES):

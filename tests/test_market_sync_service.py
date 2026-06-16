@@ -18,6 +18,11 @@ class _StubStorageManager:
         self.saved.append((df.copy(), code, source))
 
 
+class _ForbiddenFetcherManager:
+    def get_daily_data(self, code, days=30):
+        raise AssertionError(f"unexpected unified fetch for {code}")
+
+
 class MarketSyncServiceTestCase(unittest.TestCase):
     def test_sync_market_data_uses_fred_for_supported_macro_codes(self) -> None:
         saved_manager = _StubStorageManager()
@@ -125,6 +130,41 @@ class MarketSyncServiceTestCase(unittest.TestCase):
         self.assertEqual(stats["success"], 1)
         self.assertEqual(len(saved_manager.saved), 1)
         self.assertEqual(saved_manager.saved[0][2], "yfinance")
+
+    def test_sync_market_data_keeps_prefixed_code_for_a_share_indices(self) -> None:
+        saved_manager = _StubStorageManager()
+        ak_df = pd.DataFrame(
+            [
+                {
+                    "日期": pd.Timestamp("2026-06-15").date(),
+                    "开盘": 3500.0,
+                    "最高": 3510.0,
+                    "最低": 3490.0,
+                    "收盘": 3505.0,
+                    "成交量": 100,
+                    "成交额": 1000,
+                    "涨跌幅": 0.2,
+                }
+            ]
+        )
+
+        with patch.object(
+            market_sync_service,
+            "MARKET_INDICES",
+            [{"code": "sh000001", "source": "akshare", "name": "上证指数", "func": "index_zh_a_hist", "period": "daily"}],
+        ), patch("src.services.market_sync_service.StorageManager", return_value=saved_manager), patch(
+            "src.services.market_sync_service.DataFetcherManager",
+            return_value=_ForbiddenFetcherManager(),
+        ), patch(
+            "src.services.market_sync_service.ak.index_zh_a_hist",
+            return_value=ak_df,
+        ):
+            stats = market_sync_service.sync_market_data(days=30)
+
+        self.assertEqual(stats["success"], 1)
+        self.assertEqual(len(saved_manager.saved), 1)
+        self.assertEqual(saved_manager.saved[0][1], "sh000001")
+        self.assertEqual(saved_manager.saved[0][2], "akshare")
 
 
 if __name__ == "__main__":

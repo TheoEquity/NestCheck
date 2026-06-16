@@ -246,7 +246,11 @@ def _fetch_weekly_for_code(code: str) -> Optional[Tuple[pd.DataFrame, pd.DataFra
                 # 补充入库以供下次使用
                 try:
                     from src.storage import get_db
-                    get_db().save_daily_data(df, raw_code, "fred" if supports_fred_code(raw_code) else "network_fallback")
+                    get_db().save_daily_data(
+                        df,
+                        raw_code,
+                        str(df.attrs.get("source", "fred" if supports_fred_code(raw_code) else "network_fallback")),
+                    )
                 except Exception as e:
                     logger.warning(f"[Trend] {code} fallback 入库失败: {e}")
         

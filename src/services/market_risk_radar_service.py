@@ -230,7 +230,7 @@ def _get_usdcny_data() -> pd.Series:
         
         # 补充入库
         try:
-            get_db().save_daily_data(df, "USDCNY=X", "network_fallback")
+            get_db().save_daily_data(df, "USDCNY=X", str(df.attrs.get("source", "network_fallback")))
         except Exception as e:
             pass
         

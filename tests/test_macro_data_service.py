@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
 from src.services import macro_data_service
 
 
@@ -85,6 +87,52 @@ class MacroDataServiceTestCase(unittest.TestCase):
         self.assertIsNotNone(quote)
         self.assertAlmostEqual(float(quote["value"]), 7.2512, places=6)
         self.assertEqual(quote["source"], "open_er_api")
+
+    def test_fetch_supported_daily_dataframe_falls_back_to_manager_on_fred_timeout(self) -> None:
+        fallback_df = pd.DataFrame(
+            [
+                {
+                    "date": pd.Timestamp("2026-06-15").date(),
+                    "open": 42000.0,
+                    "high": 42100.0,
+                    "low": 41900.0,
+                    "close": 42050.0,
+                    "volume": 1,
+                    "amount": 1,
+                    "pct_chg": 0.2,
+                }
+            ]
+        )
+        with patch(
+            "src.services.macro_data_service.fetch_fred_daily_dataframe",
+            side_effect=macro_data_service.requests.ReadTimeout("timeout"),
+        ), patch(
+            "src.services.macro_data_service._fetch_manager_daily_dataframe",
+            return_value=fallback_df,
+        ) as mocked_fallback:
+            df = macro_data_service.fetch_supported_daily_dataframe("^DJI", days=30)
+
+        mocked_fallback.assert_called_once_with("^DJI", days=30)
+        self.assertFalse(df.empty)
+
+    def test_fetch_supported_latest_quote_falls_back_to_manager_on_fred_timeout(self) -> None:
+        fallback_quote = {
+            "value": 5959.0,
+            "date": "2026-06-15",
+            "change_pct": 0.3,
+            "source": "yfinance",
+        }
+        with patch(
+            "src.services.macro_data_service.fetch_fred_latest_quote",
+            side_effect=macro_data_service.requests.ReadTimeout("timeout"),
+        ), patch(
+            "src.services.macro_data_service._fetch_manager_latest_quote",
+            return_value=fallback_quote,
+        ) as mocked_fallback:
+            quote = macro_data_service.fetch_supported_latest_quote("^GSPC")
+
+        mocked_fallback.assert_called_once_with("^GSPC")
+        self.assertEqual(quote, fallback_quote)
 
 
 if __name__ == "__main__":

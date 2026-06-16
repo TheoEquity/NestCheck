@@ -32,6 +32,45 @@ def supports_fred_code(code: str) -> bool:
     return code in FRED_SERIES_BY_CODE
 
 
+def _normalize_provider_name(provider: object) -> str:
+    raw = str(provider or "").strip()
+    lowered = raw.lower()
+    if lowered.endswith("fetcher"):
+        lowered = lowered[:-7]
+    return lowered or "network_fallback"
+
+
+def _fetch_manager_daily_dataframe(code: str, *, days: int) -> pd.DataFrame:
+    from data_provider.base import DataFetcherManager
+
+    manager = DataFetcherManager()
+    df, source = manager.get_daily_data(code, days=days)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df.attrs["source"] = _normalize_provider_name(source)
+    return df
+
+
+def _fetch_manager_latest_quote(code: str) -> Optional[Dict[str, object]]:
+    from data_provider.base import DataFetcherManager
+
+    manager = DataFetcherManager()
+    quote = manager.get_realtime_quote(code, log_final_failure=False)
+    if quote is None:
+        return None
+    price = getattr(quote, "price", None)
+    if price in (None, ""):
+        return None
+    change_pct = getattr(quote, "change_pct", None)
+    source = getattr(quote, "source", None)
+    return {
+        "value": float(price),
+        "date": date.today().isoformat(),
+        "change_pct": float(change_pct) if change_pct is not None else None,
+        "source": _normalize_provider_name(getattr(source, "value", source)),
+    }
+
+
 def _parse_fred_csv(code: str, csv_text: str) -> List[Tuple[date, float]]:
     observations: List[Tuple[date, float]] = []
     series_id = FRED_SERIES_BY_CODE.get(code)
@@ -85,6 +124,7 @@ def fetch_fred_daily_dataframe(code: str, *, days: int) -> pd.DataFrame:
     if not observations:
         return pd.DataFrame()
     df = build_daily_dataframe(code, observations)
+    df.attrs["source"] = "fred"
     return df.tail(days + 10).reset_index(drop=True)
 
 
@@ -130,11 +170,33 @@ def fetch_latest_usd_cny_rate() -> Optional[Dict[str, object]]:
 
 def fetch_supported_daily_dataframe(code: str, *, days: int) -> pd.DataFrame:
     if supports_fred_code(code):
-        return fetch_fred_daily_dataframe(code, days=days)
+        try:
+            df = fetch_fred_daily_dataframe(code, days=days)
+        except Exception as exc:
+            logger.warning("FRED daily fetch failed for %s: %s", code, exc)
+            df = pd.DataFrame()
+        if df is not None and not df.empty:
+            return df
+        try:
+            return _fetch_manager_daily_dataframe(code, days=days)
+        except Exception as exc:
+            logger.warning("Manager daily fallback failed for %s: %s", code, exc)
+            return pd.DataFrame()
     return pd.DataFrame()
 
 
 def fetch_supported_latest_quote(code: str) -> Optional[Dict[str, object]]:
     if supports_fred_code(code):
-        return fetch_fred_latest_quote(code)
+        try:
+            quote = fetch_fred_latest_quote(code)
+        except Exception as exc:
+            logger.warning("FRED latest quote failed for %s: %s", code, exc)
+            quote = None
+        if quote is not None:
+            return quote
+        try:
+            return _fetch_manager_latest_quote(code)
+        except Exception as exc:
+            logger.warning("Manager realtime fallback failed for %s: %s", code, exc)
+            return None
     return None

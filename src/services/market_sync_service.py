@@ -184,7 +184,7 @@ def sync_market_data(days=30):
             elif source == 'fred':
                 df_std = fetch_supported_daily_dataframe(code, days=days)
                 if df_std is not None and not df_std.empty:
-                    manager.save_daily_data(df_std, code, 'fred')
+                    manager.save_daily_data(df_std, code, str(df_std.attrs.get('source', 'fred')))
                     stats["success"] += 1
 
             elif source == 'yfinance':
@@ -192,7 +192,7 @@ def sync_market_data(days=30):
                 if supports_fred_code(code) or supports_fred_code(fetch_code):
                     df_std = fetch_supported_daily_dataframe(fetch_code if supports_fred_code(fetch_code) else code, days=days)
                     if df_std is not None and not df_std.empty:
-                        manager.save_daily_data(df_std, code, 'fred')
+                        manager.save_daily_data(df_std, code, str(df_std.attrs.get('source', 'fred')))
                         stats["success"] += 1
                 else:
                     df_std, source_name = fetcher_manager.get_daily_data(fetch_code, days=days)

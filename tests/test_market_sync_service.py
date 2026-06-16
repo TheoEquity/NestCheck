@@ -35,6 +35,7 @@ class MarketSyncServiceTestCase(unittest.TestCase):
                 }
             ]
         )
+        fred_df.attrs["source"] = "fred"
 
         with patch.object(
             market_sync_service,
@@ -70,6 +71,7 @@ class MarketSyncServiceTestCase(unittest.TestCase):
                 }
             ]
         )
+        fred_df.attrs["source"] = "fred"
 
         with patch.object(
             market_sync_service,
@@ -88,6 +90,41 @@ class MarketSyncServiceTestCase(unittest.TestCase):
         self.assertEqual(len(saved_manager.saved), 1)
         self.assertEqual(saved_manager.saved[0][1], "^DJI")
         self.assertEqual(saved_manager.saved[0][2], "fred")
+
+    def test_sync_market_data_persists_fallback_source_for_supported_macro_codes(self) -> None:
+        saved_manager = _StubStorageManager()
+        fallback_df = pd.DataFrame(
+            [
+                {
+                    "date": pd.Timestamp("2026-06-15").date(),
+                    "open": 42850.0,
+                    "high": 42850.0,
+                    "low": 42850.0,
+                    "close": 42850.0,
+                    "volume": 0,
+                    "amount": 0,
+                    "pct_chg": 0.3,
+                }
+            ]
+        )
+        fallback_df.attrs["source"] = "yfinance"
+
+        with patch.object(
+            market_sync_service,
+            "MARKET_INDICES",
+            [{"code": "^DJI", "source": "fred", "name": "道琼斯"}],
+        ), patch("src.services.market_sync_service.StorageManager", return_value=saved_manager), patch(
+            "src.services.market_sync_service.DataFetcherManager"
+        ) as mock_fetcher_manager, patch(
+            "src.services.market_sync_service.fetch_supported_daily_dataframe",
+            return_value=fallback_df,
+        ):
+            stats = market_sync_service.sync_market_data(days=30)
+
+        mock_fetcher_manager.assert_called_once()
+        self.assertEqual(stats["success"], 1)
+        self.assertEqual(len(saved_manager.saved), 1)
+        self.assertEqual(saved_manager.saved[0][2], "yfinance")
 
 
 if __name__ == "__main__":

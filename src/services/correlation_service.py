@@ -118,7 +118,7 @@ def get_correlation_heatmap_data() -> Dict[str, Any]:
                         df, source = manager.get_daily_data(code, days=800)
                     if df is not None and not df.empty:
                         try:
-                            get_db().save_daily_data(df, code, source or "network_fallback")
+                            get_db().save_daily_data(df, code, str(df.attrs.get("source", source or "network_fallback")))
                         except Exception as e:
                             pass
                     else:

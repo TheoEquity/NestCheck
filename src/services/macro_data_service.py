@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from io import StringIO
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -22,7 +23,7 @@ FRED_SERIES_BY_CODE: Dict[str, str] = {
     "^VIX": "VIXCLS",
 }
 
-FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+FRED_GRAPH_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 OPEN_ER_LATEST_USD_URL = "https://open.er-api.com/v6/latest/USD"
 REQUEST_TIMEOUT_SECONDS = 10
 
@@ -31,13 +32,19 @@ def supports_fred_code(code: str) -> bool:
     return code in FRED_SERIES_BY_CODE
 
 
-def _parse_fred_observations(payload: dict) -> List[Tuple[date, float]]:
+def _parse_fred_csv(code: str, csv_text: str) -> List[Tuple[date, float]]:
     observations: List[Tuple[date, float]] = []
-    for item in payload.get("observations", []):
-        raw_value = str(item.get("value", "")).strip()
+    series_id = FRED_SERIES_BY_CODE.get(code)
+    if not series_id:
+        return observations
+    frame = pd.read_csv(StringIO(csv_text))
+    if frame.empty or "observation_date" not in frame.columns or series_id not in frame.columns:
+        return observations
+    for item in frame.to_dict(orient="records"):
+        raw_value = str(item.get(series_id, "")).strip()
         if not raw_value or raw_value == ".":
             continue
-        raw_date = str(item.get("date", "")).strip()
+        raw_date = str(item.get("observation_date", "")).strip()
         try:
             obs_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
             obs_value = float(raw_value)
@@ -51,16 +58,12 @@ def fetch_fred_observations(code: str, *, start_date: Optional[date] = None) -> 
     series_id = FRED_SERIES_BY_CODE.get(code)
     if not series_id:
         return []
-    params = {
-        "series_id": series_id,
-        "file_type": "json",
-        "sort_order": "asc",
-    }
+    params = {"id": series_id}
     if start_date is not None:
-        params["observation_start"] = start_date.isoformat()
-    response = requests.get(FRED_OBSERVATIONS_URL, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+        params["cosd"] = start_date.isoformat()
+    response = requests.get(FRED_GRAPH_CSV_URL, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
-    return _parse_fred_observations(response.json())
+    return _parse_fred_csv(code, response.text)
 
 
 def build_daily_dataframe(code: str, observations: List[Tuple[date, float]]) -> pd.DataFrame:

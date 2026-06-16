@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import time
 import random
 from data_provider.base import DataFetcherManager
+from src.services.macro_data_service import fetch_supported_daily_dataframe, supports_fred_code
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ AKSHARE_RETRY_DELAY = 2  # seconds
 
 # 定义需要同步的指标列表
 # code: 存入 stock_daily 的标识
-# source: akshare / yfinance
+# source: akshare / yfinance / fred
 # fetch_func: 对应的抓取函数名
 # days: 增量默认 30 天，初始化可设为大数值
 
@@ -36,17 +37,17 @@ MARKET_INDICES = [
     {"code": "sz399001", "source": "akshare", "name": "深证成指", "func": "index_zh_a_hist", "period": "daily"},
     {"code": "sz399006", "source": "akshare", "name": "创业板指", "func": "index_zh_a_hist", "period": "daily"},
 
-    # 美股/外汇/美债 (yfinance)
-    {"code": "^DJI", "source": "yfinance", "name": "道琼斯"},
-    {"code": "^IXIC", "source": "yfinance", "name": "纳斯达克"},
-    {"code": "^GSPC", "source": "yfinance", "name": "标普500"},
-    {"code": "DX-Y.NYB", "source": "yfinance", "name": "美元指数"},
-    {"code": "USDCNY=X", "source": "yfinance", "name": "美元兑人民币"},
-    {"code": "^TNX", "source": "yfinance", "name": "10年期美债"},
+    # 美股指数与宏观/汇率 (fred)
+    {"code": "^DJI", "source": "fred", "name": "道琼斯"},
+    {"code": "^IXIC", "source": "fred", "name": "纳斯达克"},
+    {"code": "^GSPC", "source": "fred", "name": "标普500"},
+    {"code": "DX-Y.NYB", "source": "fred", "name": "美元指数"},
+    {"code": "USDCNY=X", "source": "fred", "name": "美元兑人民币"},
+    {"code": "^TNX", "source": "fred", "name": "10年期美债"},
 
     # 情绪指标 (特殊处理)
     {"code": "cn_vix", "source": "akshare", "name": "A股恐慌(QVIX)", "func": "index_option_300etf_qvix"},
-    {"code": "us_vix", "source": "yfinance", "name": "美股恐慌(VIX)", "yfinance_symbol": "^VIX"},
+    {"code": "us_vix", "source": "fred", "name": "美股恐慌(VIX)"},
     {"code": "bond_cn_10y", "source": "akshare", "name": "中国10年国债", "func": "bond_zh_us_rate"},
     {"code": "bond_us_10y", "source": "akshare", "name": "美国10年国债", "func": "bond_zh_us_rate"},
 ]
@@ -180,12 +181,24 @@ def sync_market_data(days=30):
                         stats["success"] += 1
                 continue # Skip standard logic below as we handled it here
 
+            elif source == 'fred':
+                df_std = fetch_supported_daily_dataframe(code, days=days)
+                if df_std is not None and not df_std.empty:
+                    manager.save_daily_data(df_std, code, 'fred')
+                    stats["success"] += 1
+
             elif source == 'yfinance':
                 fetch_code = item.get('yfinance_symbol', code)
-                df_std, source_name = fetcher_manager.get_daily_data(fetch_code, days=days)
-                if df_std is not None and not df_std.empty:
-                    manager.save_daily_data(df_std, code, source_name or 'network_fallback')
-                    stats["success"] += 1
+                if supports_fred_code(code) or supports_fred_code(fetch_code):
+                    df_std = fetch_supported_daily_dataframe(fetch_code if supports_fred_code(fetch_code) else code, days=days)
+                    if df_std is not None and not df_std.empty:
+                        manager.save_daily_data(df_std, code, 'fred')
+                        stats["success"] += 1
+                else:
+                    df_std, source_name = fetcher_manager.get_daily_data(fetch_code, days=days)
+                    if df_std is not None and not df_std.empty:
+                        manager.save_daily_data(df_std, code, source_name or 'network_fallback')
+                        stats["success"] += 1
 
             elif source == 'akshare':
                 # A 股指数优先走统一数据源管理器，保留 AkShare 直连作为兜底。

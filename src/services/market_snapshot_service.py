@@ -20,6 +20,7 @@ from typing import Dict, Any, Optional
 import yfinance as yf
 import akshare as ak
 import pandas as pd
+from src.services.macro_data_service import fetch_supported_latest_quote, supports_fred_code
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,12 @@ MARKET_INDICES = [
     {"key": "sh", "label": "上证指数", "code": "sh000001", "source": "akshare"},
     {"key": "sz", "label": "深圳成指", "code": "sz399001", "source": "akshare"},
     {"key": "cyb", "label": "创业板指", "code": "sz399006", "source": "akshare"},
-    {"key": "dji", "label": "道琼斯", "code": "^DJI", "source": "yfinance"},
-    {"key": "ixic", "label": "纳斯达克", "code": "^IXIC", "source": "yfinance"},
-    {"key": "gspc", "label": "标普500", "code": "^GSPC", "source": "yfinance"},
-    {"key": "dxy", "label": "美元指数", "code": "DX-Y.NYB", "source": "yfinance"},
-    {"key": "usdcny", "label": "美元兑人民币", "code": "USDCNY=X", "source": "yfinance"},
-    {"key": "tnx", "label": "10年期美债", "code": "^TNX", "source": "yfinance"},
+    {"key": "dji", "label": "道琼斯", "code": "^DJI", "source": "fred"},
+    {"key": "ixic", "label": "纳斯达克", "code": "^IXIC", "source": "fred"},
+    {"key": "gspc", "label": "标普500", "code": "^GSPC", "source": "fred"},
+    {"key": "dxy", "label": "美元指数", "code": "DX-Y.NYB", "source": "fred"},
+    {"key": "usdcny", "label": "美元兑人民币", "code": "USDCNY=X", "source": "fred"},
+    {"key": "tnx", "label": "10年期美债", "code": "^TNX", "source": "fred"},
 ]
 
 def _load_cache() -> Optional[Dict[str, Any]]:
@@ -93,7 +94,15 @@ def _fetch_network_snapshot() -> Dict[str, Any]:
     result = {}
     for item in MARKET_INDICES:
         try:
-            if item["source"] == "yfinance":
+            if supports_fred_code(item["code"]):
+                quote = fetch_supported_latest_quote(item["code"])
+                if quote is not None:
+                    result[item["code"]] = {
+                        "close": round(float(quote["value"]), 2),
+                        "pct_chg": float(quote["change_pct"] or 0),
+                        "source": str(quote["source"]),
+                    }
+            elif item["source"] == "yfinance":
                 ticker = yf.Ticker(item["code"])
                 hist = ticker.history(period="2d")
                 if not hist.empty:

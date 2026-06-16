@@ -9,19 +9,37 @@
     "description": "AKShare 开源金融数据接口"
   },
   {
-    "name": "yfinance",
-    "type": "yfinance",
+    "name": "FRED",
+    "type": "fred",
     "enabled": true,
     "priority": 2,
     "retry_times": 2,
     "timeout": 15,
-    "description": "Yahoo Finance 数据源"
+    "description": "FRED 宏观数据接口，用于美元指数代理、美债收益率、VIX 与 USD/CNY 日线"
+  },
+  {
+    "name": "Open ER API",
+    "type": "open_er_api",
+    "enabled": true,
+    "priority": 3,
+    "retry_times": 2,
+    "timeout": 15,
+    "description": "open.er-api.com 汇率接口，用于 USD/CNY 最新汇率"
+  },
+  {
+    "name": "yfinance",
+    "type": "yfinance",
+    "enabled": true,
+    "priority": 4,
+    "retry_times": 2,
+    "timeout": 15,
+    "description": "Yahoo Finance 数据源，主要用于美股、港股与未迁移的全球行情"
   },
   {
     "name": "EFinance",
     "type": "efinance",
     "enabled": true,
-    "priority": 3,
+    "priority": 5,
     "retry_times": 2,
     "timeout": 15,
     "description": "东方财富数据接口"
@@ -30,7 +48,7 @@
     "name": "Tushare",
     "type": "tushare",
     "enabled": false,
-    "priority": 4,
+    "priority": 6,
     "retry_times": 2,
     "timeout": 15,
     "description": "Tushare 专业金融数据接口（需 Token）"

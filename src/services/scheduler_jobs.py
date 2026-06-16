@@ -21,9 +21,9 @@ def run_daily_market_cache_refresh() -> Dict[str, Any]:
     - Market dashboard cache rebuild (trend, risk, radar, etc.)
     """
     import akshare as ak
-    import yfinance as yf
 
     from src.services.portfolio_service import PortfolioService
+    from src.services.macro_data_service import fetch_supported_latest_quote
     from src.storage import get_db, StockDaily
     from src.services.market_cache_service import (
         MARKET_CACHE_BUILDERS,
@@ -59,12 +59,11 @@ def run_daily_market_cache_refresh() -> Dict[str, Any]:
             logger.warning("cn_vix failed: %s", exc)
             
         try:
-            vix = yf.Ticker("^VIX")
-            hist = vix.history(period="2d")
-            if not hist.empty:
+            vix_quote = fetch_supported_latest_quote("us_vix")
+            if vix_quote is not None:
                 with get_db().get_session() as s:
                     s.query(StockDaily).filter_by(code="us_vix", date=today).delete()
-                    s.add(StockDaily(code="us_vix", date=today, close=float(hist["Close"].iloc[-1]), data_source="yfinance", updated_at=datetime.now()))
+                    s.add(StockDaily(code="us_vix", date=today, close=float(vix_quote["value"]), data_source=str(vix_quote["source"]), updated_at=datetime.now()))
                     s.commit()
         except Exception as exc:
             logger.warning("us_vix failed: %s", exc)

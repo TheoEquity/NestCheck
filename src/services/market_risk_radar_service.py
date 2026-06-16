@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", message="Mean of empty slice") # Suppress pandas warnings
 
 from .market_trend_service import _get_manager, _load_cache, _save_cache, CACHE_EXPIRY_HOURS
+from .macro_data_service import fetch_supported_daily_dataframe
 
 
 def _linear_interpolate(val: float, keys: list, values: list) -> float:
@@ -217,12 +218,15 @@ def _get_usdcny_data() -> pd.Series:
             return df.set_index(pd.to_datetime(df['date']))['close']
         
         # 降级：从网络现拉
-        manager = _get_manager()
-        if not manager: return pd.Series()
-        
         logger.info("[Radar] USDCNY 降级现拉...")
-        df, _ = manager.get_daily_data("USDCNY=X", days=200)
-        if df is None or df.empty: return pd.Series()
+        df = fetch_supported_daily_dataframe("USDCNY=X", days=200)
+        if df is None or df.empty:
+            manager = _get_manager()
+            if not manager:
+                return pd.Series()
+            df, _ = manager.get_daily_data("USDCNY=X", days=200)
+        if df is None or df.empty:
+            return pd.Series()
         
         # 补充入库
         try:

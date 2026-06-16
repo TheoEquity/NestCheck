@@ -15,6 +15,7 @@ import logging
 import json
 from pathlib import Path
 import time
+from src.services.macro_data_service import fetch_supported_daily_dataframe, supports_fred_code
 
 logger = logging.getLogger(__name__)
 
@@ -234,15 +235,18 @@ def _fetch_weekly_for_code(code: str) -> Optional[Tuple[pd.DataFrame, pd.DataFra
         
         if df.empty:
             # 降级：数据库无数据，从网络现拉
-            if manager is None:
-                return None
             logger.info(f"[Trend] {code} 数据库无历史，降级现拉...")
-            df, _ = manager.get_daily_data(raw_code, days=days_needed)
+            if supports_fred_code(raw_code):
+                df = fetch_supported_daily_dataframe(raw_code, days=days_needed)
+            else:
+                if manager is None:
+                    return None
+                df, _ = manager.get_daily_data(raw_code, days=days_needed)
             if df is not None and not df.empty:
                 # 补充入库以供下次使用
                 try:
                     from src.storage import get_db
-                    get_db().save_daily_data(df, raw_code, "network_fallback")
+                    get_db().save_daily_data(df, raw_code, "fred" if supports_fred_code(raw_code) else "network_fallback")
                 except Exception as e:
                     logger.warning(f"[Trend] {code} fallback 入库失败: {e}")
         

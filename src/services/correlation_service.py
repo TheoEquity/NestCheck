@@ -10,6 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .market_trend_service import _get_manager, _load_cache, _save_cache
+from .macro_data_service import fetch_supported_daily_dataframe, supports_fred_code
 
 
 def _get_bond_ice_bofa_series() -> Optional[pd.Series]:
@@ -110,7 +111,11 @@ def get_correlation_heatmap_data() -> Dict[str, Any]:
                 if df.empty:
                     # 降级：从网络现拉
                     logger.info(f"[Correlation] {code} 降级现拉...")
-                    df, source = manager.get_daily_data(code, days=800)
+                    if supports_fred_code(code):
+                        df = fetch_supported_daily_dataframe(code, days=800)
+                        source = "fred"
+                    else:
+                        df, source = manager.get_daily_data(code, days=800)
                     if df is not None and not df.empty:
                         try:
                             get_db().save_daily_data(df, code, source or "network_fallback")

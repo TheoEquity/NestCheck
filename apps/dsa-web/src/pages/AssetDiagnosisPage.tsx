@@ -8,6 +8,7 @@ import { marketApi, type MarketIndexHistoryItem } from '../api/market';
 import { portfolioApi } from '../api/portfolio';
 import type { AssetAllocationPlanItem, PortfolioFundHistoryItem } from '../types/portfolio';
 import { usePortfolioOverview, formatMoney, formatSignedPct, formatPct, formatNav } from './assetsShared';
+import { computeFundDailyNavChange } from '../utils/portfolioFundNav';
 
 const PERIODS = [
   { label: '近1周', days: 7 },
@@ -334,11 +335,7 @@ function Metric({
 }
 
 function computeDailyNavChange(items: PortfolioFundHistoryItem[]): number | null {
-  if (items.length < 2) return null;
-  const latest = items[items.length - 1];
-  const previous = items[items.length - 2];
-  if (!latest || !previous || previous.fundNav <= 0 || latest.recordDate === previous.recordDate) return null;
-  return ((latest.fundNav / previous.fundNav) - 1) * 100;
+  return computeFundDailyNavChange(items);
 }
 
 function formatPlanRate(value: number | undefined | null): string {

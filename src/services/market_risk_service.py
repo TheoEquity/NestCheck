@@ -19,6 +19,8 @@ import logging
 import json
 from pathlib import Path
 
+from src.services.macro_data_service import fetch_latest_usd_cny_rate, fetch_supported_latest_quote
+
 logger = logging.getLogger(__name__)
 
 # 缓存配置
@@ -105,10 +107,10 @@ def _dollar_index() -> Dict[str, Any]:
     
     # 降级：从网络现拉
     try:
-        df = ak.currency_boc_safe()
-        latest = df.iloc[-1]
-        
-        usd_cny = float(latest['美元']) / 100.0
+        latest_quote = fetch_latest_usd_cny_rate()
+        if latest_quote is None:
+            raise ValueError("empty USD/CNY quote")
+        usd_cny = float(latest_quote["value"])
         
         if usd_cny > 7.3:
             status = "偏强"
@@ -132,7 +134,7 @@ def _dollar_index() -> Dict[str, Any]:
             "status": status,
             "badge": badge,
             "description": description,
-            "date": str(latest.get('日期', datetime.now().strftime("%Y-%m-%d")))
+            "date": str(latest_quote.get("date", datetime.now().strftime("%Y-%m-%d")))
         }
         _save_cache("dollar", result)
         return result
@@ -291,24 +293,22 @@ def _us_vix() -> Dict[str, Any]:
         df = get_db().get_daily_history_df("us_vix", days=10)
         
         if df.empty:
-            import yfinance as yf
-            vix = yf.Ticker("^VIX")
-            hist = vix.history(period="10d")
-            if hist.empty:
+            quote = fetch_supported_latest_quote("us_vix")
+            if quote is None:
                 return {"error": "数据为空"}
-            
-            # 补充入库
-            import pandas as pd
             try:
-                insert_df = pd.DataFrame({
-                    'date': hist.index.date,
-                    'close': hist['Close'].values,
-                    'open': hist['Open'].values,
-                    'high': hist['High'].values,
-                    'low': hist['Low'].values,
-                    'volume': 0,
-                    'amount': 0,
-                })
+                insert_df = pd.DataFrame([
+                    {
+                        'date': pd.to_datetime(str(quote["date"])).date(),
+                        'close': float(quote['value']),
+                        'open': float(quote['value']),
+                        'high': float(quote['value']),
+                        'low': float(quote['value']),
+                        'volume': 0,
+                        'amount': 0,
+                        'pct_chg': float(quote['change_pct'] or 0),
+                    }
+                ])
                 get_db().save_daily_data(insert_df, "us_vix", "network_fallback")
                 df = insert_df
             except Exception as e:

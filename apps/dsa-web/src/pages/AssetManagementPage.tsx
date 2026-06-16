@@ -20,6 +20,7 @@ import {
   computeHealthScore,
   usePortfolioOverview,
 } from './assetsShared';
+import { computeFundDailyNavChange } from '../utils/portfolioFundNav';
 
 const FILTER_CLASS = 'input-surface input-focus-glow h-9 rounded-lg border bg-transparent px-3 text-sm';
 const PIE_COLORS = ['#0f766e', '#2563eb', '#7c3aed', '#ea580c', '#dc2626', '#64748b'];
@@ -71,13 +72,7 @@ const getLocalMarketValue = (position: PortfolioPositionRecordItem) => Number(po
 
 const getLocalUnrealizedPnl = (position: PortfolioPositionRecordItem) => getLocalMarketValue(position) - Number(position.totalCost || 0);
 
-const computeDailyNavChange = (items: PortfolioFundHistoryItem[]): number | null => {
-  if (items.length < 2) return null;
-  const latest = items[items.length - 1];
-  const previous = items[items.length - 2];
-  if (!latest || !previous || previous.fundNav <= 0 || latest.recordDate === previous.recordDate) return null;
-  return ((latest.fundNav / previous.fundNav) - 1) * 100;
-};
+const computeDailyNavChange = (items: PortfolioFundHistoryItem[]): number | null => computeFundDailyNavChange(items);
 
 type AdjustModalProps = {
   position: PortfolioPositionRecordItem | null;

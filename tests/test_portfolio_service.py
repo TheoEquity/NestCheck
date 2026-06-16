@@ -136,6 +136,19 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertEqual(pos["price_provider"], "unit-test")
         self.assertTrue(pos["price_available"])
 
+    def test_fetch_fx_rate_prefers_open_er_for_usd_cny(self) -> None:
+        with patch(
+            "src.services.portfolio_service.fetch_latest_usd_cny_rate",
+            return_value={"value": 7.2315, "date": "2026-01-02", "source": "open_er_api"},
+        ):
+            rate = PortfolioService._fetch_fx_rate_from_yfinance(
+                from_currency="USD",
+                to_currency="CNY",
+                as_of_date=date(2026, 1, 2),
+            )
+
+        self.assertAlmostEqual(float(rate), 7.2315, places=6)
+
     def test_current_snapshot_prefers_realtime_price_over_stale_close(self) -> None:
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")

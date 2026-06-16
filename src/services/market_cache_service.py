@@ -21,6 +21,7 @@ from src.services.market_risk_radar_service import get_risk_radar_data
 from src.services.market_risk_service import calculate_market_risk
 from src.services.market_trend_service import get_market_trend_data, get_monthly_seasonality
 from src.services.market_trend_service import MARKET_INDICES
+from src.services.macro_data_service import fetch_supported_latest_quote, supports_fred_code
 
 logger = logging.getLogger(__name__)
 
@@ -274,13 +275,20 @@ def refresh_trend_realtime_quotes() -> Dict[str, Any]:
         key = item["key"]
         code = item["code"]
         try:
-            quote = manager.get_realtime_quote(code, log_final_failure=False)
-            price = getattr(quote, "price", None) if quote is not None else None
-            price_val = float(price)
+            if supports_fred_code(code):
+                quote_payload = fetch_supported_latest_quote(code)
+                if quote_payload is None:
+                    raise ValueError("empty macro quote")
+                price_val = float(quote_payload["value"])
+                change_pct_val = quote_payload.get("change_pct")
+            else:
+                quote = manager.get_realtime_quote(code, log_final_failure=False)
+                price = getattr(quote, "price", None) if quote is not None else None
+                price_val = float(price)
+                change_pct = getattr(quote, "change_pct", None)
+                change_pct_val = float(change_pct) if change_pct is not None else None
             if price_val <= 0:
                 raise ValueError("empty realtime price")
-            change_pct = getattr(quote, "change_pct", None)
-            change_pct_val = float(change_pct) if change_pct is not None else None
             entry = data.setdefault(key, {"label": item["label"], "code": code})
             entry["close"] = price_val
             entry["daily_close"] = round(price_val, 2)

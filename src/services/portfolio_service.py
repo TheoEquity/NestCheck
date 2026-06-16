@@ -14,6 +14,7 @@ from sqlalchemy import and_, select
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.config import get_config
+from src.services.macro_data_service import fetch_latest_usd_cny_rate
 from src.repositories.portfolio_repo import (
     DuplicateTradeDedupHashError,
     DuplicateTradeUidError,
@@ -2755,9 +2756,21 @@ class PortfolioService:
         as_of_date: date,
     ) -> Optional[float]:
         """Fetch latest available FX close rate around as_of date."""
+        normalized_from = str(from_currency or "").upper()
+        normalized_to = str(to_currency or "").upper()
+        if normalized_from == "USD" and normalized_to == "CNY":
+            try:
+                latest = fetch_latest_usd_cny_rate()
+            except Exception as exc:
+                logger.warning("open.er-api FX fetch failed for %s/%s: %s", normalized_from, normalized_to, exc)
+                latest = None
+            if latest is not None:
+                value = float(latest.get("value") or 0.0)
+                if value > 0:
+                    return value
         if yf is None:
             return None
-        symbol = f"{from_currency}{to_currency}=X"
+        symbol = f"{normalized_from}{normalized_to}=X"
         ticker = yf.Ticker(symbol)
         history = ticker.history(
             start=(as_of_date - timedelta(days=7)).isoformat(),

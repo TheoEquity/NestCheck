@@ -105,6 +105,15 @@ def parse_env_bool(value: Optional[str], default: bool = False) -> bool:
     return normalized not in _FALSEY_ENV_VALUES
 
 
+def resolve_tushare_enabled_env() -> bool:
+    """Resolve Tushare enablement from current and legacy env names."""
+    primary = os.getenv('TUSHARE_ENABLED')
+    if primary is not None:
+        return parse_env_bool(primary, False)
+    legacy = os.getenv('TUSHARE')
+    return parse_env_bool(legacy, False)
+
+
 def parse_env_int(
     value: Optional[str],
     default: int,
@@ -1294,7 +1303,7 @@ class Config:
             # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
             # - tushare: Tushare Pro，需要2000积分，数据全面
             realtime_source_priority=cls._resolve_realtime_source_priority(),
-            tushare=parse_env_bool(os.getenv('TUSHARE_ENABLED'), False),
+            tushare=resolve_tushare_enabled_env(),
             akshare=parse_env_bool(os.getenv('AKSHARE'), True),
             yfinance=parse_env_bool(os.getenv('YFINANCE'), True),
             pytdx=parse_env_bool(os.getenv('PYTDX'), True),
@@ -1699,13 +1708,14 @@ class Config:
             return explicit
 
         tushare_token = os.getenv('TUSHARE_TOKEN', '').strip()
-        tushare_enabled = parse_env_bool(os.getenv('TUSHARE_ENABLED'), False)
+        tushare_enabled = resolve_tushare_enabled_env()
         if tushare_enabled and tushare_token:
             # Token configured but no explicit priority override
             # Prepend tushare so the paid source is tried first
             import logging
             logger = logging.getLogger(__name__)
-            resolved = f'tushare,{default_priority}'
+            parts = ["tushare", *default_priority.split(',')]
+            resolved = ','.join(dict.fromkeys(part.strip() for part in parts if part.strip()))
             logger.info(
                 f"TUSHARE_TOKEN detected, auto-injecting tushare into realtime priority: {resolved}"
             )

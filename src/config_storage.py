@@ -151,19 +151,37 @@ class ConfigStorage:
                 "description": "AKShare 开源金融数据接口"
             },
             {
-                "name": "yfinance",
-                "type": "yfinance",
+                "name": "FRED",
+                "type": "fred",
                 "enabled": True,
                 "priority": 2,
                 "retry_times": 2,
                 "timeout": 15,
-                "description": "Yahoo Finance 数据源"
+                "description": "FRED 宏观数据接口，用于美元指数代理、美债收益率、VIX 与 USD/CNY 日线"
+            },
+            {
+                "name": "Open ER API",
+                "type": "open_er_api",
+                "enabled": True,
+                "priority": 3,
+                "retry_times": 2,
+                "timeout": 15,
+                "description": "open.er-api.com 汇率接口，用于 USD/CNY 最新汇率"
+            },
+            {
+                "name": "yfinance",
+                "type": "yfinance",
+                "enabled": True,
+                "priority": 4,
+                "retry_times": 2,
+                "timeout": 15,
+                "description": "Yahoo Finance 数据源，主要用于美股、港股与未迁移的全球行情"
             },
             {
                 "name": "EFinance",
                 "type": "efinance",
                 "enabled": True,
-                "priority": 3,
+                "priority": 5,
                 "retry_times": 2,
                 "timeout": 15,
                 "description": "东方财富数据接口"
@@ -172,7 +190,7 @@ class ConfigStorage:
                 "name": "Tushare",
                 "type": "tushare",
                 "enabled": False,
-                "priority": 4,
+                "priority": 6,
                 "retry_times": 2,
                 "timeout": 15,
                 "description": "Tushare 专业金融数据接口（需 Token）"
@@ -182,9 +200,35 @@ class ConfigStorage:
     def get_data_sources(self) -> List[Dict[str, Any]]:
         """获取数据源配置（按优先级排序）"""
         sources = self._load_json(self.data_sources_file, self._default_data_sources())
+        sources = self._apply_runtime_source_overrides(sources)
         # 按优先级排序（数字越小优先级越高）
         sources.sort(key=lambda x: x.get("priority", 999))
         return sources
+
+    def _apply_runtime_source_overrides(self, sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Reflect runtime-enabled paid sources in the settings view."""
+        try:
+            from src.config import get_config
+
+            config = get_config()
+            tushare_enabled = bool(getattr(config, "tushare", False))
+            tushare_token_present = bool((getattr(config, "tushare_token", None) or "").strip())
+        except Exception:
+            return sources
+
+        if not (tushare_enabled and tushare_token_present):
+            return sources
+
+        patched: List[Dict[str, Any]] = []
+        for source in sources:
+            if source.get("type") == "tushare":
+                updated = dict(source)
+                updated["enabled"] = True
+                updated["priority"] = -1
+                patched.append(updated)
+            else:
+                patched.append(source)
+        return patched
 
     def get_enabled_sources(self) -> List[Dict[str, Any]]:
         """获取已启用的数据源列表"""

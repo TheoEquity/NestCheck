@@ -615,6 +615,100 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual([item["record_date"] for item in items], [yesterday.isoformat(), today.isoformat()])
         self.assertEqual(items[-1]["fund_nav"], 1.2)
 
+    def test_fund_history_trims_points_before_latest_reset(self) -> None:
+        from src.storage import PortfolioFundState, PortfolioFundValue
+
+        day1 = date.today() - timedelta(days=3)
+        day2 = date.today() - timedelta(days=2)
+        reset_day = date.today() - timedelta(days=1)
+        latest_day = date.today()
+        with self.db.get_session() as session:
+            session.add(PortfolioFundValue(record_date=day1, fund_nav=1.0, fund_shares=100.0, total_equity=100.0))
+            session.add(PortfolioFundValue(record_date=day2, fund_nav=1.2, fund_shares=100.0, total_equity=120.0))
+            session.add(PortfolioFundValue(record_date=reset_day, fund_nav=1.0, fund_shares=150.0, total_equity=150.0))
+            session.add(PortfolioFundValue(record_date=latest_day, fund_nav=1.1, fund_shares=150.0, total_equity=165.0))
+            session.add(PortfolioFundState(current_inception_date=reset_day))
+            session.commit()
+
+        resp = self.client.get("/api/v1/portfolio/fund-history")
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        items = resp.json()["items"]
+        self.assertEqual([item["record_date"] for item in items], [reset_day.isoformat(), latest_day.isoformat()])
+        self.assertEqual(items[0]["fund_nav"], 1.0)
+
+    def test_fund_status_uses_latest_reset_as_inception_date(self) -> None:
+        from src.storage import PortfolioFundState, PortfolioFundValue
+
+        original_day = date.today() - timedelta(days=4)
+        pre_reset_day = date.today() - timedelta(days=2)
+        reset_day = date.today() - timedelta(days=1)
+        latest_day = date.today()
+        with self.db.get_session() as session:
+            session.add(PortfolioFundValue(record_date=original_day, fund_nav=1.0, fund_shares=100.0, total_equity=100.0))
+            session.add(PortfolioFundValue(record_date=pre_reset_day, fund_nav=1.3, fund_shares=100.0, total_equity=130.0))
+            session.add(PortfolioFundValue(record_date=reset_day, fund_nav=1.0, fund_shares=160.0, total_equity=160.0))
+            session.add(PortfolioFundValue(record_date=latest_day, fund_nav=1.05, fund_shares=160.0, total_equity=168.0))
+            session.add(PortfolioFundState(current_inception_date=reset_day))
+            session.commit()
+
+        resp = self.client.get("/api/v1/portfolio/fund-status")
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        payload = resp.json()
+        self.assertEqual(payload["fund_inception_date"], reset_day.isoformat())
+        self.assertEqual(payload["latest_nav_date"], latest_day.isoformat())
+
+    def test_fund_reset_persists_current_inception_date(self) -> None:
+        from src.storage import PortfolioFundState
+
+        account_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "Main", "broker": "Demo", "market": "cn", "base_currency": "CNY"},
+        )
+        self.assertEqual(account_resp.status_code, 200)
+        cash_resp = self.client.post(
+            "/api/v1/portfolio/cash-ledger",
+            json={
+                "account_id": account_resp.json()["id"],
+                "event_date": date.today().isoformat(),
+                "direction": "in",
+                "amount": 10000,
+                "currency": "CNY",
+            },
+        )
+        self.assertEqual(cash_resp.status_code, 200, cash_resp.text)
+
+        resp = self.client.post("/api/v1/portfolio/fund-reset", json={})
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        with self.db.get_session() as session:
+            state = session.query(PortfolioFundState).first()
+        self.assertIsNotNone(state)
+        self.assertEqual(state.current_inception_date, date.today())
+
+    def test_fund_reset_allows_zero_total_equity(self) -> None:
+        from src.storage import PortfolioFundState, PortfolioFundValue
+
+        resp = self.client.post("/api/v1/portfolio/fund-reset", json={})
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        payload = resp.json()
+        self.assertEqual(payload["fund_inception_date"], date.today().isoformat())
+        self.assertEqual(payload["fund_nav"], 1.0)
+        self.assertEqual(payload["fund_shares"], 0.0)
+        self.assertEqual(payload["total_equity"], 0.0)
+        with self.db.get_session() as session:
+            state = session.query(PortfolioFundState).first()
+            latest = session.query(PortfolioFundValue).order_by(PortfolioFundValue.record_date.desc(), PortfolioFundValue.id.desc()).first()
+        self.assertIsNotNone(state)
+        self.assertEqual(state.current_inception_date, date.today())
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.record_date, date.today())
+        self.assertEqual(latest.fund_nav, 1.0)
+        self.assertEqual(latest.fund_shares, 0.0)
+        self.assertEqual(latest.total_equity, 0.0)
+
     def test_fund_status_uses_first_record_as_inception_date(self) -> None:
         from src.storage import PortfolioFundValue
 

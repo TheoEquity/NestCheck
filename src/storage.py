@@ -525,6 +525,16 @@ class PortfolioFundValue(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class PortfolioFundState(Base):
+    """Persistent state for the current internal fund lifecycle."""
+
+    __tablename__ = 'portfolio_fund_state'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    current_inception_date = Column(Date, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class PortfolioTrade(Base):
     """Executed trade events used as the source of truth for replay."""
 

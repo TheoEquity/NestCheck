@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, datetime
 from typing import Optional
 
@@ -91,6 +92,59 @@ def _daily_latest_fund_values(session, limit: Optional[int] = None) -> list:
     if limit is not None and limit > 0:
         daily_rows = daily_rows[-limit:]
     return daily_rows
+
+
+def _is_fund_reset_baseline(row) -> bool:
+    return (
+        row is not None
+        and math.isclose(float(row.fund_nav or 0.0), 1.0, abs_tol=1e-6)
+        and math.isclose(float(row.fund_shares or 0.0), float(row.total_equity or 0.0), abs_tol=1e-6)
+    )
+
+
+def _latest_fund_reset_date(session) -> Optional[date]:
+    from src.storage import PortfolioFundValue
+
+    rows = (
+        session.query(PortfolioFundValue)
+        .order_by(PortfolioFundValue.record_date.asc(), PortfolioFundValue.id.asc())
+        .all()
+    )
+    reset_date: Optional[date] = None
+    for row in rows:
+        if _is_fund_reset_baseline(row):
+            reset_date = row.record_date
+    return reset_date
+
+
+def _effective_daily_fund_values(session, limit: Optional[int] = None) -> list:
+    reset_date = _current_fund_inception_date(session)
+    rows = _daily_latest_fund_values(session)
+    if reset_date is not None:
+        rows = [row for row in rows if row.record_date >= reset_date]
+    if limit is not None and limit > 0:
+        rows = rows[-limit:]
+    return rows
+
+
+def _current_fund_inception_date(session) -> Optional[date]:
+    from src.storage import PortfolioFundState
+
+    state = session.query(PortfolioFundState).order_by(PortfolioFundState.id.desc()).first()
+    if state and state.current_inception_date is not None:
+        return state.current_inception_date
+    return _latest_fund_reset_date(session)
+
+
+def _upsert_fund_inception_date(session, inception_date: date) -> None:
+    from src.storage import PortfolioFundState
+
+    state = session.query(PortfolioFundState).order_by(PortfolioFundState.id.desc()).first()
+    if state is None:
+        state = PortfolioFundState(current_inception_date=inception_date)
+        session.add(state)
+        return
+    state.current_inception_date = inception_date
 
 
 def _bad_request(exc: Exception) -> HTTPException:
@@ -1133,16 +1187,13 @@ def get_fund_status() -> PortfolioFundStatusResponse:
 
     db = get_db()
     with db.get_session() as session:
+        effective_rows = _effective_daily_fund_values(session)
         latest_fv = (
             session.query(PortfolioFundValue)
             .order_by(PortfolioFundValue.record_date.desc(), PortfolioFundValue.id.desc())
             .first()
         )
-        first_fv = (
-            session.query(PortfolioFundValue)
-            .order_by(PortfolioFundValue.record_date.asc(), PortfolioFundValue.id.asc())
-            .first()
-        )
+        first_fv = effective_rows[0] if effective_rows else None
 
         service = PortfolioService()
         total_equity = round_money(service.get_management_total_equity())
@@ -1172,7 +1223,7 @@ def get_fund_history(
     db = get_db()
     try:
         with db.get_session() as session:
-            rows = _daily_latest_fund_values(session, limit=limit)
+            rows = _effective_daily_fund_values(session, limit=limit)
             return PortfolioFundHistoryResponse(
                 items=[
                     PortfolioFundHistoryItem(
@@ -1207,9 +1258,6 @@ def reset_fund(_payload: PortfolioFundResetRequest) -> PortfolioFundResetRespons
             service = PortfolioService()
             total_equity = round_money(service.get_management_total_equity())
 
-            if total_equity <= 0:
-                raise HTTPException(status_code=400, detail={"error": "bad_request", "message": "Total equity must be positive to reset fund"})
-
             today = date_type.today()
 
             PortfolioService._upsert_internal_fund_value(
@@ -1219,6 +1267,7 @@ def reset_fund(_payload: PortfolioFundResetRequest) -> PortfolioFundResetRespons
                 fund_nav=1.0,
                 total_equity=total_equity,
             )
+            _upsert_fund_inception_date(session, today)
             session.commit()
 
             return PortfolioFundResetResponse(

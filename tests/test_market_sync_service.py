@@ -23,6 +23,17 @@ class _ForbiddenFetcherManager:
         raise AssertionError(f"unexpected unified fetch for {code}")
 
 
+class _StubFetcherManager:
+    def __init__(self, df: pd.DataFrame, source: str = "yfinance") -> None:
+        self.df = df
+        self.source = source
+        self.calls = []
+
+    def get_daily_data(self, code, days=30):
+        self.calls.append((code, days))
+        return self.df.copy(), self.source
+
+
 class MarketSyncServiceTestCase(unittest.TestCase):
     def test_sync_market_data_uses_fred_for_supported_macro_codes(self) -> None:
         saved_manager = _StubStorageManager()
@@ -165,6 +176,40 @@ class MarketSyncServiceTestCase(unittest.TestCase):
         self.assertEqual(len(saved_manager.saved), 1)
         self.assertEqual(saved_manager.saved[0][1], "sh000001")
         self.assertEqual(saved_manager.saved[0][2], "akshare")
+
+    def test_sync_market_data_routes_dxy_through_yfinance_manager(self) -> None:
+        saved_manager = _StubStorageManager()
+        yf_df = pd.DataFrame(
+            [
+                {
+                    "date": pd.Timestamp("2026-06-15").date(),
+                    "open": 98.1,
+                    "high": 98.8,
+                    "low": 97.9,
+                    "close": 98.4,
+                    "volume": 1,
+                    "amount": 0,
+                    "pct_chg": 0.2,
+                }
+            ]
+        )
+        fetcher_manager = _StubFetcherManager(yf_df, "yfinance")
+
+        with patch.object(
+            market_sync_service,
+            "MARKET_INDICES",
+            [{"code": "DX-Y.NYB", "source": "yfinance", "name": "美元指数"}],
+        ), patch("src.services.market_sync_service.StorageManager", return_value=saved_manager), patch(
+            "src.services.market_sync_service.DataFetcherManager",
+            return_value=fetcher_manager,
+        ):
+            stats = market_sync_service.sync_market_data(days=30)
+
+        self.assertEqual(stats["success"], 1)
+        self.assertEqual(fetcher_manager.calls, [("DX-Y.NYB", 30)])
+        self.assertEqual(len(saved_manager.saved), 1)
+        self.assertEqual(saved_manager.saved[0][1], "DX-Y.NYB")
+        self.assertEqual(saved_manager.saved[0][2], "yfinance")
 
 
 if __name__ == "__main__":

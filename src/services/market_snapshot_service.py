@@ -39,7 +39,7 @@ MARKET_INDICES = [
     {"key": "dji", "label": "道琼斯", "code": "^DJI", "source": "fred"},
     {"key": "ixic", "label": "纳斯达克", "code": "^IXIC", "source": "fred"},
     {"key": "gspc", "label": "标普500", "code": "^GSPC", "source": "fred"},
-    {"key": "dxy", "label": "美元指数", "code": "DX-Y.NYB", "source": "fred"},
+    {"key": "dxy", "label": "美元指数", "code": "DX-Y.NYB", "source": "yfinance"},
     {"key": "usdcny", "label": "美元兑人民币", "code": "USDCNY=X", "source": "fred"},
     {"key": "tnx", "label": "10年期美债", "code": "^TNX", "source": "fred"},
 ]

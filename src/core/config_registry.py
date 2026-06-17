@@ -382,7 +382,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "YFINANCE": {
         "title": "YFinance",
-        "description": "是否启用 Yahoo Finance 数据源（主要提供美股个股、港股与未迁移的全球行情；道琼斯、纳指、标普500、美元指数、USD/CNY、10 年美债与 VIX 链路已优先改走 FRED 或 open.er-api.com）。",
+        "description": "是否启用 Yahoo Finance 数据源（主要提供美股个股、港股、DXY 美元指数与未迁移的全球行情；道琼斯、纳指、标普500、USD/CNY、10 年美债与 VIX 链路已优先改走 FRED 或 open.er-api.com）。",
         "category": "data_source",
         "data_type": "boolean",
         "ui_control": "switch",

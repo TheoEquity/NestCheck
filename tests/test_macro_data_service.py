@@ -75,6 +75,9 @@ class MacroDataServiceTestCase(unittest.TestCase):
         self.assertEqual(kwargs["params"]["cosd"], "2026-06-10")
         self.assertNotIn("api_key", kwargs["params"])
 
+    def test_dxy_is_not_mapped_to_fred_series(self) -> None:
+        self.assertFalse(macro_data_service.supports_fred_code("DX-Y.NYB"))
+
     def test_fetch_latest_usd_cny_rate_reads_open_er_payload(self) -> None:
         payload = {
             "result": "success",

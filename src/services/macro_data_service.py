@@ -17,7 +17,6 @@ FRED_SERIES_BY_CODE: Dict[str, str] = {
     "^DJI": "DJIA",
     "^IXIC": "NASDAQCOM",
     "^GSPC": "SP500",
-    "DX-Y.NYB": "DTWEXBGS",
     "USDCNY=X": "DEXCHUS",
     "^TNX": "DGS10",
     "us_vix": "VIXCLS",

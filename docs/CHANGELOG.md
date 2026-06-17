@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 市场指数、宏观与汇率链路优先改用 FRED 和 `open.er-api.com` 获取 `DJIA`、`NASDAQCOM`、`SP500`、`DGS10`、`VIXCLS`、`DTWEXBGS` 与 `USD/CNY`，降低个人电脑长期运行时的 Yahoo Finance 限流影响。
 - [修复] FRED 链路改用免鉴权的 `fredgraph.csv` 下载接口，避免个人电脑在未配置 FRED API key 时同步市场指数与宏观数据返回 400。
 - [修复] FRED 宏观链路新增有限重试并统一风险面板的 `^TNX` 主数据路由，降低个人电脑访问 `fred.stlouisfed.org` 抖动时长期落入保底源的概率。
+- [修复] 首页 12 指标中的“美元指数”改回真实 `DXY` 行情链路，移除此前误映射到 FRED `DTWEXBGS` 广义美元指数导致数值显示在 `119` 区间的问题。
 - [修复] Windows 安装脚本与迁移打包源 `.env` 统一固定 `DATABASE_PATH=./data/stock_analysis.db`，避免把工作区 `/workspace/...` 路径带进个人电脑后导致恢复数据不生效。
 - [修复] 股票自动补全索引生成缺少 `pypinyin` 时改为直接失败，避免写出缺失拼音字段的降级索引。
 - [修复] 归一腾讯实时行情成交量为股口径，避免量能变化倍数被放大并误导分析报告。

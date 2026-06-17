@@ -157,7 +157,7 @@ class ConfigStorage:
                 "priority": 2,
                 "retry_times": 2,
                 "timeout": 15,
-                "description": "FRED 宏观数据接口，用于美元指数代理、美债收益率、VIX 与 USD/CNY 日线"
+                "description": "FRED 宏观数据接口，用于美债收益率、VIX 与 USD/CNY 日线；DXY 美元指数仍走独立市场行情源"
             },
             {
                 "name": "Open ER API",

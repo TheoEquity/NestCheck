@@ -29,6 +29,30 @@ CACHE_DIR.mkdir(exist_ok=True)
 CACHE_EXPIRY_HOURS = 12  # 缓存过期时间（小时）
 
 
+def _load_latest_stock_daily_record(*codes: str) -> Optional[Dict[str, Any]]:
+    from sqlalchemy import desc, select
+
+    from src.storage import StockDaily, get_db
+
+    db = get_db()
+    for code in codes:
+        with db.get_session() as session:
+            row = session.execute(
+                select(StockDaily)
+                .where(StockDaily.code == code)
+                .order_by(desc(StockDaily.date), desc(StockDaily.updated_at))
+                .limit(1)
+            ).scalar_one_or_none()
+        if row is not None and row.close is not None:
+            return {
+                "code": code,
+                "value": float(row.close),
+                "date": row.date.isoformat() if row.date else None,
+                "source": row.data_source or "database",
+            }
+    return None
+
+
 def _load_cache(name: str) -> Optional[Dict[str, Any]]:
     
     cache_file = CACHE_DIR / f"{name}.json"
@@ -70,11 +94,9 @@ def _dollar_index() -> Dict[str, Any]:
     
     # 优先从数据库读取
     try:
-        from src.storage import get_db
-        df = get_db().get_daily_history_df("USDCNY=X", days=10)
-        if not df.empty:
-            latest = df.iloc[-1]
-            usd_cny = float(latest['close'])
+        latest_record = _load_latest_stock_daily_record("USDCNY=X")
+        if latest_record is not None:
+            usd_cny = float(latest_record['value'])
             
             if usd_cny > 7.3:
                 status = "偏强"
@@ -98,7 +120,8 @@ def _dollar_index() -> Dict[str, Any]:
                 "status": status,
                 "badge": badge,
                 "description": description,
-                "date": str(latest.get('date', datetime.now().strftime("%Y-%m-%d")))
+                "date": str(latest_record.get('date', datetime.now().strftime("%Y-%m-%d"))),
+                "source": str(latest_record.get("source") or "database"),
             }
             _save_cache("dollar", result)
             return result
@@ -134,7 +157,8 @@ def _dollar_index() -> Dict[str, Any]:
             "status": status,
             "badge": badge,
             "description": description,
-            "date": str(latest_quote.get("date", datetime.now().strftime("%Y-%m-%d")))
+            "date": str(latest_quote.get("date", datetime.now().strftime("%Y-%m-%d"))),
+            "source": str(latest_quote.get("source") or "network_fallback"),
         }
         _save_cache("dollar", result)
         return result
@@ -154,34 +178,49 @@ def _bond_spread() -> Dict[str, Any]:
     us_10y = None
     cn_10y = None
     date = None
+    source = None
     
     # 优先从数据库读取
     try:
-        from src.storage import get_db
-        
-        df_cn = get_db().get_daily_history_df("bond_cn_10y", days=10)
-        df_us = get_db().get_daily_history_df("bond_us_10y", days=10)
-        
-        if not df_cn.empty and not df_us.empty:
-            cn_10y = float(df_cn.iloc[-1]['close'])
-            us_10y = float(df_us.iloc[-1]['close'])
-            date = str(df_cn.iloc[-1].get('date', datetime.now().strftime("%Y-%m-%d")))
+        cn_record = _load_latest_stock_daily_record("bond_cn_10y")
+        us_record = _load_latest_stock_daily_record("^TNX", "bond_us_10y")
+
+        if cn_record is not None:
+            cn_10y = float(cn_record["value"])
+            date = str(cn_record.get("date") or datetime.now().strftime("%Y-%m-%d"))
+        if us_record is not None:
+            us_10y = float(us_record["value"])
+            date = str(us_record.get("date") or date or datetime.now().strftime("%Y-%m-%d"))
+            source = str(us_record.get("source") or "database")
     except Exception as e:
         logger.warning(f"读取数据库债券数据失败: {e}")
     
     # 降级：从网络现拉
     if us_10y is None:
         try:
-            logger.info("[Risk] 利差降级现拉...")
+            quote = fetch_supported_latest_quote("^TNX")
+            if quote is not None:
+                us_10y = float(quote["value"])
+                date = str(quote.get("date") or datetime.now().strftime("%Y-%m-%d"))
+                source = str(quote.get("source") or "network_fallback")
+        except Exception as e:
+            logger.warning(f"FRED 拉取美国 10Y 失败: {e}")
+
+    if us_10y is None or cn_10y is None:
+        try:
+            logger.info("[Risk] 利差降级现拉 AkShare...")
             df = ak.bond_zh_us_rate()
-            
+
             for i in range(len(df)-1, max(0, len(df)-10), -1):
                 row = df.iloc[i]
-                val = row.get('美国国债收益率10年')
-                if str(val) != 'nan' and val is not None:
-                    us_10y = float(val)
-                    cn_10y = float(row['中国国债收益率10年'])
+                us_val = row.get('美国国债收益率10年')
+                cn_val = row.get('中国国债收益率10年')
+                if str(us_val) != 'nan' and us_val is not None and str(cn_val) != 'nan' and cn_val is not None:
+                    us_10y = float(us_val)
+                    cn_10y = float(cn_val)
                     date = str(row.get('日期', datetime.now().strftime("%Y-%m-%d")))
+                    if source is None:
+                        source = "akshare"
                     break
         except Exception as e:
             logger.warning(f"网络拉取债券数据失败: {e}")
@@ -211,7 +250,8 @@ def _bond_spread() -> Dict[str, Any]:
         "status": status,
         "badge": badge,
         "description": description,
-        "date": date
+        "date": date,
+        "source": source or "database",
     }
     _save_cache("bond", result)
     return result
@@ -336,7 +376,8 @@ def _us_vix() -> Dict[str, Any]:
             "status": status,
             "badge": badge,
             "description": description,
-            "date": str(df.iloc[-1].get('date', datetime.now().strftime("%Y-%m-%d")))
+            "date": str(df.iloc[-1].get('date', datetime.now().strftime("%Y-%m-%d"))),
+            "source": "database",
         }
         _save_cache("us_vix", result)
         return result

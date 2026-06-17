@@ -156,6 +156,7 @@ if (-not (Test-Path $envPath)) {
 Set-EnvValue -Path $envPath -Key "ADMIN_AUTH_ENABLED" -Value "true"
 Set-EnvValue -Path $envPath -Key "API_PORT" -Value $Port
 Set-EnvValue -Path $envPath -Key "WEBUI_HOST" -Value "127.0.0.1"
+Set-EnvValue -Path $envPath -Key "DATABASE_PATH" -Value "./data/stock_analysis.db"
 
 Write-Step "Preparing persistent directories"
 foreach ($dir in @("data", "logs", "reports", "strategies")) {

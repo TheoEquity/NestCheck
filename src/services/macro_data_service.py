@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from typing import Dict, List, Optional, Tuple
@@ -26,6 +27,29 @@ FRED_SERIES_BY_CODE: Dict[str, str] = {
 FRED_GRAPH_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 OPEN_ER_LATEST_USD_URL = "https://open.er-api.com/v6/latest/USD"
 REQUEST_TIMEOUT_SECONDS = 10
+REQUEST_ATTEMPTS = 3
+
+
+def _request_with_retries(url: str, *, params: Optional[Dict[str, object]] = None) -> requests.Response:
+    last_error: Optional[Exception] = None
+    for attempt in range(1, REQUEST_ATTEMPTS + 1):
+        timeout = REQUEST_TIMEOUT_SECONDS + (attempt - 1) * 5
+        try:
+            return requests.get(url, params=params, timeout=timeout)
+        except requests.RequestException as exc:
+            last_error = exc
+            logger.warning(
+                "Request failed for %s on attempt %s/%s: %s",
+                url,
+                attempt,
+                REQUEST_ATTEMPTS,
+                exc,
+            )
+            if attempt < REQUEST_ATTEMPTS:
+                time.sleep(0.5 * attempt)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"request failed without exception: {url}")
 
 
 def supports_fred_code(code: str) -> bool:
@@ -100,7 +124,7 @@ def fetch_fred_observations(code: str, *, start_date: Optional[date] = None) -> 
     params = {"id": series_id}
     if start_date is not None:
         params["cosd"] = start_date.isoformat()
-    response = requests.get(FRED_GRAPH_CSV_URL, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+    response = _request_with_retries(FRED_GRAPH_CSV_URL, params=params)
     response.raise_for_status()
     return _parse_fred_csv(code, response.text)
 
@@ -146,7 +170,7 @@ def fetch_fred_latest_quote(code: str) -> Optional[Dict[str, object]]:
 
 
 def fetch_latest_usd_cny_rate() -> Optional[Dict[str, object]]:
-    response = requests.get(OPEN_ER_LATEST_USD_URL, timeout=REQUEST_TIMEOUT_SECONDS)
+    response = _request_with_retries(OPEN_ER_LATEST_USD_URL)
     response.raise_for_status()
     payload = response.json()
     rates = payload.get("rates") or {}

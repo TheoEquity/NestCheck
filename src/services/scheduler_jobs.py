@@ -69,18 +69,24 @@ def run_daily_market_cache_refresh() -> Dict[str, Any]:
             logger.warning("us_vix failed: %s", exc)
             
         try:
+            us_quote = fetch_supported_latest_quote("^TNX")
+            if us_quote is not None:
+                with get_db().get_session() as s:
+                    s.query(StockDaily).filter_by(code="^TNX", date=today).delete()
+                    s.query(StockDaily).filter_by(code="bond_us_10y", date=today).delete()
+                    s.add(StockDaily(code="^TNX", date=today, close=float(us_quote["value"]), data_source=str(us_quote.get("source") or "fred"), updated_at=datetime.now()))
+                    s.add(StockDaily(code="bond_us_10y", date=today, close=float(us_quote["value"]), data_source=str(us_quote.get("source") or "fred"), updated_at=datetime.now()))
+                    s.commit()
+
             df = ak.bond_zh_us_rate()
             if not df.empty:
                 for i in range(len(df) - 1, max(0, len(df) - 10), -1):
                     row = df.iloc[i]
-                    us_val = row.get("美国国债收益率10年")
                     cn_val = row.get("中国国债收益率10年")
-                    if str(us_val) != "nan" and us_val is not None and str(cn_val) != "nan" and cn_val is not None:
+                    if str(cn_val) != "nan" and cn_val is not None:
                         with get_db().get_session() as s:
-                            s.query(StockDaily).filter_by(code="bond_us_10y", date=today).delete()
                             s.query(StockDaily).filter_by(code="bond_cn_10y", date=today).delete()
                             s.add(StockDaily(code="bond_cn_10y", date=today, close=float(cn_val), data_source="akshare", updated_at=datetime.now()))
-                            s.add(StockDaily(code="bond_us_10y", date=today, close=float(us_val), data_source="akshare", updated_at=datetime.now()))
                             s.commit()
                         break
         except Exception as exc:

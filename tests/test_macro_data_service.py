@@ -134,6 +134,22 @@ class MacroDataServiceTestCase(unittest.TestCase):
         mocked_fallback.assert_called_once_with("^GSPC")
         self.assertEqual(quote, fallback_quote)
 
+    def test_fetch_fred_latest_quote_retries_before_success(self) -> None:
+        csv_text = "observation_date,DGS10\n2026-06-10,4.30\n2026-06-11,4.35\n"
+        with patch(
+            "src.services.macro_data_service.requests.get",
+            side_effect=[
+                macro_data_service.requests.ReadTimeout("timeout-1"),
+                macro_data_service.requests.ReadTimeout("timeout-2"),
+                _StubResponse(text=csv_text),
+            ],
+        ) as mocked_get, patch("src.services.macro_data_service.time.sleep"):
+            quote = macro_data_service.fetch_fred_latest_quote("^TNX")
+
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote["source"], "fred")
+        self.assertEqual(mocked_get.call_count, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

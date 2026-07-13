@@ -291,8 +291,8 @@ def refresh_trend_realtime_quotes() -> Dict[str, Any]:
                 raise ValueError("empty realtime price")
             entry = data.setdefault(key, {"label": item["label"], "code": code})
             entry["close"] = price_val
-            entry["daily_close"] = round(price_val, 2)
-            entry["daily_pct_chg"] = round(change_pct_val, 2) if change_pct_val is not None else None
+            entry["daily_close"] = price_val
+            entry["daily_pct_chg"] = change_pct_val if change_pct_val is not None else None
             _sync_current_week_quote(entry, price_val)
             refreshed += 1
         except Exception as exc:

@@ -324,14 +324,14 @@ def get_market_trend_data() -> Dict[str, Any]:
             date_str = date_val.strftime("%Y-%m-%d") if hasattr(date_val, "strftime") else str(date_val)
             weekly_data_list.append({
                 "date": date_str,
-                "open": round(float(row.get("open", 0)), 2),
-                "high": round(float(row.get("high", 0)), 2),
-                "low": round(float(row.get("low", 0)), 2),
-                "close": round(float(row.get("close", 0)), 2),
+                "open": float(row.get("open", 0)),
+                "high": float(row.get("high", 0)),
+                "low": float(row.get("low", 0)),
+                "close": float(row.get("close", 0)),
                 "volume": float(row.get("volume", 0)),
-                "ma10": round(float(row.get("ma10", 0)), 2) if pd.notna(row.get("ma10")) else None,
-                "ma20": round(float(row.get("ma20", 0)), 2) if pd.notna(row.get("ma20")) else None,
-                "ma50": round(float(row.get("ma50", 0)), 2) if pd.notna(row.get("ma50")) else None,
+                "ma10": float(row.get("ma10", 0)) if pd.notna(row.get("ma10")) else None,
+                "ma20": float(row.get("ma20", 0)) if pd.notna(row.get("ma20")) else None,
+                "ma50": float(row.get("ma50", 0)) if pd.notna(row.get("ma50")) else None,
             })
         
         result_data[key] = {

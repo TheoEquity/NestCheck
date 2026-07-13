@@ -1,10 +1,11 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Settings, Plus, Trash2, X } from 'lucide-react';
+import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { portfolioApi } from '../api/portfolio';
 import { watchlistApi } from '../api/watchlist';
 import { marketApi, type SectorEtfConfig, type SectorEtfDashboardResponse } from '../api/market';
-import { getParsedApiError, type ParsedApiError } from '../api/error';
+import { getAssetPriceDecimals } from './assetsShared';
 import { ApiErrorAlert, Badge, Button, Card, Input, Select, Textarea } from '../components/common';
 import type { WatchlistAssetCategory, WatchlistItem, WatchlistItemInput } from '../types/watchlist';
 import type { AssetCategoryDefinitionItem } from '../types/portfolio';
@@ -43,9 +44,9 @@ function splitTags(value: string): string[] {
   return value.split(',').map((tag) => tag.trim()).filter(Boolean);
 }
 
-function formatPrice(value?: number | null, assetCategory?: string | null): string {
+function formatPrice(value?: number | null, position?: { symbol?: string | null; assetCategory?: string | null; assetSubcategory?: string | null }): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  const precision = String(assetCategory || '').toLowerCase() === 'fund' ? 4 : 2;
+  const precision = position ? getAssetPriceDecimals(position) : 2;
   return Number(value).toFixed(precision);
 }
 
@@ -608,7 +609,7 @@ function InstrumentBlock({
       </div>
       <div className="mt-0.5 text-[11px] text-muted-text">{displaySymbol}</div>
       <div className="mt-2 flex items-baseline gap-2 text-[11px]">
-        <span className="font-mono text-base font-semibold text-foreground">{formatPrice(item.latestPrice, item.assetCategory)}</span>
+          <span className="font-mono text-base font-semibold text-foreground">{formatPrice(item.latestPrice, { symbol: item.symbol, assetCategory: item.assetCategory, assetSubcategory: item.assetSubcategory })}</span>
         <span className={`font-mono font-semibold ${changeTone.className}`}>{formatChangePct(item.latestChangePct)}</span>
       </div>
       <div className="mt-2 flex gap-1">

@@ -564,6 +564,7 @@ def adjust_position(
             quantity=body.quantity,
             avg_cost=body.avg_cost,
             last_price=body.last_price,
+            asset_risk_class=body.asset_risk_class,
         )
         return PortfolioPositionAdjustResponse(**data)
     except ValueError as exc:

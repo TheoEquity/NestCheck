@@ -245,8 +245,10 @@ const AssetDashboardPage: React.FC = () => {
               {/* 当前组 3 个指标 */}
               <div className="grid min-h-[238px] grid-cols-3 gap-6">
                 {currentTrendItems.map((item) => {
-                  const dailyClose = item.dailyClose;
-                  const dailyPct = item.dailyPctChg;
+                    const dailyClose = item.dailyClose;
+                      const dailyPct = item.dailyPctChg;
+                      const isForex = item.key === 'dxy' || item.key === 'usdcny' || item.key === 'tnx';
+                      const priceDecimals = isForex ? 4 : 2;
 
                   return (
                     <div key={item.key} className="flex h-[238px] flex-col gap-1">
@@ -255,7 +257,7 @@ const AssetDashboardPage: React.FC = () => {
                       {/* 现价 + 涨跌幅 */}
                       <div className="relative h-8 flex items-center justify-center">
                         <div className="text-xl font-bold text-foreground tabular-nums">
-                          {(dailyClose ?? item.close)?.toFixed(2)}
+                          {(dailyClose ?? item.close)?.toFixed(priceDecimals)}
                         </div>
                         <div className={`absolute right-0 text-sm font-semibold tabular-nums ${dailyPct != null && dailyPct >= 0 ? 'text-[#ef4444]' : 'text-[#22c55e]'}`}>
                           {(dailyPct ?? 0) >= 0 ? '+' : ''}{(dailyPct ?? 0).toFixed(2)}%

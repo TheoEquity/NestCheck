@@ -5,6 +5,7 @@ import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { portfolioApi } from '../api/portfolio';
 import { ApiErrorAlert, AppPage, Button, Card, ConfirmDialog, InlineAlert, PageHeader } from '../components/common';
 import { toDateInputValue } from '../utils/format';
+import { getAssetPriceDecimals } from './assetsShared';
 import type {
   PortfolioAccountItem,
   PortfolioCashLedgerListItem,
@@ -73,6 +74,11 @@ const normalizeCurrencyCode = (value?: string | null): CurrencyCode => {
 const getTodayIso = () => toDateInputValue(new Date());
 
 const formatNumber = (value: number) => Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 4 });
+
+const formatTradePrice = (item: { price: number; symbol?: string | null; assetCategory?: string | null; assetSubcategory?: string | null }): string => {
+  const decimals = getAssetPriceDecimals({ symbol: item.symbol, assetCategory: item.assetCategory, assetSubcategory: item.assetSubcategory });
+  return Number(item.price || 0).toLocaleString('zh-CN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
 
 const AssetEventsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -340,7 +346,7 @@ const AssetEventsPage: React.FC = () => {
         name: item.name || positionNameByAccountSymbol.get(`${item.accountId}:${item.symbol}`) || '--',
         direction: item.side === 'buy' ? '买入' : '卖出',
         amount: formatNumber(item.quantity),
-        price: formatNumber(item.price),
+        price: formatTradePrice(item),
         note: item.note || (item.side === 'sell' ? `本单盈利 ${formatNumber(item.realizedPnl || 0)}` : '买入建仓/加仓'),
       });
     });

@@ -87,7 +87,7 @@ def round_asset_price(
         return round(float(value or 0.0), MONEY_DECIMALS)
     if is_exchange_traded_fund(symbol=symbol, asset_category=asset_category, asset_subcategory=asset_subcategory):
         return round(float(value or 0.0), EXCHANGE_FUND_PRICE_DECIMALS)
-    if category == "fund":
+    if category == "fund" or category == "wealth":
         return round(float(value or 0.0), OPEN_FUND_NAV_DECIMALS)
     return round(float(value or 0.0), STOCK_PRICE_DECIMALS)
 
@@ -2357,8 +2357,9 @@ class PortfolioService:
         quantity: Optional[float] = None,
         avg_cost: Optional[float] = None,
         last_price: Optional[float] = None,
+        asset_risk_class: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Manually adjust a single position's quantity, avg_cost, or last_price."""
+        """Manually adjust a single position's quantity, avg_cost, last_price, or asset_risk_class."""
         fields: Dict[str, Any] = {}
         if quantity is not None:
             fields["quantity"] = float(quantity)
@@ -2366,9 +2367,11 @@ class PortfolioService:
             fields["avg_cost"] = float(avg_cost)
         if last_price is not None:
             fields["last_price"] = float(last_price)
+        if asset_risk_class is not None:
+            fields["asset_risk_class"] = asset_risk_class
 
         if not fields:
-            raise ValueError("At least one of quantity, avg_cost, last_price must be provided")
+            raise ValueError("At least one of quantity, avg_cost, last_price, asset_risk_class must be provided")
 
         from src.storage import PortfolioPosition
 

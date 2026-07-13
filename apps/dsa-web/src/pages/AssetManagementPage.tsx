@@ -24,6 +24,7 @@ import { computeFundDailyNavChange } from '../utils/portfolioFundNav';
 
 const FILTER_CLASS = 'input-surface input-focus-glow h-9 rounded-lg border bg-transparent px-3 text-sm';
 const PIE_COLORS = ['#0f766e', '#2563eb', '#7c3aed', '#ea580c', '#dc2626', '#64748b'];
+const RISK_CLASS_OPTIONS = ['R1', 'R2', 'R3', 'R4', 'R5'];
 
 const getRiskBadgeVariant = (level: string) => {
   if (level === 'R5' || level === 'R4' || level === '高') return 'danger';
@@ -77,7 +78,7 @@ const computeDailyNavChange = (items: PortfolioFundHistoryItem[]): number | null
 type AdjustModalProps = {
   position: PortfolioPositionRecordItem | null;
   onClose: () => void;
-  onConfirm: (quantity: number, avgCost: number, lastPrice: number) => void;
+  onConfirm: (quantity: number, avgCost: number, lastPrice: number, assetRiskClass: string) => void;
   isSubmitting: boolean;
 };
 
@@ -104,6 +105,7 @@ const AdjustModalContent: React.FC<{
   const [quantity, setQuantity] = useState(() => String(position.quantity || ''));
   const [avgCost, setAvgCost] = useState(() => String(position.avgCost || ''));
   const [lastPrice, setLastPrice] = useState(() => String(position.lastPrice || ''));
+  const [riskClass, setRiskClass] = useState(() => normalizeAssetRiskClass(position.assetRiskClass || ''));
 
   const displaySymbol = (() => {
     return `${position.symbol}.${position.market.toUpperCase()}`;
@@ -171,6 +173,16 @@ const AdjustModalContent: React.FC<{
               {formatMoney(Number(quantity || 0) * Number(lastPrice || 0), position.currency)}
             </div>
           </div>
+          <div>
+            <label className="mb-1 block text-xs text-secondary-text">风险等级</label>
+            <select
+              className="input-surface input-focus-glow h-10 w-full rounded-lg border bg-white px-3 text-sm"
+              value={riskClass}
+              onChange={(e) => setRiskClass(e.target.value)}
+            >
+              {RISK_CLASS_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+          </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -189,7 +201,7 @@ const AdjustModalContent: React.FC<{
               const cost = parseFloat(avgCost);
               const price = parseFloat(lastPrice);
               if (isNaN(qty) || isNaN(cost) || isNaN(price)) return;
-              onConfirm(qty, cost, price);
+              onConfirm(qty, cost, price, riskClass);
             }}
             disabled={isSubmitting}
           >
@@ -311,6 +323,7 @@ const AssetManagementPage: React.FC = () => {
 
   const filteredPositions = useMemo(() => {
     const rows = positions.filter((row) => {
+      if (Number(row.quantity || 0) === 0) return false;
       if (accountFilter !== '全部' && row.accountName !== accountFilter) return false;
       if (categoryFilter !== '全部' && localizeAssetCategory(row.assetCategory) !== categoryFilter) return false;
       if (riskFilter !== '全部' && (normalizeAssetRiskClass(row.assetRiskClass) || getPositionRiskLevel(row)) !== riskFilter) return false;
@@ -476,14 +489,15 @@ const AssetManagementPage: React.FC = () => {
     return sortDirection === 'desc' ? '↓' : '↑';
   };
 
-  const handleAdjustConfirm = async (quantity: number, avgCost: number, lastPrice: number) => {
+  const handleAdjustConfirm = async (quantity: number, avgCost: number, lastPrice: number, assetRiskClass: string) => {
     if (!adjustTarget) return;
     setIsAdjusting(true);
     try {
       await portfolioApi.adjustPosition(adjustTarget.id, { 
         quantity, 
         avg_cost: avgCost,
-        last_price: lastPrice 
+        last_price: lastPrice,
+        asset_risk_class: assetRiskClass || undefined,
       });
       await reload();
       setAdjustTarget(null);
@@ -660,7 +674,7 @@ const AssetManagementPage: React.FC = () => {
                           {normalizeAssetRiskClass(row.assetRiskClass)}
                         </Badge>
                       </td>
-                      <td className="px-1 py-1.5 text-right">{Number(row.quantity || 0).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}</td>
+                      <td className="px-1 py-1.5 text-right">{Number(row.quantity || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-1 py-1.5 text-right text-[11px]">{row.currency}</td>
                       <td className="px-3 py-1.5 text-right" style={{minWidth: '112px'}}>{formatPrice(row.avgCost, row.currency, row)}</td>
                       <td className="px-2 py-1.5 text-right">

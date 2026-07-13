@@ -360,6 +360,7 @@ class PortfolioPositionAdjustRequest(BaseModel):
     quantity: Optional[float] = None
     avg_cost: Optional[float] = None
     last_price: Optional[float] = None
+    asset_risk_class: Optional[str] = None
 
 
 class PortfolioPositionAdjustResponse(BaseModel):

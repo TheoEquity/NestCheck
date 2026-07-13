@@ -125,6 +125,8 @@ class PortfolioRepository:
                 row.avg_cost = float(fields["avg_cost"])
             if "last_price" in fields and fields["last_price"] is not None:
                 row.last_price = float(fields["last_price"])
+            if "asset_risk_class" in fields and fields["asset_risk_class"] is not None:
+                row.asset_risk_class = str(fields["asset_risk_class"])
             if "realized_pnl_base" in fields and fields["realized_pnl_base"] is not None:
                 row.realized_pnl_base = float(fields["realized_pnl_base"])
             qty = float(row.quantity or 0)

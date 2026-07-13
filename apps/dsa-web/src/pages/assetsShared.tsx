@@ -28,7 +28,7 @@ export function getAssetPriceDecimals(position: { symbol?: string | null; assetC
     || subcategory.includes('lof')
     || /^(510|511|512|513|515|516|517|518|159|160|161|162|163|164|165)/.test(symbol);
   if (isExchangeFund) return 3;
-  if (category === 'fund') return 4;
+  if (category === 'fund' || category === 'wealth') return 4;
   return 2;
 }
 

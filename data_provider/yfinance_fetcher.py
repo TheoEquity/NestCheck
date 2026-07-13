@@ -662,6 +662,10 @@ class YfinanceFetcher(BaseFetcher):
         - 外汇：DX-Y.NYB (美元指数), USDCNY=X (美元/人民币)
         - 债券：^TNX (10 年期美债), ^TYX (30 年期美债)
         
+        yfinance 失败时自动降级到国内数据源：
+        - 美元指数 (DX-Y.NYB) → 新浪财经 hf_DX
+        - 美元兑人民币 (USDCNY=X) → ak.fx_spot_quote
+        
         Args:
             stock_code: 外汇或债券代码
             
@@ -672,6 +676,17 @@ class YfinanceFetcher(BaseFetcher):
         
         symbol = stock_code.strip()
         logger.debug(f"[Yfinance] 获取外汇/债券 {symbol} 实时行情")
+        
+        # 先尝试 yfinance
+        quote = self._get_forex_or_bond_quote_yf(symbol)
+        if quote is not None:
+            return quote
+        
+        # yfinance 失败，尝试国内数据源
+        return self._get_forex_or_bond_quote_domestic(symbol)
+    
+    def _get_forex_or_bond_quote_yf(self, symbol: str) -> Optional[UnifiedRealtimeQuote]:
+        import yfinance as yf
         
         try:
             ticker = yf.Ticker(symbol)
@@ -697,11 +712,107 @@ class YfinanceFetcher(BaseFetcher):
                 low=float(info.get('dayLow', 0)) or None,
                 pre_close=prev_close,
                 volume=int(info.get('regularMarketVolume', 0)) or None,
-                amount=None,  # 外汇/债券无成交额
+                amount=None,
             )
             
         except Exception as e:
-            logger.warning(f"[Yfinance] 获取外汇/债券 {symbol} 失败：{e}")
+            logger.info(f"[Yfinance] 获取外汇/债券 {symbol} 失败，尝试国内数据源: {e}")
+            return None
+    
+    @staticmethod
+    def _get_forex_or_bond_quote_domestic(symbol: str) -> Optional[UnifiedRealtimeQuote]:
+        """国内数据源兜底：新浪外汇期货 (USD index) 和 ak.fx_spot_quote (USDCNY)."""
+        symbol_upper = symbol.strip().upper()
+        
+        if 'DX-Y.NYB' in symbol_upper or symbol_upper == 'DX-Y.NYB':
+            return YfinanceFetcher._get_usd_index_sina()
+        
+        if 'USDCNY' in symbol_upper or symbol_upper == 'USDCNY=X':
+            return YfinanceFetcher._get_usdcny_akshare()
+        
+        logger.info(f"[Yfinance] {symbol} 无国内数据源兜底，跳过")
+        return None
+    
+    @staticmethod
+    def _get_usd_index_sina() -> Optional[UnifiedRealtimeQuote]:
+        """从新浪财经获取美元指数实时行情."""
+        try:
+            import requests
+            
+            url = "https://hq.sinajs.cn/list=hf_DX"
+            headers = {
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Referer": "https://finance.sina.com.cn/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            text = resp.text
+            
+            if not text or text.strip() == 'Forbidden' or 'hf_DX' not in text:
+                logger.debug(f"[美元指数] 新浪接口返回异常: {text[:100]}")
+                return None
+            
+            data = text.split('"')[1].split(",") if '"' in text else []
+            if len(data) < 4:
+                return None
+            
+            name = data[0]
+            price = float(data[1]) if data[1] else 0.0
+            prev_close = float(data[2]) if len(data) > 2 and data[2] else price
+            change_pct_str = (data[3] or "0").replace("%", "")
+            change_pct = float(change_pct_str) if change_pct_str else 0.0
+            change_amount = price - prev_close if prev_close else 0.0
+            open_price = float(data[4]) if len(data) > 4 and data[4] else None
+            high = float(data[5]) if len(data) > 5 and data[5] else None
+            low = float(data[6]) if len(data) > 6 and data[6] else None
+            
+            logger.info(f"[美元指数] 新浪兜底成功: price={price}, change_pct={change_pct}%")
+            return UnifiedRealtimeQuote(
+                code="DX-Y.NYB",
+                name=name or "美元指数",
+                price=price,
+                change_amount=change_amount,
+                change_pct=change_pct,
+                open_price=open_price,
+                high=high,
+                low=low,
+                pre_close=prev_close,
+                volume=None,
+                amount=None,
+            )
+        except Exception as e:
+            logger.info(f"[美元指数] 新浪兜底失败: {e}")
+            return None
+    
+    @staticmethod
+    def _get_usdcny_akshare() -> Optional[UnifiedRealtimeQuote]:
+        """从 akshare fx_spot_quote 获取美元兑人民币实时汇率."""
+        try:
+            import akshare as ak
+            df = ak.fx_spot_quote()
+            row = df[df['货币对'] == 'USD/CNY']
+            if row.empty:
+                return None
+            bid = float(row.iloc[0]['买报价'])
+            ask = float(row.iloc[0]['卖报价'])
+            price = round((bid + ask) / 2, 4)
+            
+            logger.info(f"[美元兑人民币] akshare 兜底成功: price={price}")
+            return UnifiedRealtimeQuote(
+                code="USDCNY=X",
+                name="美元兑人民币",
+                price=price,
+                change_amount=0.0,
+                change_pct=0.0,
+                pre_close=price,
+                volume=None,
+                amount=None,
+            )
+        except Exception as e:
+            logger.info(f"[美元兑人民币] akshare 兜底失败: {e}")
             return None
 
     def get_minute_data(self, stock_code: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:

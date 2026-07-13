@@ -401,6 +401,7 @@ export interface PortfolioPositionAdjustRequest {
   quantity?: number;
   avg_cost?: number;
   last_price?: number;
+  asset_risk_class?: string;
 }
 
 export interface PortfolioPositionAdjustResponse {

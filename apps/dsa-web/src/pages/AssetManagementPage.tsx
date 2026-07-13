@@ -99,7 +99,7 @@ const AdjustModal: React.FC<AdjustModalProps> = ({ position, onClose, onConfirm,
 const AdjustModalContent: React.FC<{
   position: PortfolioPositionRecordItem;
   onClose: () => void;
-  onConfirm: (quantity: number, avgCost: number, lastPrice: number) => void;
+  onConfirm: (quantity: number, avgCost: number, lastPrice: number, assetRiskClass: string) => void;
   isSubmitting: boolean;
 }> = ({ position, onClose, onConfirm, isSubmitting }) => {
   const [quantity, setQuantity] = useState(() => String(position.quantity || ''));

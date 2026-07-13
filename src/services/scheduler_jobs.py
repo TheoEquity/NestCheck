@@ -53,7 +53,7 @@ def run_daily_market_cache_refresh() -> Dict[str, Any]:
             if not df.empty:
                 with get_db().get_session() as s:
                     s.query(StockDaily).filter_by(code="cn_vix", date=today).delete()
-                    s.add(StockDaily(code="cn_vix", date=today, close=float(df.iloc[-1]["qvix"]), data_source="akshare", updated_at=datetime.now()))
+                    s.add(StockDaily(code="cn_vix", date=today, close=float(df.iloc[-1].get("qvix", df.iloc[-1]["close"])), data_source="akshare", updated_at=datetime.now()))
                     s.commit()
         except Exception as exc:
             logger.warning("cn_vix failed: %s", exc)

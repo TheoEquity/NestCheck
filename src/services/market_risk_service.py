@@ -274,7 +274,9 @@ def _chinese_vix() -> Dict[str, Any]:
             
             # 补充入库
             try:
-                insert_df = df.rename(columns={'date': 'date', 'qvix': 'close'})
+                insert_df = df.rename(columns={'date': 'date'})
+                if 'qvix' in insert_df.columns:
+                    insert_df = insert_df.rename(columns={'qvix': 'close'})
                 insert_df['open'] = insert_df['close']
                 insert_df['high'] = insert_df['close']
                 insert_df['low'] = insert_df['close']

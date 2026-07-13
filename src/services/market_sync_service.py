@@ -91,7 +91,8 @@ def _fetch_cn_vix(days):
     for attempt in range(AKSHARE_MAX_RETRIES):
         try:
             df = ak.index_option_300etf_qvix()
-            df = df.rename(columns={'date': 'date', 'qvix': 'close'})
+            if 'qvix' in df.columns:
+                df = df.rename(columns={'qvix': 'close'})
             df['open'] = df['close']
             df['high'] = df['close']
             df['low'] = df['close']
